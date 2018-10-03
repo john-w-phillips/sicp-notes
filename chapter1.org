@@ -2636,4 +2636,14 @@
     #+END_SRC
 
     The presence of such a common pattern is strong evidence that
-    there is a useful abstraction 
+    there is a useful abstraction waiting to be brought to the
+    surface. Indeed, mathematicians long ago identified the
+    abstraction of _summation of a series_ and invented "sigma
+    notation," for example:
+
+    \begin{summation}
+    Sum $\sum_{n=a}^{b} f(n)$ = f(a) + ... + f(b)
+    \end{summation}
+
+    to express this concept.
+    
