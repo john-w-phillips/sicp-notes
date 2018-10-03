@@ -2641,9 +2641,8 @@
     abstraction of _summation of a series_ and invented "sigma
     notation," for example:
 
-    \begin{summation}
-    Sum $\sum_{n=a}^{b} f(n)$ = f(a) + ... + f(b)
-    \end{summation}
+    $$\sum_{n=a}^{b} f(n) = f(a) + ... + f(b)$$
+
 
     to express this concept.
     
