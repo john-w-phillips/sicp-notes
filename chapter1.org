@@ -2641,8 +2641,1413 @@
     abstraction of _summation of a series_ and invented "sigma
     notation," for example:
 
-    $$\sum_{n=a}^{b} f(n) = f(a) + ... + f(b)$$
+    $$ \sum_{n=a}^{b} f(n) = f(a) + ... + f(b) $$
 
 
-    to express this concept.
+    to express this concept. The power of sigma notation is that it
+    allows mathematicians to deal with the concept of summation itself
+    rather than only with particular sums -- for example, to formulate
+    general results about sums that are independent of the particular
+    series being summed.
+
+    Similarly, as program designers, we would like our language to be
+    powerful enough so that we can write a procedure that expresses
+    the concept of summation itself rather than only procedures that
+    compute particular sums. We can do so readily in our procedural
+    language by taking the common template shown above and
+    transforming the "slots" into formal parameters:
+
+    #+BEGIN_SRC scheme
+    (define (sum term a next b)
+      (if (> a b)
+          0
+          (+ (term a)
+             (sum term (next a) next b))))
+    #+END_SRC
+
+    Notice that sum takes as its arguments the lower and upper bounds
+    a and b together with the procedures term and next. We can use sum
+    just as we would any procedure. For example, we can use it (along
+    with a procedure inc that increments its argument by 1) to define
+    sum-cubes:
+
+    #+BEGIN_SRC scheme
+    (define (inc n) (+ n 1))
+    (define (sum-cubes a b)
+      (sum cube a inc b))
+    #+END_SRC
+
+    Using this we can compute the sum of the cubes of the integers
+    from 1 to 10:
+
+    #+BEGIN_SRC scheme
+    (sum-cubes 1 10)
+    3025
+    #+END_SRC
+
+    With the aid of an identity procedure to compute the term we can
+    define sum-integers in terms of sum:
+
+    #+BEGIN_SRC scheme
+    (define (identity x) x)
+    (define (sum-integers a b)
+      (sum identity a inc b))
+    #+END_SRC
+
+    We can also define pi-sum in the same way:
+
+    #+BEGIN_SRC scheme
+    (define (pi-sum a b)
+      (define (pi-term x)
+        (/ 1.0 (* x (+ x 2))))
+      (define (pi-next x)
+        (+ x 4))
+      (sum pi-term a pi-next b))
+    #+END_SRC
+
+    Using these procedures, we can compute an approximation to \pi:
+
+    (* 8 (pi-sum 1 1000))
+    3.139
+
+    Once we have sum we can use it as a building block in formulating
+    further concepts. For instance the definite integral of a function
+    f between the limits a and b can be approximated numerically using
+    the formula:
+
+    \int_{a}^{b} f(x) dx = [f(a + dx/2) + f(a + dx + dx/2) + ...] dx
     
+    for small values of dx. We can express this directly as a
+    procedure:
+
+    #+BEGIN_SRC scheme
+    (define (integral f a b dx)
+      (define (add-dx x) (+ x dx))
+      (* (sum f (+ a (/ dx 2.0)) add-dx b)
+         dx))
+    (integral cube 0 1 0.01)
+    .24998...
+    (integral cube 0 1 0.001)
+    .249999...
+    #+END_SRC
+
+    The actual value is 1/4.
+
+    - Exercise 1.29. Simpson's Rule is a more accurate method of
+      numerical integration than the method illustrated above. Using
+      Simpson's Rule the integral of a function f between a and b is
+      approximated as
+
+      \frac{h}{3}[y_{0} + 4y_{1} + 2y_{2} + 4y_{3} + 2y_{4} + ... + 2y_{n-2} + 4y_{n-1} + y_{n}]
+    
+      where h = (b - a)/n for some integer n and y_{k} = f(a +
+      kh). (Increasing n increases the accuracy of the approximation.)
+      Define a procedure that takes as arguments f, a, b, and n and
+      returns the value of the integral, computed using Simpson's
+      Rule. Use your procedure to integrate cube between 0 and 1 (with
+      n = 100 and n = 1000) and compare the results to those of the
+      integral procedure shown above.
+
+      #+BEGIN_SRC scheme
+      (define (simpsons-rule f a b n)
+        (define h (/ (- b a) n))
+        (define (simpsons-term x)
+          (define fval (f (+ a (* x h))))
+          (* (/ h 3)
+             (cond
+              ((or (= x 0) (= x n))
+               fval)
+              ((even? x) (* 2 fval))
+              ((odd? x) (* 4 fval)))))
+        (define (next x) (+ x 1))
+        (sum simpsons-term 0 next n))
+      #+END_SRC
+
+      This procedure is more exact, in part because it uses fractions
+      and not inexact numbers.
+
+    - Exercise 1.30. The sum procedure above generates a linear
+      recursion. The procedure can be rewritten so that the sum is
+      performed iteratively. Show how to do this by filling in the
+      missing expressions in the following definition:
+
+      #+BEGIN_SRC scheme
+      (define (sum term a next b)
+        (define (iter a result)
+          (if <??>
+              <??>
+              (iter <??> <??>)))
+        (iter <??> <??>))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (sum term a next b)
+        (define (iter a result)
+          (if (> a b)
+              result
+              (iter (next a) (+ result (term a)))))
+        (iter a 0))
+      #+END_SRC
+
+    - Exercise 1.31. The sum procedure is only the simplest of a vast
+      number of similar abstractions that can be captured as
+      higher-order procedures. Write an analogous procedure called
+      product that returns the product of the values of a function at
+      points over a given range. Show how to define factorial in terms
+      of product. Also use product to compute approximations to \pi
+      using the formula:
+
+      \frac{\pi}{4} = \frac{2 * 4 * 4 * 4 *6 * 6 * 7 ...}{3 * 3 * 5 * 5 * 7 * 7 ...}
+
+      #+BEGIN_SRC scheme
+      (define (product term a next b)
+        (if (> a b)
+            1
+            (* (term a) (product term (next a) next b))))
+
+      (define (pi-over-four-product n)
+        (define (pi-term a)
+          (define num 
+           (cond ((= 0 a) 2)
+                 ((even? a) (+ 2. (* 2 (/ a 2))))
+                 ((odd? a) (+ 2. (* 2 (/ (+ a 1) 2))))))
+          (define denom
+           (cond ((even? a) (+ 3. (* 2 (/ a 2))))
+                 ((odd? a) (+ 3. (* 2 (/ (- a 1) 2))))))
+          (/ num denom))
+        (define (pi-next x) (+ x 1))
+        (product pi-term 0 pi-next n))
+
+      #+END_SRC
+
+      If your product procedure generates a recursive process, write
+      one that generates an iterative process. If it generates an
+      iterative process, write one that generates a recursive process.
+
+      #+BEGIN_SRC scheme
+      (define (product term a next b)
+        (define (iter a accum)
+          (if (> a b) 
+              accum
+              (iter (next a) (* accum (term a)))))
+        (iter a 1))
+      #+END_SRC
+
+    - Exercise 1.32. Show that sum and product (exercise 1.31) are
+      both special cases of a still more general notion called
+      accumulate that combines a collection of terms, using some
+      general accumulation function:
+
+      #+BEGIN_SRC scheme
+      (accumulate combiner null-value term a next b)
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (sum term a next b)
+        (if (> a b)
+            0 
+            (+ (term a) (sum term (next a) next b))))
+      (define (product term a next b)
+        (if (> a b)
+            1
+            (* (term a) (product term (next a) next b))))
+      (define (accumulate combiner null-value term a next b)
+        (if (> a b)
+            null-value
+            (combiner 
+             (term a) 
+             (accumulate combiner null-value term (next a) next b))))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (sum term a next b)
+        (accumulate + 0 term a next b))
+      (define (product term a next b)
+        (accumulate * 1 term a next b))
+      #+END_SRC
+
+      If your accumulate procedure generates a recursive process write
+      one that generates an iterative process. If it generates an
+      iterative process write one that generates a recursive process.
+
+      #+BEGIN_SRC scheme
+      (define (accumulate combiner null-value term a next b)
+        (define (iter a accum)
+          (if (> a b)
+              accum
+              (iter (next a) (combiner (term a) accum))))
+        (iter a null-value))
+      #+END_SRC
+
+    - Exercise 1.33. You can obtain an even more general version of
+      accumulate (exercise 1.32.) by introducing the notion of a
+      _filter_ on the terms to be combined. That is, combine only
+      those terms derived from values in the range that satisfy a
+      specified condition. The resulting filtered-accumulate
+      abstraction takes the same arguments as accumulate together with
+      an additional predicate of one argument that specifies the
+      filter. Write filtered-accumulate as a procedure. Show how to
+      express the following using filtered-accumulate:
+
+      a. the sum of squares of the prime numbers in the interval a to
+      b (assuming you have a prime? predicate already written)
+
+      b. the product of all the positive integers less than n that are
+      relatively prime to n (i.e. all positive integers i < n such
+      that GCD(i, n) = 1).
+
+      #+BEGIN_SRC scheme
+      (define (filtered-accumulate combine null-value term a next b should-use?)
+        (define (iter a accum)
+          (if (> a b) 
+              accum
+              (iter (next a) 
+                    (if (should-use? a)
+                        (combine (term a) accum)
+                        accum))))
+        (iter a null-value))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (identity x) x)
+      (define (addone x) (+ x 1))
+      (define (sum-of-squares-of-primes a b)
+        (filtered-accumulate
+         +
+         0
+         square
+         a
+         addone
+         b
+         prime?))
+
+      (define (product-of-relative-primes n)
+       (filtered-accumulate
+        *
+        1
+        identity
+        a
+        addone
+        b
+        relatively-prime?))
+      #+END_SRC
+
+
+    
+      
+*** 1.3.2. Constructing Procedures using Lambda
+    In using sum as in section 1.3.1, it seems terribly awkward to
+    have to define trivial procedures such as pi-term and pi-next just
+    so we can use them as arguments to our higher-order
+    procedure. Rather than define pi-next and pi-term, it would be
+    more convenient to have a way to directly specify "the procedure
+    that returns its input incremented by 4" and "the procedure that
+    returns the reciprocal of its input times its input plus 2." We
+    can do this by introducing the special form lambda, which creates
+    procedures. Using lambda we can describe what we want as
+
+    #+BEGIN_SRC scheme
+    (lambda (x) (+ x 4))
+    #+END_SRC
+
+    and
+
+    #+BEGIN_SRC scheme
+    (lambda (x) (/ 1.0 (* x (+ x 2))))
+    #+END_SRC
+
+    Then our pi-sum procedure can be expressed without defining any
+    auxiliary procedures as
+
+    #+BEGIN_SRC scheme
+    (define (pi-sum a b)
+      (sum (lambda (x) (/ 1.0 (* x (+ x 2))))
+           a
+           (lambda (x) (+ x 4))
+           b))
+    #+END_SRC
+
+    Again using lambda, we can write the integral procedure without
+    having to define the auxiliary procedure add-dx:
+
+    #+BEGIN_SRC scheme
+    (define (integral f a b dx)
+      (* (sum f
+              (+ a (/ dx 2.0))
+              (lambda (x) (+ x dx))
+              b)
+         dx))
+    #+END_SRC
+    
+    In general, lambda is used to create procedures in the same way as
+    define except that no name is specified for the procedure:
+
+    #+BEGIN_SRC scheme
+    (lambda (<forma-parameters>) <body>)
+    #+END_SRC
+
+    The resulting procedure is just as much a procedure as one that is
+    created using define. The only difference is that it has not been
+    associated with any name in the environment. In fact,
+
+    #+BEGIN_SRC scheme
+    (define (plus4 x) (+ x 4))
+    #+END_SRC
+    
+    is equivalent to
+
+    #+BEGIN_SRC scheme
+    (define plus4 (lambda (x) (+ x 4)))
+    #+END_SRC
+
+    We can read a lambda expression as follows:
+
+    #+BEGIN_SRC scheme
+    (lambda (x) (+ x 4))
+    #+END_SRC
+
+    Like any expression that has a procedure as its value, a lambda
+    expression can be used as the operator in a combination such as
+
+    #+BEGIN_SRC scheme
+    ((lambda (x y z) (+ x y (square z))) 1 2 3)
+    => 12
+    #+END_SRC
+
+    or, more generally in any context where we would normally use a
+    procedure name.
+
+**** Using let to create local variables
+
+     Another use of lambda is in creating local variables. We often
+     need local variables in our procedures other than those that have
+     been bound as formal parameters. For example, suppose we wish to
+     compute the function
+
+     \begin{equation}
+     f(x, y) = x(1 + xy)^{2} + y(1 - y) + (1 + x y)(1 - y)
+     \end{equation}
+     
+     which we could also express as
+
+     \begin{another_equation}
+     a = 1 + xy
+     b = 1 - y
+     f(x, y) = xa^{2} + yb + ab
+     \end{another_equation}
+
+     In writing a procedure to compute f, we would like to include as
+     local variables not only x and y but also the names of
+     intermediate quantities like _a_ and _b_. One way to accomplish
+     this is to use an auxiliary procedure to bind the local
+     variables:
+
+     #+BEGIN_SRC scheme
+     (define (f x y)
+       (define (f-helper a b)
+         (+ (* x (square a))
+            (* y b)
+            (* a b)))
+       (f-helper (+ 1 (* x y))
+                 (- 1 y)))
+     #+END_SRC
+
+     Of course, we could use a lambda expression to specify an
+     anonymous procedure for binding our local variables. The body of
+     f then becomes a single call to that procedure:
+
+     #+BEGIN_SRC scheme
+     (define (f x y)
+       ((lambda (a b)
+          (+ (* x (square a))
+             (* y b)
+             (* a b)))
+        (+ 1 (* x y))
+        (- 1 y)))
+     #+END_SRC
+
+     This construct is so useful that there is a special form called
+     let to make its use more convenient. Using let, the f procedure
+     could be written as
+
+     #+BEGIN_SRC scheme
+     (define (f x y)
+       (let ((a (+ 1 (* x y)))
+             (b (- 1 y)))
+        (+ (* x (square a))
+           (* y b)
+           (* a b))))
+     #+END_SRC
+
+     which can be thought of as saying
+
+     let <var1> have the value <exp1> and
+         <var2> have the value <exp2> and
+         ...
+	 <varn> have the value <expn>
+     in <body>
+
+     The first part of the let expression is a list of name-expression
+     pairs. When the let is evaluated each name is associated with the
+     value of the corresponding expression. The body of the let is
+     evaluated with these names bound as local variables. The way this
+     happens is that the let expression is interpreted as an alternate
+     syntax for
+
+     #+BEGIN_SRC scheme
+     ((lambda (<var1> ... <varn>)
+         <body>)
+      <exp1>
+      ...
+      <expn>)
+     #+END_SRC
+
+     No new mechanism is required in the interpreter in order to
+     provide local variables. A let expression is simply syntactic
+     sugar for the underlying lambda application.
+
+     We can see from this equivalence that the scope of a variable
+     specified by a let expression is the body of the let. This
+     implies that:
+
+     - Let allows one to bind variables as locally as possible to
+       where they are to be used. For example, if the value of x is 5,
+       the value of the expression
+       
+       #+BEGIN_SRC scheme
+       (+ (let ((x 3))
+           (+ x (* x 10)))
+          x)
+       #+END_SRC
+
+       is 38. Here, the x in the body of the let is 3, so the value of
+       the let expression is 33. On the other hand, the x that is the
+       second argument to the outermost + is still 5.
+
+     - The variables' values are computed outside the let. This
+       matters when the expressions that provide the values for the
+       local variables depend on the variables having the same names
+       as the local variables themselves. For example, if the value of
+       x is 2, the expression
+
+       #+BEGIN_SRC scheme
+       (let ((x 3)
+             (y (+ x 2)))
+        (* x y))
+       #+END_SRC
+
+       will have the value 12 because, inside the body of the let, x
+       will be 3 and y will be 4 (which is the outer x plus 2).
+
+       
+     Sometimes we can use internal definitions to get the same effect
+     as with let. For example, we could have defined the procedure f
+     above as
+
+     #+BEGIN_SRC scheme
+     (define (f x y)
+       (define a (+ 1 (* x y)))
+       (define b (- 1 y))
+       (+ (* x (square a))
+          (* y b)
+          (* a b)))
+     #+END_SRC
+
+     We prefer, however, to use let in situations like this and to use
+     the internal define only for internal procedures.
+
+     - Exercise 1.34. Suppose we define the procedure
+
+       #+BEGIN_SRC scheme
+       (define (f g)
+         (g 2))
+       #+END_SRC
+
+       Then we have
+
+       #+BEGIN_SRC scheme
+       (f square)
+       4
+       (f (lambda (z) (* z (+ z 1))))
+       6
+       #+END_SRC
+
+       What happens if we (perversely) ask the interpreter to evaluate
+       the combination (f f)? Explain.
+
+       #+BEGIN_SRC scheme
+       (f f)
+       (f 2)
+       (2 2) -> error
+       #+END_SRC
+
+       You get an error, it calls f with 2 which is not a function and
+       then tries to apply '2' to '2' and 2 is not a function.
+
+*** 1.3.3. Procedures as General Methods
+
+    We introduced compound procedures in section 1.1.4. as a mechanism
+    for abstracting patterns of numerical operations so as to make
+    them independent of the particular numbers involved. With
+    higher-order procedures, such as the integeral procedure of
+    section 1.3.1, we began to see a more powerful kind of
+    abstraction: procedures used to express general methods of
+    computation, independent of the particular functions involved. In
+    this section we discuss two more elaborate examples -- general
+    methods for finding zeros and fixed points of functions -- and
+    show how these methods can be expressed directly as procedures.
+
+**** Finding roots of equations by the half-interval method
+
+     The _half-interval method_ is a simple but powerful technique for
+     finding roots of an equation f(x) = 0, where f is a continuous
+     function. The idea is that, if we are given points a and b such
+     that f(a) < 0 < f(b), then f must have at least one zero between
+     a and b. To locate a zero, let x be the average and of a and b
+     and compute f(x). If f(x) > 0, then f must have a zero between a
+     and x. If f(x) < 0, then f must have a zero between x and
+     b. Continuing in this way, we can identify smaller and smaller
+     intervals on which f must have a zero. When we reach a point
+     where the interval is small enough, the process stops. Since the
+     interval of uncertainty is reduced by half at each step of the
+     process, the number of steps required grows as O(log(L/T)), where
+     L is the length of the original interval and T is the error
+     tolerance (that is, the size of the interval we will consider
+     "small enough"). Here is a procedure that implements this
+     strategy:
+     
+     #+BEGIN_SRC scheme
+     (define (search f neg-point pos-point)
+       (let ((midpoint (average neg-point pos-point)))
+        (if (close-enough? neg-point pos-point)
+            midpoint
+            (let ((test-value (f midpoint)))
+             (cond ((positive? test-value)
+                    (search f neg-point midpoint))
+                   ((negative? test-value)
+                    (search f midpoint pos-point))
+                   (else midpoint))))))
+     #+END_SRC
+
+     We assume that we are initially given the function f together
+     with points at which its values are negative and positive. We
+     first compute the midpoint of the two given points. Next we check
+     to see if the given interval is small enough, and if so we simply
+     return the midpoint as our answer. Otherwise, we compute as a
+     test value the value of f at the midpoint. If the test value is
+     positive, then we continue the process with a new interval
+     running from the original negative point to the midpoint. If the
+     test value is negative, we continue with the interval from the
+     midpoint to the positive point. Finally, there is the possibility
+     that the test value is 0, in which case the midpoint is itself
+     the root we are searching for.
+
+     To test whether the endpoints are "close enough" we can use a
+     procedure similar to the one used in section 1.1.7. For computing
+     square roots:
+     
+     #+BEGIN_SRC scheme
+     (define (close-enough? x y)
+       (< (abs (- x y)) 0.001))
+     #+END_SRC
+
+     Search is awkward to use directly, because we can accidentally
+     give it points at which f's values do not have the required sign,
+     in which case we get the wrong answer. Instead we will use search
+     via the following procedure, which checks to see which of the
+     endpoints has a negative function value and which has a positive
+     value, and calls the search procedure accordingly. If the
+     function has the same sign on the two given points, the
+     half-interval method cannot be used, in which case the procedure
+     signals an error.
+
+     #+BEGIN_SRC scheme
+     (define (half-interval-method f a b)
+       (let ((a-value (f a))
+             (b-value (f b)))
+        (cond ((and (negative? a-value) (positive? b-value))
+               (search f a b))
+              ((and (negative? b-value) (positive? a-value))
+               (search f b a))
+              (else
+               (error "Values are not of opposite sign" a b)))))
+     #+END_SRC 
+
+     The following example uses the half-interval method to
+     approximate \pi as the root between 2 and 4 of sin x = 0:
+
+     
+     #+BEGIN_SRC scheme
+     (half-interval-method sin 2.0 4.0)
+     3.1411
+     #+END_SRC
+       
+     Here is another example, using the half-interval method to search
+     for a root of the equation x^{3} - 2x - 3 = 0 between 1 and 2:
+
+     #+BEGIN_SRC scheme
+     1 (user) => (half-interval-method (lambda (x) (- (* x x x) (* 2 x) 3)) 1.0 2.0)
+     ;Value: 1.89306640625
+     #+END_SRC
+
+**** Finding fixed points of functions
+
+     A number x is called a fixed point of a function f if x satisfies
+     the equation f(x) = x. For some functions f we can locate a fixed
+     point by beginning with an initial guess and applying f
+     repeatedly,
+
+     f(x), f(f(x()), f(f(f(x))),
+
+     until the value does not change very much. Using this idea, we
+     can devise a procedure fixed-point that takes as inputs a
+     function and an initial guess and produces an approximation to a
+     fixed point of the function. We apply the function repeatedly
+     until we find two successive values whose difference is less than
+     some prescribed tolerance:
+
+     #+BEGIN_SRC scheme
+     (define tolerance 0.00001)
+     (define (fixed-point f first-guess)
+       (define (close-enough? v1 v2)
+         (< (abs (- v1 v2)) tolerance))
+       (define (try guess)
+         (let ((next (f guess)))
+           (if (close-enough? next guess)
+               next
+               (try next))))
+        (try first-guess))
+     #+END_SRC
+
+     For example, we can use this method to approximate the fixed
+     point of a cosine function, starting with 1 as an initial
+     approximation:
+
+     #+BEGIN_SRC scheme
+     1 (user) => (fixed-point cos 1.0)
+     ;Value: .7390822985224024
+     #+END_SRC
+
+     Similarly, we can find a solution to the equation y= sin y + cos
+     y:
+
+     #+BEGIN_SRC scheme
+     1 (user) => (fixed-point (lambda (y) (+ (sin y) (cos y))) 1.0)
+     ;Value: 1.2587315962971173
+     #+END_SRC
+
+     The fixed-point process is reminiscent of the process we used for
+     finding square roots in section 1.1.7. Both are based on the idea
+     of repeatedly improving a guess until the result satisfies some
+     criterion. In fact, we can readily formulate the square-root
+     computation as a fixed-point search. Computing the square root of
+     some number x requires finding a y such that y^2 = x. Putting
+     this equation into the equivalent form y = x/y, we recognize that
+     we are looking for a fixed point of the function y -> x/y, and we
+     can therefore try to compute square roots as
+     
+     #+BEGIN_SRC scheme
+     (define (sqrt x)
+       (fixed-point (lambda (y) (/ x y)) 1.0))
+     #+END_SRC
+
+     Unfortunately, this fixed-point search does not
+     converge. Consider an initial guess y_{1}. The next guess is
+     y_{2} = x / y_{1} and the next guess is y_{3} = x/y_{2} =
+     x/(x/y_{1}) = y_{1}. This results in an infinite loop in which
+     the two guesses y_{1} and y_{2} repeat over and over, oscillating
+     about the answer.
+
+     One way to control such oscillations is to prevent the guesses
+     from changing so much. Since the answer is always between our
+     guess y and x/y, we can make a new guess that is not as far from
+     y as x/y by averaging y with x/y, so that the next guess after y
+     is (1/2)(y + x/y) instead of x/y. The process of making such a
+     sequence of guesses is simply the process of looking for a fixed
+     point of y -> (1/2)(y + x/y):
+
+     #+BEGIN_SRC scheme
+     (define (sqrt x)
+       (fixed-point (lambda (y) (average y (/ x y)))
+                    1.0))
+     #+END_SRC
+
+     (Note that y = (1/2)(y + x/y) is a simple transformation of the
+     equation y = x/y; to derive it, add y to both sides of the
+     equation and divide by 2.)
+
+     With this modification, the square-root procedure works. In fact,
+     if we unravel the definitions, we can see that the sequence of
+     approximations to the square root generated here is precisely the
+     same as the one generated by our original square-root procedure
+     in section 1.1.7. This approach of averaging successive
+     approximations to a solution, a technique that we call _average
+     damping_, often aids the convergence of fixed-point searches.
+
+     - Exercise 1.35. Show that the golden ratio \phi (section 1.2.2)
+       is a fixed point of the transformation x -> 1 + 1/x, and use
+       this fact to compute \phi by means of the fixed-point procedure.
+
+       One definition of the golden ratio is that
+
+       \begin{phi_equ}
+       \phi = 1 + \frac{1}_{\phi}
+       \end{phi_eq}
+
+       So it is a fixed point of the transformation x -> 1/x.
+
+       #+BEGIN_SRC scheme
+       1 (user) => (fixed-point (lambda (x) (+ 1 (/ 1 x))) 1.0)
+			 )
+        guess: 1.
+        guess: 2.
+        guess: 1.5
+        guess: 1.6666666666666665
+        guess: 1.6
+        guess: 1.625
+        guess: 1.6153846153846154
+        guess: 1.619047619047619
+        guess: 1.6176470588235294
+        guess: 1.6181818181818182
+        guess: 1.6179775280898876
+        guess: 1.6180555555555556
+        guess: 1.6180257510729614
+        guess: 1.6180371352785146
+       guess: 1.6180327868852458
+       uess: 1.618034447821682
+       guess: 1.618033813400125
+       guess: 1.6180340557275543
+       ;Value: 1.6180339631667064
+       #+END_SRC
+
+     - Exercise 1.36 Modify the fixed-point so that it prints the
+       sequence of approximations it generates, using the newline and
+       display primitives shown in exercise 1.22. Then find a solution
+       to x^{x} = 1000 by finding a fixed point of x ->
+       log(1000)/log(x). (Use Scheme's primitive log procedure which
+       computes natural logarithms.) Compare the number of steps this
+       takes with and without average damping. (Note that you cannot
+       start fixed-point with a guess of 1, as this would cause
+       division by log(1) = 0). 
+  
+       #+BEGIN_SRC scheme
+       (define tolerance 0.00001)
+       (define (fixed-point f first-guess)
+         (define (close-enough? v1 v2)
+           (< (abs (- v1 v2)) tolerance))
+         (define (try guess)
+           (display "guess: ")
+           (display guess)
+           (newline)
+           (let ((next (f guess)))
+            (if (close-enough? guess next) 
+                next
+                (try next))))
+         (try first-guess))
+       #+END_SRC
+
+       No damping:
+
+       #+BEGIN_SRC scheme
+        (fixed-point (lambda (x) (/ (log 1000) (log x))) 1.1)
+        guess: 1.1
+        guess: 72.47657378429035
+        guess: 1.6127318474109593
+        guess: 14.45350138636525
+        guess: 2.5862669415385087
+        guess: 7.269672273367045
+        guess: 3.4822383620848467
+        guess: 5.536500810236703
+        guess: 4.036406406288111
+        guess: 4.95053682041456
+        guess: 4.318707390180805
+        guess: 4.721778787145103
+        guess: 4.450341068884912
+        guess: 4.626821434106115
+        guess: 4.509360945293209
+        guess: 4.586349500915509
+        guess: 4.535372639594589
+        guess: 4.568901484845316
+        guess: 4.546751100777536
+        guess: 4.561341971741742
+        guess: 4.551712230641226
+        guess: 4.558059671677587
+        guess: 4.55387226495538
+        guess: 4.556633177654167
+        guess: 4.554812144696459
+        guess: 4.556012967736543
+        guess: 4.555220997683307
+        guess: 4.555743265552239
+        guess: 4.555398830243649
+        guess: 4.555625974816275
+        guess: 4.555476175432173
+        guess: 4.555574964557791
+        guess: 4.555509814636753
+        guess: 4.555552779647764
+        guess: 4.555524444961165
+        guess: 4.555543131130589
+        guess: 4.555530807938518
+        ;Value: 4.55553893484850
+       #+END_SRC
+
+       38 guesses.
+
+       #+BEGIN_SRC scheme
+       (fixed-point (lambda (x) (/ (+ x (/ (log 1000) (log x))) 2)) 1.1)
+       guess: 1.1
+       guess: 36.78828689214517
+       guess: 19.352175531882512
+       guess: 10.84183367957568
+       guess: 6.870048352141772
+       guess: 5.227224961967156
+       guess: 4.701960195159289
+       guess: 4.582196773201124
+       guess: 4.560134229703681
+       guess: 4.5563204194309606
+       guess: 4.555669361784037
+       guess: 4.555558462975639
+       guess: 4.55553957996306
+       ;Value: 4.555536364911781
+       #+END_SRC
+
+       13 guesses, far fewer.
+
+     - Exercise 1.37. An infinite _continued fraction_ is an
+       expression of the form 
+
+       \begin{fract}
+       f = \frac{N_1}{D_1 + \frac{N_2}{D_2 + \frac{N_3}{D_3 + ...}}}
+       \end{fract}
+
+       As an example, one can show that the infinite continued
+       fraction expressed with the N_i and D_i all equal to 1 produces
+       1/\phi, where \phi is the golden ratio (described in section
+       1.2.2). One way to approximate an infinite continued fraction
+       is to truncate the expansion after a given number of
+       terms. Such a truncation -- a so-called k-term finite continued
+       fraction -- has the form
+
+       \begin{fract}
+       \frac{N_1}{D_1 + \frac{N_2}{+ N_K/D_K}}
+       \end{fract}
+
+       Suppose that n and d are procedures of one argument (the term
+       index i) that return N_i and D_i of the terms of the continued
+       fraction. Define a procedure cont-frac such that evaluating
+       (cond-frac n d k) computes the value of the k-term finite
+       continued fraction. Check your procedure by approximating
+       1/\phi using
+
+       #+BEGIN_SRC scheme
+       (cont-frac (lambda (i) 1.0)
+                  (lambda (i) 1.0)
+                  k)
+       #+END_SRC
+
+       for successive values of k. How large must you make k in order
+       to get an approximation that is accurate to 4 decimal places?
+
+       b. If your cont-frac procedure generates a recursive process,
+       write one that generates an iterative process. If it generates
+       an iterative process, write one that generates a recursive
+       process.
+
+       Recursive:
+       #+BEGIN_SRC scheme
+       (define (cont-frac n-gen d-gen k)
+         (if (= k 0) 
+             (/ (n-gen 0) (d-gen 0))
+             (/ (n-gen k) (+ (d-gen k) (cont-frac n-gen d-gen (- k 1))))))
+       #+END_SRC
+
+       Iterative:
+       #+BEGIN_SRC scheme
+       (define (cont-frac n-gen d-gen k)
+         (define (cont-frac-iter k-iter acc)
+           (if (= k-iter 0) 
+               acc
+               (cont-frac-iter 
+                (- k-iter 1)
+                (/ (n-gen k-iter) 
+                   (+ (d-gen k-iter) acc)))))
+          (cont-frac-iter k 0))
+       #+END_SRC
+
+     - Exercise 1.38 In 1737, the Swiss mathematician Leonhard Euler
+       published a memoir _De Fractionibus Cantinuis_, which included
+       a continued fraction expansion for e - 2, where e is the base
+       of the natural logarithms. In this fraction, the N_i, are all
+       1, and the D_i are successively 1, 2, 1, 1, 4, 1, 1, 6, 1, 1,
+       8, .... Write a program that uses your cont-frac procedure from
+       exercise 1.37 to approximate e, based on Euler's expansion.
+
+       #+BEGIN_SRC scheme
+       (+ 2 (cont-frac 
+        (lambda (i) 1.0)
+        (lambda (i) (cond
+                     ((= i 1) 1)
+                     ((= (remainder (- i 1) 3) 1) 
+                      (+ 2 (* 2 (floor (/ i 3)))))
+                     (else 1))) 100))
+       #+END_SRC
+
+     - Exercise 1.39. A continued fraction representation of the
+       tangent function was published in 1770 by the German
+       mathematician J.H. Lambert:
+
+       \begin{tan}
+       tan x = \frac{x}{1 - \frac{x^2}{3 - \frac{x^2}{5 - ...}}}
+       \end{tan}
+
+       where _x_ is in radians. Define a procedure (tan-cf x k) that
+       computes an approximation to the tangent function based on
+       Lambert's formula. K specifies the number of terms to compute,
+       as in exercise 1.37.
+
+       #+BEGIN_SRC scheme
+       (define (tan-cf x k)
+        (cont-frac (lambda (i) (if (= i 1) x (* -1 (square x))))
+                  (lambda (i) (- (* 2 i) 1)) k))
+       #+END_SRC
+
+*** 1.3.4 Procedures as Returned Values
+
+    The above examples demonstrate how the ability to pass procedures
+    as arguments significantly enhances the expressive power of our
+    programming language. We can achieve even more expressive power by
+    creating procedures whose returned values are themselves
+    procedures.
+
+    We can illustrate this idea by looking again at the fixed-point
+    example described at the end of section 1.3.3. We formulated a new
+    version of the square-root procedure as a fixed-point search,
+    starting with the observation that \sqrt{x} is a fixed-point of
+    the function y => x/y. Then we used average damping to make the
+    approximations converge. Average damping is a useful general
+    technique in itself. Namely, given a function _f_, we consider the
+    function whose value at x is equal to the average of x and f(x).
+
+    We can express the idea of average damping by means of the
+    following procedure:
+
+    #+BEGIN_SRC scheme
+    (define (average-damp f)
+      (lambda (x) (average x (f x))))
+    #+END_SRC
+
+    Average-damp is a procedure that takes as its argument a procedure
+    f and returns as its value a procedure (produced by the lambda)
+    that, when applied to a number x, produces the average of x and (f
+    x). For example, applying average-damp to the square procedure
+    produces a procedure whose value at some number x is the average
+    of x and x^2. Applying this resulting procedure to 10 returns the
+    average of 10 and 100, or 55:
+
+    #+BEGIN_SRC scheme
+    ((average-damp square) 10)
+    55
+    #+END_SRC
+
+    Using average-damp, we can reformulate the square-root procedure
+    as follows:
+
+    #+BEGIN_SRC scheme
+    (define (sqrt x)
+     (fixed-point (average-damp (lambda (y) (/ x y))) 1.0))
+    #+END_SRC
+
+    Notice how this formulation makes explicit three ideas in the
+    method: fixed-point search, average damping, and the function y =>
+    x/y. It is instructive to compare this formulation of the
+    square-root method with the original version given in section
+    1.1.7. Bear in mind that these procedures express the same
+    process, and notice how much clearer the idea becomes when we
+    express the process in terms of these abstractions. In general,
+    there are many ways to formulate a process as a
+    procedure. Experienced programmers know how to choose procedural
+    formulations that are particularly perspicuous and where useful
+    elements of the process are exposed as separate entities that can
+    be reused in other applications. As a simple example of reuse,
+    notice that the cube root of x is a fixed point of the function y
+    -> x/y^2, so we can immediately generalize our square-root
+    procedure to one that extracts cube roots:
+
+    #+BEGIN_SRC scheme
+    (define (cube-root x)
+     (fixed-point (average-damp (lambda (y) (/ x (square y))))
+                  1.0))
+    #+END_SRC
+
+**** Newton's method
+     When we first introduced the square-root procedure, in section
+     1.1.7, we mentioned that this was a special case of _Newton's
+     method_. If x |=> g(x) is a differentiable function, then a
+     solution of the equation g(x) = 0 is a fixed point of the
+     function x |=> f(x) where
+
+     \begin{newton}
+     f(x) = x - \frac{g(x)}{Dg(x)}
+     \end{newton}
+
+     and Dg(x) is the derivative of g evaluated at x. Newton's method
+     is the use of the fixed-point method we saw above to approximate
+     a solution of the equation by finding a fixed point of the
+     function f. For many functions g and for sufficiently good
+     initial guesses for x, Newton's method converges very rapidly to
+     a solution of g(x) = 0.
+
+     In order to implement Newton's method as a procedure, we must
+     first express the idea of a derivative. Note that "derivative,"
+     like average damping, is something that transforms a function
+     into another function. For instance, the derivative of the
+     function x |=> x^3 is the function x |=> 3x^2. In general if g is
+     a function and dx is a small number then the derivative Dg of g
+     is the function whose value at any number x is given (in the
+     limit of small dx) by
+
+     \begin{deriv}
+     Dg(x) = \frac{g(x + dx) - g(x)}{dx}
+     \end{deriv}
+     
+     Thus, we can express the idea of a derivative (taking dx to be,
+     say, 0.000001) as the procedure
+
+     #+BEGIN_SRC scheme
+     (define (deriv g)
+      (lambda (x)
+       (/ (- (g (+ x dx)) (g x))
+          dx)))
+     #+END_SRC
+     
+     along with the definition
+
+     #+BEGIN_SRC scheme
+     (define dx 0.000001)
+     #+END_SRC
+
+     Like average-damp, deriv is a procedure that takes a procedure as
+     argument and returns a procedure as value. For example, to
+     approximate the derivative of x |=> x^3 at 5 (whose exact value
+     is 75) we can evaluate
+
+     #+BEGIN_SRC scheme
+     (define (cube x) (* x x x))
+     ((deriv cube) 5)
+     75.00014999
+     #+END_SRC
+
+     With the aid of deriv, we can express Newton's method as a
+     fixed-point process:
+
+     #+BEGIN_SRC scheme
+     (define (newton-transform g)
+      (lambda (x)
+       (- x (/ (g x) ((deriv g) x)))))
+     (define (newtons-method g guess)
+      (fixed-point (newton-transform g) guess))
+     #+END_SRC
+     
+     The newton-transform procedure expresses the formula at the
+     beginning of this section and newtons-method is readily defined
+     in terms of this. It takes as arguments a procedure that computes
+     the function for which we want to find a zero, together with an
+     initial guess. For instance, to find the square root of x, we can
+     use Newton's method to find a zero of the function y |=> y^2 - x
+     starting with an initial guess of 1. This provides yet another
+     form of the square-root procedure:
+
+     #+BEGIN_SRC scheme
+     (define (sqrt x)
+      (newtons-method (lambda (y) (- (square y) x)) 1.0))
+     #+END_SRC
+
+**** Abstractions and first-class procedures
+
+     We've seen two ways to express the square-root computation as an
+     instance of a more general method, once as a fixed-point search
+     and once using Newton's method. Since Newton's method was itself
+     expressed as a fixed-point process, we actually saw two ways to
+     compute square roots as fixed points. Each method begins with a
+     function and finds a fixed point of some transformation of the
+     function. We can express this general idea itself as a procedure:
+     
+     #+BEGIN_SRC scheme
+     (define (fixed-point-of-transform g transform guess)
+      (fixed-point (transform g) guess))
+     #+END_SRC
+
+     This very general procedure takes as its arguments a procedure g
+     that computes some function, a procedure that transforms g, and
+     an initial guess. The returned result is a fixed point of the
+     transformed function.
+
+     Using this abstraction, we can recast the first square-root
+     computation from this section (where we look for a fixed point of
+     the average-damped version of y => x/y) as an instance of this
+     general method:
+
+     #+BEGIN_SRC scheme
+     (define (sqrt x)
+      (fixed-point-of-transform (lambda (y) (/ x y))
+                                average-damp
+                                1.0))
+     #+END_SRC
+     
+     Similarly we can express the second square-root computation from
+     this section (an instance of Newton's method that finds a fixed
+     point of the Newton transform of y => y^2 - x) as
+
+     #+BEGIN_SRC scheme
+     (define (sqrt x)
+      (fixed-point-of-transform (lambda (y) (- (square y) x))
+                                newton-transform
+                                1.0))
+     #+END_SRC
+
+     We began section 1.3 with the observation that compound
+     procedures are a crucial abstraction mechanism because they
+     permit us to express general methods of computing as explicit
+     elements in our programming language. Now we've seen how
+     high-order procedures permit us to manipulate these general
+     methods to create further abstractions.
+
+     As programmers, we should be alert to opportunities to identify
+     the underlying abstractions in our programs and to build upon
+     them and generalize them to create more powerful
+     abstractions. This is not to say that one should always write
+     programs in the most abstract way possible; expert programmers
+     know how to choose the level of abstraction appropriate to their
+     task. But it is important to be able to think in terms of these
+     abstractions so that we can be ready to apply them in new
+     contexts. The significance of higher-order procedures is that
+     they enable us to represent these abstractions explicitly as
+     elements in our programming language, so that they can be handled
+     just like other computational elements.
+
+     In general, programming languages impose restrictions on the ways
+     in which computational elements can be manipulated. Elements with
+     the fewest restrictions are said to have _first-class_
+     status. Some of the "rights and privileges" of first-class
+     elements are:
+
+     - They may be named by variables
+     - They may be passed as arguments to procedures
+     - They may be returned as the results of procedures
+     - They may be included in data structures.
+
+     Lisp, unlike other common programming languages, awards full
+     first-class status. This poses challenges for efficient
+     implementation, but the resulting gain in expressive power is
+     enormous.
+
+     - Exercise 1.40. Define a procedure cubic that can be used
+       together with the newtons-method procedure in expressions of
+       the form
+
+       #+BEGIN_SRC scheme
+       (newtons-method (cubic a b c) 1)
+       #+END_SRC
+
+       to approximate zeros of the cubic x^3 + ax^2 + bx + c.
+
+       #+BEGIN_SRC scheme
+       (define (cubic a b c)
+        (lambda (x) (+ (* x x x) (* a x x) (* b x) c)))
+       #+END_SRC
+
+     - Exercise 1.41. Define a procedure double that takes a procedure
+       of one argument as argument and returns a procedure that
+       applies the original procedure twice. For example, if inc is a
+       procedure that adds 1 to its argument, then (double inc) should
+       be a procedure that adds 2. What value is returned by
+
+       #+BEGIN_SRC scheme
+       (((double (double double)) inc) 5)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (double f) (lambda (x) (f (f x))))
+       #+END_SRC
+       
+       The inner function is inc, which is passed to the return value
+       of (double (double double)). 
+
+       What happens is you apply a function that quadruples the number
+       of function calls to itself which results in f getting called
+       sixteen times.
+
+     - Exercise 1.42. Let f and g be two one-argument functions. The
+       _composition f_ after _g_ is defined to be the function x ->
+       f(g(x)). Define a procedure compose that implements
+       composition. For example, if inc is a procedure that adds 1 to
+       its argument
+
+       #+BEGIN_SRC scheme
+       ((compose square inc) 6)
+       49
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (compose f g)
+        (lambda (x) (f (g x))))
+       #+END_SRC
+
+     - Exercise 1.43. If _f_ is a numerical function and _n_ is a
+       positive integer, then we can form the _n_th repeated
+       application of f, which is defined to be the function whose
+       value at x is f(f(...(f(x))...)). For example, if f is the
+       function x -> x + 1, then the nth repeated application of f is
+       the function x -> x + n. If f is the operation of squaring a
+       number, then the nth repeated application of f is the function
+       that raises its argument to the 2^nth power. Write a procedure
+       that takes as inputs a procedure that computes f and a positive
+       integer n and returns the procedure that computes the nth
+       repeated application of f. Your procedure should be able to be
+       used as follows:
+
+       #+BEGIN_SRC scheme
+       ((repeated square 2) 5)
+       625
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (repeated f n)
+        (define (repeated-iter f n x)
+         (cond
+          ((= n 1) (f x))
+          (else (f (repeated-iter f (- n 1) x)))))
+        (lambda (x)
+         (repeated-iter f n x)))
+    
+       (define (repeated2 f n)
+        (cond
+         ((= n 1) f)
+         (else (compose f (repeated2 f (- n 1))))))
+       #+END_SRC
+
+     - Exercise 1.44. The idea of a smoothing function is an important
+       concept in signal processing. If f is a function and dx is some
+       small number, then the smoothed version of f is the function
+       whose value at a point x is the average of f(x - dx), f(x) and
+       f(x + dx). Write a procedure smooth that takes as input a
+       procedure that computes f and returns a procedure that computes
+       the smoothed f. It i sometimes valuable to repeatedly smooth a
+       function (that is, smooth the smoothed function and so on) to
+       obtain the n-fold smoothed function. Show how to generate an
+       n-fold smoothed function of any given function using smooth and
+       repeated from exercise 1.43.
+       
+       #+BEGIN_SRC scheme
+       (define (average3 a b c) (/ (+ a b c) 3))
+       (define (smooth f)
+        (lambda (x)
+         (average (f (- x dx)) (f x) (f (+ x dx)))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (cube x) (* x x x))
+       (define repeated-average-of-cube (repeated (smooth cube) 5))
+       #+END_SRC
+
+     - Exercise 1.45 We saw in section 1.3.3 that attempting to
+       compute square roots by naively finding a fixed point of y ->
+       x/y does not converge, and that this can be fixed by average
+       damping. THe same method works for finding cube roots as fixed
+       points of the average-damped y -> x/y^2. Unfortunately, the
+       process does not work for fourth roots -- a single average damp
+       is not enough to make a fixed-point search for y -> x/y^3
+       converge. On the other hand, if we average damp twice (i.e. use
+       the average damp of the average damp of y -> x/^3) the
+       fixed-point search does converge. Do some experiments to
+       determine how many average damps are required to compute nth
+       rotos as a fixed-point search based on the repeated average
+       damping of y-> x/y^n-1. Use this to implement a simple
+       procedure for computing nth roots using fixed-point,
+       average-damp, and the repeated procedure of exercise
+       1.43. Assume that any arithmetic operations you need are
+       available as primitives.
+
+       4 needs 2
+       8 needs 3
+       16 needs 4
+       32 needs 5
+
+       so log2 of n.
+
+       #+BEGIN_SRC scheme
+       (define (fixed-point f guess)
+        (define tolerance 1e-10)
+        (define (close-enough? a b)
+         (< (abs (- a b)) tolerance))
+        (define (fixed-point-iter guess)
+         (let ((next (f guess)))
+          (if (close-enough? guess next)
+              guess
+              (fixed-point-iter next))))
+        (fixed-point-iter guess))
+
+       (define (compose f g)
+        (lambda (x) (f (g x))))
+       
+       (define (repeated f n)
+        (if (= n 1)
+            f
+            (compose f (repeated f (- n 1)))))
+
+       (define (average x y) (/ (+ x y) 2))
+      
+       (define (average-damp f)
+        (lambda (x) (average x (f x))))
+
+       (define (nth-root x n)
+        (fixed-point
+         ((repeated 
+           average-damp
+           (floor (/ (log n) (log 2))))
+          (lambda (y) (/ x (expt y (- n 1)))))
+         1.0))
+       #+END_SRC
+
+     - Exercise 1.46. Several of the numerical methods described in
+       this chapter are instances of an extremely general
+       computational strategy known as _iterative
+       improvement_. Iterative improvement says that, to compute
+       something, we start with an initial guess for the answer, test
+       if the guess is good enough, and otherwise improve the guess
+       and continue the process using the improved guess as the new
+       guess. Write a procedure iterative-improve that takes two
+       procedures as arguments: a method for telling whether a guess
+       is good enough and a method for improving a
+       guess. Iterative-improve should return as its value a procedure
+       that takes a guess as argument and keeps improving the guess
+       until it is good enough. Rewrite the sqrt procedure of section
+       1.1.7 and the fixed-point procedure of section 1.3.3 in terms
+       of iterative-improve.
+
+       #+BEGIN_SRC scheme
+       (define (iterative-improve good-enough? improve-guess)
+        (define (iterator guess)
+         (cond
+          ((good-enough? guess) guess)
+          (else (iterator (improve-guess guess)))))
+        iterator)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (fixed-point f guess)
+        (define tolerance 1e-10)
+        ((iterative-improve 
+          (lambda (guess) (< (abs (- guess (f guess))) tolerance))
+          (lambda (guess) (f guess))) guess))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (sqrt x)
+        (define tolerance 1e-10)
+        ((iterative-improve
+          (lambda (guess) (< (abs (- (* guess guess) x)) tolerance))
+          (lambda (guess) (average guess (/ x guess))))
+         1.0))
+       #+END_SRC
+
+       

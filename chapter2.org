@@ -1,0 +1,2036 @@
+* Chapter 2 Building Abstractions with Data
+  We concentrated in chapter 1 on computational processes and on the
+  role of procedures in program design. We saw how to use primitive
+  data (numbers) and primitive operations (arithmetic operations), how
+  to combine procedures to form compound procedures through
+  composition, conditionals, and the use of parameters, and how to
+  abstract procedures by using define. We saw that a procedure can be
+  regarded as a pattern for the local evolution of a process, and we
+  classified, reasoned about, and performed simple algorithmic
+  analyses of some common patterns for processes as embodied in
+  procedures. We also saw that higher-order procedures enhance the
+  power of our language by enabling us to manipulate, and thereby to
+  reason in terms of, general methods of computation. This is much of
+  the essence of programming.
+
+  In this chapter we are going to look at more complex data. All the
+  procedures in chapter 1 operate on simple numerical data, and simple
+  data are not sufficient for many of the problems we wish to address
+  using computation. Programs are typically designed to model complex
+  phenomena, and more often than not one must construct computational
+  objects that have several parts in order to model real-world
+  phenomena that have several aspects. Thus, whereas our focus on
+  chapter 1 was on building abstractions by combining procedures to
+  form compound procedures, we turn in this chapter to another key
+  aspect of any programming language: the means it provides for
+  building abstractions by combining data objects to form _compound
+  data_.
+
+  Why do we want compound data in a programming language? For the same
+  reasons we want compound procedures: to elevate the conceptual level
+  at which we can design our programs, to increase the modularity of
+  our designs, and to enhance the expressive power of our
+  language. Just as the ability to define procedures enables us to
+  deal with processes at a higher conceptual level than that of the
+  primitive operations of the language, the ability to construct
+  compound data objects enables us to deal with data at a higher
+  conceptual level than that of the primitive data objects of our
+  language.
+
+  Consider the task of designing a system to perform arithmetic with
+  rational numbers. We could imagine an operation add-rat that takes
+  two rational numbers and produces their sum. In terms of simple
+  data, a rational number can be thought of as two integers: a
+  numerator and a denominator. Thus, we could design a program in
+  which each rational number would be represented by two integers (a
+  numerator and denominator) and where add-rat would be implemented by
+  two procedures (one producing a numerator of the sum and one
+  producing the denominator). But this would be awkward, because we
+  would then need to explicitly keep track of which numerators
+  corresponded to which denominators. In a system intended to perform
+  many operations on many rational numbers, such bookkeeping details
+  would clutter the programs substantially, to say nothing of what
+  they would do to our minds. It would be much better if we could
+  "glue together" a numerator and denominator to form a pair -- a
+  _compound data object_ -- that our programs could manipulate in a
+  way that would be consistent with regarding a rational number as a
+  single conceptual unit.
+
+  The use of compound data also enables us to increase the modularity
+  of our programs. If we can manipulate rational numbers directly as
+  objects in their own right then we can separate the part of our
+  program that deals with rational numbers per se from the details of
+  how rational numbers may be represeted as pairs of integers. The
+  general technique of isolating the parts of a program that deal with
+  how data objects are represented from the parts of the program that
+  deal with how data objects are used is a powerful design methodology
+  called _data abstraction_. We will see how data abstraction makes
+  programs much easier to design, maintain, and modify.
+
+  The use of compound data leads to a real increase in the expressive
+  power of our programming language. Consider the idea of forming a
+  "linear combination" ax + by. We might like to write a procedure
+  that would accept a, b, x, and y as arguments and return the value
+  of ax + by. This presents no difficulty if the arguments are to be
+  numbers, because we can readily define the procedure
+
+  #+BEGIN_SRC scheme
+  (define (linear-combination a b x y)
+   (+ (* a x) (* b y)))
+  #+END_SRC
+
+  But suppose we are not concerned only with numbers. Suppose we would
+  like to express, in procedural terms, the idea that one can form
+  linear combinations whenever addition and multiplication are defined
+  -- for rational numbers, complex numbers, polynomials, or
+  whatever. We could express this as a procedure of the form 
+  
+  #+BEGIN_SRC scheme
+  (define (linear-combination a b x y)
+   (add (mul a x) (mul b y)))
+  #+END_SRC
+
+  where add and mul are not primitive procedures + and * but rather
+  more complex things that will perform the appropriate operations for
+  whatever kinds of data we pass in as the arguments a, b, x, and
+  y. The key point is that the only thing linear-combination should
+  need to know about a, b, x, and y is that the procedures add and mul
+  will perform the appropriate manipulations. From the perspective of
+  the procedure linear-combination, it is irrelevant what a, b, x, and
+  y are and even more irrelevant how they might happen to be
+  represented in terms of more primitive data. This same example shows
+  why it is important that our programming language provide the
+  ability to manipulate compound objects directly: Without this, there
+  is no way for a procedure such as linear-combination to pass its
+  arguments along to add and mul without having to know their detailed
+  structure. We begin this chapter by implementing the rational-number
+  arithmetic system mentioned above. This will form the background for
+  our discussion of compound data and data abstraction. As with
+  compound procedures, the main issue to be addressed is that of
+  abstraction as a technique for coping with complexity, and we will
+  see how data abstraction enables us to erect suitable _abstraction
+  barriers_ between different parts of a program.
+
+  We will see that the key to forming compound data is that a
+  programming language should provide some kind of "glue" so that data
+  objects can be combined to form more complex data objects. There are
+  many possible kinds of glue. Indeed, we will discover how to form
+  compound data using no special "data" operations at all, but only
+  procedures. This will further blur the distinction between
+  "procedure" and "data", which was already becoming tenuous toward
+  the end of chapter 1. We will also explore some conventional
+  techniques for representing sequences and trees. One key idea in
+  dealing with compound data is the nothion of _closure_ -- that the
+  glue we use for combining data objects should allow us to combine
+  not only primitive data objects, but compound data objects as
+  well. Another key idea is that compound data objects can serve as
+  _conventional interfaces_ for combining program modules in
+  mix-and-match ways. We illustrate some of these ideas by presenting
+  a simple graphics language that exploits closure.
+
+  We will then augment the representational power of our language by
+  introducing _symbolic expressions_ -- data whose elementary parts
+  can be arbitrary symbols rather than only numbers. We explore
+  various alternatives for representing sets of objects. We will find
+  that, just as a given numerical function can be computed by many
+  different computational processes, there are many ways in which a
+  given data structure can be represented in terms of simpler objects,
+  and the choice of representation can have significant impact on the
+  time and space requirements of processes that manipulate the
+  data. We will investigate these ideas in the context of symbolic
+  differentiation, the representation of sets, and the encoding of
+  information.
+
+  Next we will take up the problem of working with data that may be
+  represented differently by different parts of the program. This
+  leads to the need to implement _generic operations_, which must
+  handle many different types of data. Maintaining modularity in the
+  presence of generic operations requires more powerful abstraction
+  barriers than can be erected with simple data abstraction alone. In
+  particular, we introduce _data-directed programming_ as a technique
+  that allows individual data representations to be designed in
+  isolation and then combined _additively_ (i.e. without
+  modification). To illustrate the power of this approach to system
+  design, we close the chapter by applying what we have learned to the
+  implementation of a package for performing symbolic arithmetic on
+  polynomials, in which the coefficients of the polynomials can be
+  integers, rational numbers, complex numbers, and even other
+  polynomials.
+
+** 2.1 Introduction to Data Abstraction
+
+   In section 1.1.8, we noted that a procedure used as an element in
+   creating a more complex procedure could be regarded not only as a
+   collection of particular operations but also as a procedural
+   abstraction. That is, the details of how the procedure was
+   implemented could be suppressed, and the particular procedure
+   itself could be replaced by any other procedure with the same
+   overall behavior. In other words, we could make an abstraction that
+   would separate the way the procedure would be used from the details
+   of how the procedure would be implemented in terms of more
+   primitive procedures. The analogous notion for compound data is
+   called _data abstraction_. Data abstraction is a methodology that
+   enables us to isolate how a compound data object is used from the
+   details of how it is constructed from more primitive data objects.
+
+   The basic idea of data abstraction is to structure the programs
+   that are to use compound data objects so that they operate on
+   "abstract data." That is, our programs should use data in such a
+   way as to make no assumptions about the data that are not strictly
+   necessary for performing the task at hand. At the same time, a
+   "concrete" data representation is defined independent of the
+   programs that use the data. The interface between these two parts
+   of our system will be a set of procedures, called _selectors_ and
+   _constructors_, that implement the abstract data in terms of
+   concrete representation. To illustrate this technique, we will
+   consider how to design a set of procedures for manipulating
+   rational numbers.
+
+*** 2.1.1 Example: Arithmetic Operations for Rational Numbers
+    
+    Suppose we want to do arithmetic with rational numbers. We want to
+    be able to add, subtract, multiply, and divide them and to test
+    whether two rational numbers are equal. 
+
+    Let us begin by assuming that we already have a way of
+    constructing a rational number from a numerator and a
+    denominator. We also assume that, given a rational number, we have
+    a way of extracting (or selecting) its numerator and its
+    denominator. Let us further assume that the constructor and
+    selectors are available as procedures:
+
+    - (make-rat <n> <d>) returns the rational number whose numerator
+      is the integer <n> and whose denominator is the integer <d>.
+    - (numer <x>) returns the numerator of the rational number <x>.
+    - (denom <x>) returns the denominator of the rational number <x>.
+
+    
+    We are using here a powerful strategy of synthesis: _wishful
+    thinking_. We haven't yet said how a rational number is
+    represented, or how the procedures numer, denom, and make-rat
+    should be implemented. Even so, if we did have these three
+    procedures, we could then add, subtract, multiply, divide, and
+    test equality by using the following relations:
+
+    \begin{rats}
+    \frac{n_1}{d_1} + \frac{n_{2}}{d_{2}} = \frac{n_1d_2 + n_2d_1}{d_1d_2}
+    
+    \frac{n_1}{d_1} - \frac{n_{2}}{d_{2}} = \frac{n_1d_2 - n_2d_1}{d_1d_2}
+
+    \frac{n_{1}}{d_{1}} * \frac{n_{2}}{d_{2}} = \frac{n_{1}n_{2}}{d_{1}d_{2}}
+
+    \frac{n_{1}/d_{1}}{n_{2}/d_{2}} = \frac{n_{1}d_{2}}{d_{1}n_{2}}
+
+    \frac{n_{1}}{d_{1}} = \frac{n_{2}}{d_{2}} if and only if n_{1}d_{2} = n_{2}d_{1}
+    \end{rats}
+
+    We can express these rules as procedures:
+
+    #+BEGIN_SRC scheme
+    (define (add-rat x y)
+     (make-rat (+ (* (numer x) (denom y))
+                  (* (numer y) (denom x)))
+               (* (denom x) (denom y))))
+    (define (sub-rat x y)
+     (make-rat (- (* (numer x) (denom y))
+                  (* (numer y) (denom x)))
+               (* (denom x) (denom y))))
+
+    (define (mul-rat x y)
+     (make-rat (* (numer x) (numer y))
+               (* (denom x) (denom y))))
+
+    (define (div-rat x y)
+     (make-rat (* (numer x) (denom y))
+               (* (denom x) (numer y))))
+    (define (equal-rat? x y)
+     (= (* (numer x) (denom y))
+        (* (numer y) (denom x))))
+    #+END_SRC
+
+    Now we have the operations on rational numbers defined in terms of
+    the selector and constructor procedures numer, denom, and
+    make-rat. But we haven't yet defined these. What we need is some
+    way to glue together a numerator and a denominator to form a
+    rational number.
+
+**** Pairs
+     To enable us to implement the concrete level of our data
+     abstraction, our language provides a compound structure called a
+     pair, which can be constructed with the primitive procedure
+     cons. This procedure takes two arguments and returns a compound
+     data object that contains the two arguments as parts. Given a
+     pair, we can extract the parts using the primitive procedures car
+     and cdr. Thus, we can use cons, car, and cdr as follows:
+
+     #+BEGIN_SRC
+     (define x (cons 1 2))
+     (car x)
+     1
+     (cdr x)
+     2
+     #+END_SRC
+
+     Notice that a pair is a data object that can be given a name and
+     manipulated, just like a primitive data object. Moreover, cons
+     can be used to form pairs whose elements are pairs and so on:
+
+     #+BEGIN_SRC scheme
+     (define x (cons 1 2))
+     (define y (cons 3 4))
+     (define z (cons x y))
+     (car (car z))
+     1
+     (car (cdr z))
+     3
+     #+END_SRC
+
+     In section 2.2 we will see how this ability to combine pairs
+     means that pairs can be used as general-purpose building blocks
+     to create all sorts of complex data structures. The single
+     compound-data primitive _pair_, implemented by the procedures
+     cons, car, and cdr, is the only glue we need. Data objects
+     constructed from pairs are called _list-structured_ data.
+
+**** Representing rational numbers
+
+     Pairs offer a natural way to complete the rational-number
+     system. Simply represent a rational number as a pair fo two
+     integers: a numerator and a denominator. Then make-rat, numer,
+     and denom are readily implemented as follows:
+
+     #+BEGIN_SRC scheme
+     (define (make-rat n d) (cons n d))
+     (define (numer x) (car x))
+     (define (denom x) (cdr x))
+     #+END_SRC
+
+     Also, in order to display the results of our computations, we can
+     print rational numbers by printing the numerator, a slash, and
+     the denominator:
+
+     #+BEGIN_SRC scheme
+     (define (print-rat x)
+      (newline)
+      (display (numer x))
+      (display "/")
+      (display (denom x)))
+     #+END_SRC
+
+     Now we can try our rational-number procedures:
+
+     #+BEGIN_SRC scheme
+     1 (user) => (print-rat (add-rat one-half one-third))
+     
+     5/6
+     ;Unspecified return value
+     
+     1 (user) => (print-rat (add-rat one-third one-third))
+     
+     6/9
+     ;Unspecified return value
+     
+     1 (user) => (print-rat (add-rat one-half one-third))
+     
+     5/6
+     ;Unspecified return value
+     
+     1 (user) => (print-rat one-half)
+     
+     1/2
+     ;Unspecified return value
+     
+     1 (user) => (print-rat one-third)
+     
+     1/3
+     ;Unspecified return value
+     
+     1 (user) => (print-rat (mul-rat one-half one-third))
+     
+     1/6
+     ;Unspecified return value
+     
+     1 (user) => (print-rat (add-rat one-third one-half))
+     
+     5/6
+     ;Unspecified return value
+     
+     1 (user) => 
+     #+END_SRC
+
+     
+     As the final example shows, our rational number implementation
+     does not reduce rational numbers to lowest terms. We can remedy
+     this by changing make-rat. If we have a gcd procedure like the
+     one in section 1.2.5 that produces the greatest common divisor of
+     two integers, we can use gcd to reduce the numerator and the
+     denominator to lowest terms before constructing the pair:
+
+     #+BEGIN_SRC scheme
+     (define (make-rat n d)
+      (let ((g (gcd n d)))
+       (cons (/ n g) (/ d g))))
+     #+END_SRC
+
+     Now we have
+
+     #+BEGIN_SRC scheme
+     (print-rat (add-rat one-third one-third))
+     2/3
+     #+END_SRC
+
+     as desired. This modification was accomplished by changing the
+     constructor make-rat without changing any of the procedures (such
+     as add-rat and mul-rat) that implement the actual operations.
+
+     - Exercise 2.1. Define a better version of make-rat that handles
+       both positive and negative arguments. Make-rat should normalize
+       the sign so that if the rational number is positive, both the
+       numerator and denominator are positive, and if the rational
+       number is negative, only the numerator is negative.
+
+       #+BEGIN_SRC scheme
+       (define (make-rat n d)
+        (define (make-rat-gcd n d) 
+         (let ((g (gcd n d)))
+          (cons (/ n g) (/ d g))))
+        (cond ((< (* n d) 0) (make-rat-gcd (* -1 (abs n)) (abs d)))
+              (else (make-rat-gcd (abs n) (abs d)))))
+       #+END_SRC
+
+*** 2.1.2 Abstraction Barriers
+
+    Before continuing with more examples of compound data and data
+    abstraction, let us consider some of the issues raised by the
+    rational-number example. We defined the rational-number operations
+    in terms of a constructor make-rat and selectors numer and
+    denom. In general, the underlying idea of data abstraction is to
+    identify for each type of data object a basic set of operations in
+    terms of which all manipulations of data objects of that type will
+    be expressed, and then to use only those operations in
+    manipulating the data.
+
+    We can envision the structure of the rational-number system as
+    shown in figure 2.1. The horizontal lines represent _abstraction
+    barriers_ that isolate different "levels" of the system. 
+     
+
+    
+
+    
+  
+*** 2.1.4 Extended Exercise: Interval Arithmetic
+    Alyssa P. Hacker is designing a system to help people solve
+    engineering problems. One feature she wants to provide in her
+    system is the ability to manipulate inexact quantities (such as
+    measured parameters of physical devices) with known precision, so
+    that when computations are done with such approximate quantities
+    the results will be numbers of known precision.
+
+    Electrical engineers will be using Alyssa's system to compute
+    electrical quantities. It is sometimes necessary for them to
+    compute the value of a parallel equivalent resistance R_p of two
+    resistors R_1 and R_2 using the formula
+
+    \begin{parallel_resistors}
+    R_{p} = \frac{1}{\frac{1}{R_{1}} + \frac{1}{R_2}}
+    \end{parallel_resistors}
+
+    Resistance values are usually known only up to some tolerance
+    guaranteed by the manufacturer of the resistor. For example, if
+    you buy a resistor labeled "6.8 ohms with 10% tolerance" you can
+    only be sure that the resistor has a resistance between 6.8 - 0.68
+    = 6.12 and 6.8 + 0.68 = 7.48 ohms. Thus, if you have a 6.8-ohm 10%
+    resistor in parallel with a 4.7-ohm 5% resistor, the resistance of
+    the combination can range from about 2.58 ohms (if the two
+    resistors are at the lower bounds) to about 2.97 ohms (if the two
+    resistors are at the upper bounds).
+
+    Alyssa's idea is to implement "interval arithmetic" as a set of
+    arithmetic operations for combining "intervals" (objects that
+    represent the range of possible values of an inexact
+    quantity). The result of adding, subtracting, multiplying, or
+    dividing two intervals is itself an interval, representing the
+    range of the result.
+
+    Alyssa postulates the existence of an abstract object called an
+    "interval" that has two endpoints: a lower bound and an upper
+    bound. She also presumes that, given the endpoints of an interval,
+    she can construct the interval using the data constructor
+    make-interval. Alyssa first writes a procedure for adding two
+    intervals. She reasons that the minimum value the sum could be is
+    the sum of two lower bounds and the maximum value it could be is
+    the sum of the two upper bounds:
+
+    #+BEGIN_SRC scheme
+    (define (add-interval x y)
+     (make-interval (+ (lower-bound x) (lower-bound y))
+                    (+ (upper-bound x) (upper-bound y))))
+    #+END_SRC
+
+    Alyssa also works out the product of two intervals by finding the
+    minimum and the maximum of the products of the bounds and using
+    them as the bounds of the resulting interval. (Min and max are
+    primitives that find the minimum or maximum of any number of
+    arguments.)
+
+    #+BEGIN_SRC scheme
+    (define (mul-interval x y)
+     (let ((p1 (* (lower-bound x) (lower-bound y)))
+           (p2 (* (lower-bound x) (upper-bound y)))
+           (p3 (* (upper-bound x) (lower-bound y)))
+           (p4 (* (upper-bound x) (upper-bound y))))
+     (make-interval (min p1 p2 p3 p4)
+                    (max p1 p2 p3 p4))))
+    #+END_SRC
+
+    To divide two intervals, Alyssa multiplies the first by the
+    reciprocal of the second. Note that the bounds of the reciprocal
+    interval are the reciprocal of the upper bound and the reciprocal
+    of the lower bound, in that order.
+
+    #+BEGIN_SRC scheme
+    (define (div-interval x y)
+     (mul-interval x
+                   (make-interval (/ 1.0 (upper-bound y))
+                                  (/ 1.0 (lower-bound y)))))
+    #+END_SRC
+
+    - Exercise 2.7 Alyssa's program is incomplete because she has not
+      specified the implementation of the interval abstraction. Here
+      is a definition of the interval constructor:
+
+      #+BEGIN_SRC scheme
+      (define (make-interval a b) (cons a b))
+      #+END_SRC
+
+      Define selectors upper-bound and lower-bound to complete the
+      implementation.
+
+      #+BEGIN_SRC scheme
+      (define (upper-bound interval) (cdr interval))
+      (define (lower-bound interval) (car interval))
+      #+END_SRC
+
+    - Exercise 2.8. Using reasoning analogous to Alyssa's, describe
+      how the difference of two intervals may be computed. Define 
+      corresponding subtraction procedure, called sub-interval.
+
+      If we think of the difference between two intervals as an
+      interval describing the smallest and largest difference between
+      the two, then the smallest difference is actually the difference
+      between the closest two peices -- probably the upper of one and
+      the lower of the other -- and the largest is the difference
+      between the furthest two. 
+
+      #+BEGIN_SRC scheme
+      (define (sub-interval x y)
+       (let ((d1 (- (lower-bound x) (upper-bound y)))
+             (d2 (- (lower-bound x) (lower-bound y)))
+             (d3 (- (upper-bound x) (upper-bound y)))
+             (d4 (- (upper-bound x) (lower-bound y))))
+        (make-interval (min d1 d2 d3 d4)
+                       (max d1 d2 d3 d4))))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (sub-interval x y)
+       (make-interval (- (lower-bound x) (upper-bound y))
+                      (- (upper-bound x) (lower-bound y))))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (print-interval i)
+       (newline)
+       (display "[ ")
+       (display (lower-bound i))
+       (display ", ")
+       (display (upper-bound i))
+       (display " ]"))
+      #+END_SRC
+
+    - Exercise 2.9. The _width_ of an interval is half of the
+      difference between its upper and lower bounds. The width is a
+      measure of the uncertainty of the number specified by the
+      interval. For some arithmetic operations the width of the result
+      of combining two intervals is a function only of the widths of
+      the argument intervals. Show that the width of the sum (or
+      difference) of two intervals is a function only of the widths of
+      the intervals being added (or subtracted). Give examples to show
+      that this is not true for multiplication or division.
+
+      In addition if we have two intervals:
+      a = [x, y]
+      b =  [t, u]
+      the sum is = [x + t, y + u]
+      And the width is therefore:
+      ((y + u) - (x + t)) / 2
+
+      The width of a is:
+      (y - x) / 2
+      and the width of b is:
+      (u - t) / 2
+
+      We can just add the two widths without reference to anything
+      else and get:
+      ((y + u) - (x + t)) / 2
+
+      And we know what the width is even without knowing the actual
+      interval; just by adding the two. Subtraction is nearly the
+      same. 
+
+      a = [x, y]
+      b = [t, u]
+      
+      The difference is always
+      [x - t, y - u]
+
+      THe width is therefore
+      ((x - t) - (y - u)) / 2
+
+      While the widths of the intervals are
+      (x - t) / 2
+      and 
+      (y - u) / 2
+
+      So all we do is subtract w_b from w_a and get the same result
+      for width.
+      
+      But for multiplication 
+
+      a = [x, y]
+      b = [t, u]
+
+      There are actually different cases here depending on which
+      numbers are negative.
+
+      There are many different cases here. If x and t are both
+      negative and y and u are positive, the lower bound will be the
+      most negative number of the pair x * u, t * y. 
+
+      [x * u, t * y]
+      [t * y, x * u]
+
+      This will result in two different calculations for the width,
+      just on one case. Not only that, but if we take only one case
+      and try to calculate the resulting width from the inputs, it's
+      impossible to get.
+      
+      One width case:
+      ((t * y) - (x * u)) / 2
+      
+      The input widths:
+      (y - x) / 2
+      (u - t) / 2
+
+      There is no way to take these input widths and get the output
+      width, even for this one case.
+
+    - Exercise 2.10. Ben Bitdiddle, an expert systems programmer,
+      looks over Alyssa's shoulder and comments that it is not clear
+      what it means to divide by an interval that spans zero. Modify
+      Alyssa's code to check for this condition and signal an error if
+      it occurs. 
+
+      #+BEGIN_SRC scheme
+      (define (div-interval x y)
+       (cond 
+        ((and (< (lower-bound y) 0)
+              (> (upper-bound y) 0))         
+         (error "Divide by an interval spanning 0."))
+        (else
+         (mul-interval x
+                       (make-interval (/ 1.0 (upper-bound y))
+                                      (/ 1.0 (lower-bound y)))))))
+      #+END_SRC
+
+    - Exercise 2.11. In passing, Ben also cryptically comments: "By
+      testing the signs of the endpoints of the intervals, it is
+      possible to break mul-interval into nine cases, only one of
+      which requires more than two multiplications." Rewrite this
+      program using Ben's suggestion.
+
+      #+BEGIN_SRC scheme
+      (define (mul-interval x y)
+       (define (interval-below-zero i)
+        (and (< (lower-bound i) 0)
+             (<= (upper-bound i) 0)))
+       (define (interval-zero i)
+        (and (= (lower-bound i) 0)
+             (= (upper-bound i) 0)))
+       (define (interval-above-zero i)
+        (and (>= (lower-bound i) 0)
+             (> (upper-bound i) 0)))
+       (define (interval-spans-zero i)
+        (and (< (lower-bound i) 0)
+             (> (upper-bound i) 0)))
+       (cond
+        ((or (interval-zero x)
+             (interval-zero y))
+         (make-interval 0 0))
+        ((and (interval-above-zero x)
+              (interval-above-zero y))
+         (make-interval
+          (* (lower-bound x) (lower-bound y))
+          (* (upper-bound x) (upper-bound y))))
+        ((and (interval-below-zero x)
+              (interval-below-zero y))
+         (make-interval
+          (* (upper-bound x) (upper-bound y))
+          (* (lower-bound x) (lower-bound y))))
+        ((and (interval-spans-zero x)
+              (interval-above-zero y))
+         (make-interval
+          (* (lower-bound x) (upper-bound y))
+          (* (upper-bound x) (upper-bound y))))
+        ((and (interval-above-zero x)
+              (interval-spans-zero y))
+         (make-interval
+          (* (upper-bound x) (lower-bound y))
+          (* (upper-bound x) (upper-bound y))))
+        ((and (interval-below-zero x)
+              (interval-above-zero y))
+         (make-interval
+          (* (lower-bound x) (upper-bound y))
+          (* (upper-bound x) (lower-bound y))))
+        ((and (interval-above-zero x)
+              (interval-below-zero y))
+         (make-interval
+          (* (upper-bound x) (lower-bound y))
+          (* (lower-bound x) (upper-bound y))))
+        ((and (interval-spans-zero y)
+              (interval-below-zero x))
+         (make-interval (* (lower-bound x) (upper-bound y))
+                        (* (lower-bound x) (lower-bound y))))
+        ((and (interval-spans-zero x)
+              (interval-below-zero y))
+         (make-interval (* (lower-bound y) (upper-bound x))
+                        (* (lower-bound x) (lower-bound y))))
+        ((and (interval-spans-zero x)
+              (interval-spans-zero y))
+         (make-interval (min (* (lower-bound x) (upper-bound y))
+                             (* (lower-bound y) (upper-bound x)))
+                        (max (* (upper-bound x) (upper-bound y))
+                             (* (lower-bound x) (lower-bound y)))))))
+      #+END_SRC
+
+      
+    After debugging her program, Alyssa shows it to a potential user,
+    who complains that her program solves the wrong problem. He wants
+    a program that can deal with numbers represented as a center value
+    and an additive tolerance; for example, he wants to work with
+    intervals such as 3.5 +/- 0.15 rather than [3.35, 3.65]. Alyssa
+    returns to her desk and fixes this problem by supplying an
+    alternate constructor and alternate selectors:
+
+    #+BEGIN_SRC scheme
+    (define (make-center-width c w)
+     (make-interval (- c w) (+ c w)))
+    (define (center i)
+     (/ (+ (lower-bound i) (upper-bound i)) 2))
+    (define (width i)
+     (/ (- (upper-bound i) (lower-bound i)) 2))
+    #+END_SRC
+
+    Unfortunately, most of Alyssa's users are engineers. Real
+    engineering situations usually involve measurements with only a
+    small uncertainty, measured as the ratio of the width of the
+    interval to the midpoint of the interval. Engineers usually
+    specify percentage tolerances on the parameters of devices, as in
+    the resistor specifications given earlier. 
+
+    - Exercise 2.12. Define a constructor make-center-percent that
+      takes a center and a percentage tolerance and produces the
+      desired interval. You must also define a selector percent that
+      produces the percentage tolerance for a given interval. The
+      center selector is the same as the one shown above.
+
+      #+BEGIN_SRC scheme
+      (define (make-center-percent center percent)
+       (let ((width (* center (/ percent 100.0))))
+        (make-interval (- center width) (+ center width))))
+      (define (width interval)
+       (/ (- (upper-bound interal) (lower-bound interval)) 2))
+      (define (interval-center interval)
+       (- (upper-bound interval) (width interval)))
+      #+END_SRC
+
+    - Exercise 2.13. Show that under the assumption of small
+      percentage tolerances there is a simple formula for the
+      approximate percentage tolerance of the product of two intervals
+      in terms of tolerances of the factors. You may simplify the
+      problem by assuming that all numbers are positive. 
+
+      You only have to add the two percentages to get the approximate
+      new percentage tolerance; 1% + 1% =~ 2%. This only works because
+      we assume that the multiplication of the two widths is a very
+      small number that we then dismiss. The algebra should be done by hand.
+
+    
+    After considerable work, Alyssa P. Hacker delivers her finished
+    system. Several years later, after she has forgotten all about it,
+    she gets a frenzied call from an irate user, Lem E. Tweakit. It
+    seems that Lem has noticed that the formula for parallel resistors
+    can be written in two algebraically equivalent ways:
+
+    \frac{R_{1}R_{2}}{R_{1} + R_{2}}
+
+    and
+
+    \frac{1}{1/R_{1} + 1/R_{2}}
+
+    He has written the following two programs, each of which computes
+    the parallel-resistors formula differently:
+
+    #+BEGIN_SRC scheme
+    (define (par1 r1 r2)
+     (div-interval (mul-interval r1 r2)
+                   (add-interval r1 r2)))
+    (define (par2 r1 r2)
+     (let ((one (make-interval 1 1)))
+      (div-interval 
+       one
+       (add-interval (div-interval one r1)
+                     (div-interval one r2)))))             
+    #+END_SRC
+
+    Lem complains that Alyssa's program gives different answers for
+    the two ways of computing. This is a serious complaint.
+
+    - Exercise 2.14. Demonstrate that Lem is right. Investigate the
+      behavior of the system on a variety of arithmetic
+      expressions. Make some intervals A and B, and use them in
+      computing the expressions A/A and A/B. You will get the most
+      insight by using intervals whose width is a small percentage of
+      the center value. Examine the results of the computation in
+      center-percent form (see exercise 2.12).
+
+      #+BEGIN_SRC scheme
+      1 (user) => (par2 (make-center-percent 3 1) (make-center-percent 4 2))
+      
+      ;Value 60: (1.6897532656023222 . 1.7387341772151899)
+      
+      1 (user) => (par1 (make-center-percent 3 1) (make-center-percent 4 2))
+      
+      ;Value 61: (1.63746835443038 . 1.794252539912917)
+      #+END_SRC
+
+      The second definition has a much tighter tolerance. Probably
+      because division works with smaller intervals since it inverts
+      the numbers before multiplying. Adding and multiplying both
+      can't reduce tolerance but division can actually reduce
+      tolerance. 
+
+      #+BEGIN_SRC scheme
+      (define (interval-percent-tol interval)
+       (* 100.0 (/ (width interval) (interval-center interval))))
+      (define (print-center-percent interval)
+       (newline)
+       (display "[ ")
+       (display (interval-center interval))
+       (display " +/- ")
+       (display (interval-percent-tol interval))
+       (display " ]"))
+      (define A (make-center-percent 30 2))
+      (define B (make-center-percent 15 1))
+      (define C (make-center-percent 8 3))
+      (define D (make-center-percent 5 2))
+    
+      (display "Add intervals")
+      (print-center-percent (add-interval A B))
+      (print-center-percent (add-interval A C))
+      (print-center-percent (add-interval B C))
+      (print-center-percent (add-interval D A))
+
+      (newline)
+      (display "Sub intervals")
+      (print-center-percent (sub-interval A B))
+      (print-center-percent (sub-interval B C))
+      (print-center-percent (sub-interval C D))
+      (print-center-percent (sub-interval A D))
+
+      (newline) 
+      (display "Mul intervals")
+      (print-center-percent (mul-interval A B))
+      (print-center-percent (mul-interval A C))
+      (print-center-percent (mul-interval B C))
+      (print-center-percent (mul-interval D A))
+      
+      (newline)
+      (display "Div intervals")
+      (print-center-percent (div-interval A B))
+      (print-center-percent (div-interval A C))
+      (print-center-percent (div-interval B C))
+      (print-center-percent (div-interval D A)) 
+
+
+      (newline) 
+      (display "Compound mul/div")
+      (print-center-percent (mul-interval A (div-interval A B)))
+      (print-center-percent (div-interval A (mul-interval D C)))
+      (print-center-percent (div-interval (mul-interval D C) D))
+      
+
+      (newline)
+      (display "Compound add")
+      (print-center-percent (add-interval A (add-interval D C)))
+      #+END_SRC
+
+      output:
+      #+BEGIN_SRC scheme
+      1 (user) => Add intervals
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 45. +/- 1.6666666666666667 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 38. +/- 2.2105263157894828 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 23. +/- 1.6956521739130461 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 35. +/- 2.000000000000008 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Unspecified return value
+      
+      1 (user) => Sub intervals
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 15. +/- 5.000000000000012 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 7. +/- 5.571428571428579 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 3. +/- 11.333333333333329 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 25. +/- 2.8000000000000114 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Unspecified return value
+      
+      1 (user) => Mul intervals
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 450.09000000000003 +/- 2.999400119976011 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 240.144 +/- 4.997001798920653 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 120.036 +/- 3.998800359892042 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 150.06 +/- 3.998400639744102 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Unspecified return value
+      
+      1 (user) => Div intervals
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 2.0006000600060005 +/- 2.9994001199760105 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 3.7556300670603546 +/- 4.997001798920656 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 1.877252026824142 +/- 3.998800359892036 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ .1668000533546752 +/- 3.998400639744098 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Unspecified return value
+      
+      1 (user) => Compound mul/div
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 60.05400540054005 +/- 4.99640287769785 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ .7521775600441357 +/- 6.990015974440896 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 8.016006402561025 +/- 6.990015974440879 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Unspecified return value
+      
+      1 (user) => Compound add
+      ;Unspecified return value
+      
+      1 (user) => 
+      [ 43. +/- 2.1860465116279015 ]
+      ;Unspecified return value
+      
+      1 (user) => 
+      ;Value: #f
+      
+      1 (user) => 
+      #+END_SRC
+ 
+      The reason why the par2 algorithm is more efficent is that
+      although it has more operations, it never has the two input
+      values in a single mul/div operation together; they always are
+      with 'one' which we defined earlier and has ZERO
+      TOLERANCE. Generally speaking an addition or subtraction averages the
+      tolerances and a division or multiplication adds the
+      tolerances. Inversion with dividing one by a value does not
+      introduce extra tolerance into the system and acts as a no-op as
+      far as tolerance is concerned. So our equations become more
+      accurate if we use more tolerant terms as little as possible and
+      use constants as much as possible. It also helps if we avoid
+      compound multiplications or divisions.
+
+    - Exercise 2.15. Eva Lu Ator, another user, has also noticed the
+      different intervals computed by different but algebraically
+      equivalent expressions. She says that a formula to compute with
+      intervals using Alyssa's system will produce tighter error
+      bounds if it can be written in such a form that no variable that
+      represents an uncertain number is repeated. Thus, she says, par2
+      is a "better" program for parallel resistances than par1. Is she
+      right? Why?
+
+      Yes, since (make-interval 1 1) has zero tolerance, putting it in
+      a divison introduces no more tolerance to anything. Any time you
+      put a variable that has tolerance in an expression, it can at
+      best keep the tolerance the same but probably make it worse if
+      any kind of multiplication is happening. So relying on
+      zero-tolerance constants and keeping the number of repeated
+      terms to a minimum helps.
+
+    - Exercise 2.16. Explain, in general, why equivalent algebraic
+      expressions may lead to different answers. Can you devise an
+      interval-arithmetic package that does not have this shortcoming,
+      or is this task impossible?
+
+      The order of operations matters; technically any fraction can be
+      made indefinitely long by multiplying it by A/A or something,
+      lots of expressions are algebraically equivalent that require
+      more steps by the computer to evaluate. If we introduce extra
+      steps, more error bounds are going to creep in. 
+
+      It's probably possible to in some circumstances automatically
+      reduce error bounds by lazy evaluation; if you stack up
+      operations into some data structure and then reorder the
+      operations or find ways to algebraically reduce the number of
+      terms in the expression you may benefit.
+
+** 2.2 Hierarchical Data and the Closure property
+   As we have seen, pairs provide a primitive "glue" that we can use
+   to construct compound data objects. Figure 2.2 shows a standard way
+   to visualize a pair -- in this case, the pair formed by (cons 1
+   2). In this representation, which is called _box-and-pointer
+   notation_, each object is shown as a _pointer_ to a box. The box
+   for a primitive object contains a representation of the object. For
+   example, the box for a number contains a numeral. The box for a
+   pair is actually a double box, the left part containing (a pointer
+   to) the car of the pair and the right containing the CDR.
+
+   We have already seen that cons can be used to combine not only
+   numbers but pairs as well. (You made use of this fact, or should
+   have, in doing exercises 2.2 and 2.3.) As a consequence, pairs
+   provide a universal building block from which we can construct all
+   sorts of data structures. Figure 2.3 shows two ways to use pairs to
+   combine the numbers 1, 2, 3, and 4.
+
+   The ability to create pairs whose elements are pairs is the essence
+   of lists structure's importance as a representational tool. We
+   refer to this ability as the _closure property_ of cons. In
+   general, an operation for combining data objects satisfies the
+   closure property if the results of combining things with that
+   operation can themselves be combined using the same
+   operation. Closure is the key to power in any means of combination
+   because it permits us to create _hierarchical_ structures --
+   structures made up of parts, which themselves are made up of parts,
+   and so on.
+
+   From the outset of chapter 1, we've made essential use of closure
+   in dealing with procedures, because all but the very simplest
+   programs rely on the fact that the elements of a combination can
+   themselves be combinations. In this section, we take up the
+   consequences of closure for compound data. We describe some
+   conventional techniques for using pairs to represent sequences and
+   trees, and we exhibit a graphics language that illustrates closure
+   in a vivid way.
+
+*** 2.2.1. Representing Sequences
+    One of the useful structures we can build with pairs is a
+    _sequence_ -- an ordered collection of data objects. There are, of
+    course, many ways to represent sequences in terms of pairs. One
+    particularly striaghtforward representation is illustrated in
+    figure 2.4, where the sequence 1, 2, 3, 4 is represented as a
+    chain of pairs. The car of each pair is the corresponding item in
+    the chain, and the cdr of the pair is the next pair in the
+    chain. The cdr of the final pair signals the end of the sequence
+    by pointing to a distinguished value that is not a pair,
+    represented in box-and-pointer diagrams as a diagonal line and in
+    programs as the value of the variable nil. The entire sequence is
+    constructed by nested cons operations:
+
+    #+BEGIN_SRC scheme
+    (cons 1
+          (cons 2
+                (cons 3
+                      (cons 4 nil))))
+    #+END_SRC
+
+    Such a sequence of pairs, formed by nested conses, is called a
+    _list_, and Scheme provides a primitive called list to help in
+    constructing lists. The above sequence could be produced by (list
+    1 2 3 4). In general,
+
+    #+BEGIN_SRC scheme
+    (list <a1> <a2> ... <an>)
+    #+END_SRC
+
+    is equivalent to
+
+    #+BEGIN_SRC scheme
+    (cons <a1> (cons <a2> (cons ... (cons <an> nil) ...)))
+    #+END_SRC
+
+    Lisp systems conventionally print lists by printing the sequence
+    of elements, enclosed in parentheses. Thus, the data object in
+    figure 2.4 is printed as (1 2 3 4):
+
+    
+**** List operations
+     The use of pairs to represent sequences of elements as lists is
+     accompanied by conventional programming techniques for
+     manipulating lists by successively "cdring down" the lists. For
+     example, the procedure list-ref takes as arguments a list and a
+     number _n_ and returns the _n_th item of the list. It is
+     customary to number the elements of the list beginning
+     with 0. The method for computing list-ref is the following:
+
+     - For n = 0, list-ref should return the car of the list.
+     - Otherwise, list-ref should return the (n-1)st item of the cdr
+       of the list.
+
+     #+BEGIN_SRC scheme
+     (define (list-ref items n)
+      (if (= n 0)
+          (car items)
+          (list-ref (cdr items) (- n 1))))
+     (define squares (list 1 4 9 16 25))
+     (list-ref squares 3)
+     16
+     #+END_SRC
+
+     Often we cdr down the whole list. To aid in this, Scheme includes
+     a primitive predicate null?, which tests whether its argument is
+     the empty list. The procedure length, which returns the number of
+     items in a list, illustrates this typical pattern of use:
+
+     #+BEGIN_SRC scheme
+     (define (length items)
+      (if (null? items)
+          0
+          (+ 1 (length (cdr items)))))
+     (define odds (list 1 3 5 7))
+     (length odds)
+     4
+     #+END_SRC
+
+     The length procedure implements a simple recursive plan. The
+     reduction step is:
+
+     - The length of any list is 1 plus the length of the cdr of the
+       list.
+       
+       
+     This is applied successively until we reach the base case:
+
+     - The length of the empty list is 0.
+
+       
+     We could also compute length in an iterative style:
+
+     #+BEGIN_SRC scheme
+     (define (length items)
+      (define (length-iter a count)
+       (if (null? a)
+           count
+           (length-iter (cdr a) (+ 1 count))))
+      (length-iter items 0))
+     #+END_SRC
+
+     Another conventional programming technique is to "cons up" an
+     answer list while cdring down a list, as in the procedure append,
+     which takes two lists as arguments and combines the elements to
+     make a new list:
+
+     #+BEGIN_SRC scheme
+     (append squares odds)
+     (1 4 9 16 25 1 3 5 7)
+     (append odds squares)
+     (1 3 5 7 1 4 9 16 25)
+     #+END_SRC
+
+     Append is also implemented using a recursive plan. To append
+     lists list1 and list2, do the following:
+
+     - If list1 is the empty list, then the result is just list2.
+     - Otherwise, append teh cdr of list1 and list2, and ocns the car
+       of list1 onto the result:
+       
+       
+     #+BEGIN_SRC scheme
+     (define (append list1 list2)
+      (if (null? list1)
+          list2
+          (cons (car list1) (append (cdr list1) list2))))
+     #+END_SRC
+
+     - Exercise 2.17. Define a procedure last-pair that returns the
+       list that contains only the last element of a given (nonempty)
+       list:
+
+       #+BEGIN_SRC scheme
+       (last-pair (list 23 72 149 34))
+       (34)
+       #+END_SRC
+
+     - Exercise 2.18. Define a procedure reverse that takes a list as
+       argument and returns a list of the same elements in the reverse
+       order:
+
+       #+BEGIN_SRC scheme
+       (reverse (list 1 4 9 16 25))
+       (25 16 9 4 1)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (reverse items)
+        (cond ((null? items) '())
+              (else (append (reverse (cdr items)) (list (car items))))))
+       #+END_SRC
+
+     - Exercise 2.19. Consider the change-counting program of section
+       1.2.2. It would be nicer to be able to easily change the
+       currency used by the program, so that we could compute the
+       number of ways to change a British pound, for example. As the
+       program is written, the knowledge of the currency is
+       distributed partly into the procedure first-denomination and
+       partly into the procedure count-change (which knows that there
+       are five kidns of U.S. coins). It would be nicer to be able to
+       supply a list of coins to be sued for making change.
+
+       We want to rewrite the procedure cc so that its second argument
+       is a list of values of the coins to use rather than an integer
+       specifying which coins to use. We could then have lists that
+       defined each kind of currency:
+
+       #+BEGIN_SRC scheme
+       (define us-coins (list 50 25 10 5 1))
+       (define uk-coins (list 100 50 20 10 5 2 1 0.5))
+       #+END_SRC
+
+       We could then call cc as follows:
+
+       #+BEGIN_SRC scheme
+       (cc 100 us-coins)
+       292
+       #+END_SRC
+
+       To do this will require changing the program cc somewhat. It
+       will still have the same form, but it will access its second
+       argument differently, as follows:
+
+       #+BEGIN_SRC scheme
+       (define (cc amount coin-values)
+        (cond ((= amount 0) 1)
+              ((or (< amount 0) (no-more? coin-values)) 0)
+              (else
+               (+ (cc amount
+                      (except-first-denomination coin-values))
+                  (cc (- amount
+                         (first-denomination coin-values))
+                      coin-values)))))
+       #+END_SRC
+
+       Define the procedures first-denomination,
+       except-first-denomination, and no-more? in terms of primitive
+       operations on list structures. Does the order of the list
+       coin-values affect the answer produced by cc? Why or why not?
+
+       #+BEGIN_SRC scheme
+       (define (first-denomination coin-values)
+        (car coin-values))
+       (define (except-first-denomination coin-values)
+        (cdr coin-values))
+       (define no-more? null?)
+       #+END_SRC
+
+       The order does not appear to matter. No matter what order you
+       do subtractions in, if you're subtracting some set of values,
+       you end up going to zero with the same number of
+       subtractions. So if you subtract fifty and twenty-five from 100
+       to get 0, You can do:
+
+       100 - 50 - 25 - 25 = 0
+       100 - 50 - 50 = 0
+       100 - 25 - 25 - 25 -25 = 0
+
+       We can reorder this way:
+       100 - 25 - 25 - 50 = 0
+       for one of the subtractions. So if we ran cc with just 50 and
+       25 and the value 100, it would do these:
+
+       100 - 50 - 25 - 25 = 0
+       100 - 50 - 50 = 0
+       100 - 25 - 25 - 25 -25 = 0
+
+       But if we ran it with 25 and 50, it would do these:
+       100 - 25 - 25 - 50 = 0
+       100 - 50 - 50 = 0
+       100 - 25 - 25 - 25 -25 = 0
+
+       but it's three either way because in counting change, order
+       doesn't matter. So logically a correct program wouldn't change
+       its answer, and cc doesn't. You can see from this clause:
+
+       #+BEGIN_SRC scheme
+       (else
+        (+ (cc amount
+               (except-first-denomination coin-values))
+           (cc (- amount
+                  (first-denomination coin-values))
+               coin-values)))
+       #+END_SRC
+
+       Each denomination is taken into account in order and never
+       revisted. That is, we subtract one denomination until we can't;
+       and then move on to other denominations. In this way it doesn't
+       matter what order the list is in; because the first clause
+       looks over the entire list without first subtracting anything
+       from the total amount.
+
+     - Exercise 2.20. The procedures +, *, and list take arbitrary
+       numbers of arguments. One way to define such procedures is to
+       use define with _dotted-tail notation_. In a procedure
+       definition, a parameter list that has a dot before the last
+       parameter name indicates that, when the procedure is called,
+       the initial parameters (if any) will have as values the initial
+       arguments, as usual, but the final parameter's value will be a
+       _list_ of any remaining arguments. For instance, given the
+       definition
+
+       #+BEGIN_SRC scheme
+       (define (f x y . z) <body>)
+       #+END_SRC
+    
+       the procedure f can be called with two or more arguments. If we
+       evaluate
+
+       #+BEGIN_SRC scheme
+       (f 1 2 3 4 5 6)
+       #+END_SRC
+
+       then in the body of f, x will be 1, y will be 2, and z will be
+       the list (3 4 5 6). Given the definition
+
+       (define (g . w) <body>)
+
+       the procedure g can be called with zero or more arguments. If
+       we evaluate 
+
+       (g 1 2 3 4 5 6)
+
+       Then in the body of g, w will be the list (1 2 3 4 5 6).
+
+       Use this notation to write a procedure same-parity that takes
+       one or more integers and returns a list of all the arguments
+       that have the same even-odd parity as the first argument. For
+       example,
+
+       #+BEGIN_SRC scheme
+       (same-parity 1 2 3 4 5 6 7)
+       (1 3 5 7)
+       (same-parity 2 3 4 5 6 7)
+       (2 4 6)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (same-parity . items)
+        (define (same-parity-iter first rest result)
+         (cond ((null? rest) result)
+               ((or (and (odd? first) (odd? (car rest)))
+                    (and (even? first) (even? (car rest))))
+                (same-parity-iter first (cdr rest) (cons (car rest) result)))
+               (else
+                (same-parity-iter first (cdr rest) result))))
+         (reverse (same-parity-iter (car items) (cdr items) (list (car items)))))
+       #+END_SRC
+
+**** Mapping over lists
+     One extremely useful operation is to apply some transformation to
+     each element in a list and generate the list of results. For
+     instance, the following procedure scales each number in a list by
+     a given factor:
+
+     #+BEGIN_SRC scheme
+     (define (scale-list items factor)
+      (if (null? items)
+          '()
+          (cons (* (car items) factor)
+                (scale-list (cdr items) factor))))
+     (scale-list (list 1 2 3 4 5) 10)
+     (10 20 30 40 50)
+     #+END_SRC
+
+     We can abstract this general idea and capture it as a common
+     pattern expressed as a higher-order procedure, just as in section
+     1.3. The higher-order procedure here is called map. Map takes as
+     arguments a procedure of one argument and a list, and returns a
+     list of the results produced by applying the procedure to each
+     element in the list:
+
+     #+BEGIN_SRC scheme
+     (define (map proc items)
+      (if (null? items)
+          '()
+          (cons (proc (car items))
+                (map proc (cdr items)))))
+     (map abs (list -10 2.5 -11.6 17))
+     (10 2.5 11.6 17)
+     (map (lambda (x) (* x x))
+          (list 1 2 3 4))
+     (1 4 9 6)
+     #+END_SRC
+
+     Now we can give a new definition of scale-list in terms of map:
+
+     #+BEGIN_SRC scheme
+     (define (scale-list items factor)
+      (map (lambda (x) (* x factor))
+           items))
+     #+END_SRC
+
+     map is an important construct, not only because it captures a
+     common pattern, but because it establishes a higher level of
+     abstraction in dealing with lists. In the original definition of
+     scale-list, the recursive structure of the program draws
+     attention to the element-by-element processing of the
+     list. Defining scale-list in terms of map suppresses that level
+     of detail and emphasizes that scaling transforms a list of
+     elements to a list of results. The difference between the two
+     definitions is not that the computer is performing a different
+     process (it isn't) but that we think about the process
+     differently. In effect, map helps establish an abtraction barrier
+     that isolates the implementation of procedures that transform
+     lists from the details of how the elements of the list are
+     extracted and combined. Like the barriers shown in figure 2.1,
+     this abstraction gives us the flexibility to change the low-level
+     details of how sequences are implemented, while preserving the
+     conceptual framework of operations that transform sequences to
+     sequences. Section 2.2.3 expands on this use of sequences as a
+     framework for organizing programs.
+
+     - Exercise 2.21. The procedure square-list takes a list of
+       numbers as argument and returns a list of squares of those
+       numbers.
+
+       #+BEGIN_SRC scheme
+       (square-list (list 1 2 3 4))
+       (1 4 9 16)
+       #+END_SRC
+
+       Here are two different definitions of square-list. Complete
+       both of them by filling in the missing expressions:
+
+       #+BEGIN_SRC scheme
+       (define (square-list items)
+        (if (null? items)
+            '()
+            (cons <??> <??>)))
+       (define (square-list items)
+        (map <??> <??>))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (square-list items)
+        (if (null? items)
+            '()
+            (cons (square (car items))
+                  (square-list (cdr items)))))
+       (define (square-list items)
+        (map square items))
+       #+END_SRC
+
+     - Exercise 2.22. Louis Reasoner tries to rewrite the first
+       square-list procedure of exercise 2.21 so that it evolves an
+       iterative process:
+
+       #+BEGIN_SRC scheme
+       (define (square-list items)
+        (define (iter things answer)
+         (if (null? things)
+             answer
+             (iter (cdr things)
+                   (cons (square (car things))
+                          answer))))
+        (iter items nil)) 
+       #+END_SRC
+
+       Unfortunately, defining square-list this way produces the
+       answer list in the reverse order of the one desired. Why?
+
+       Things are not consed in order. You build up the answer
+       starting at the first element of the list and then cons on from
+       there, meaning the first element becomes the last of the
+       result.
+
+       Louis then tries to fix his bug by interchanging the arguments
+       to cons:
+
+       #+BEGIN_SRC scheme
+       (define (square-list items)
+        (define (iter things answer)
+         (if (null? things)
+             answer
+             (iter (cdr things)
+                   (cons answer
+                         (square (car things))))))
+        (iter items nil))
+       #+END_SRC
+       
+       This doesn't work either. Explain.
+
+       cons lists only make sense if for every cons you cons an item
+       to another cons cell. So the car can be anything but if the
+       answer is going to be an intelligible list the second item must
+       be either a list (a cons cell) or nil. The thing constructed
+       here is not really a list in that sense; it's a bunch of cons
+       cells where the cdr is an atomic item and the car is a list. So
+       although you do actually get a result where 1 4 9 16 and 25
+       appear when written in order, the actual data structure isn't
+       interpretable as a list. Moreover, the only way to access the
+       elements is by cdr, and so if you actually try to iterate it
+       it's with cdr followed by car, and the items come off in
+       reverse order.
+
+     - Exercise 2.23. The procedure for-each is similar to map. It
+       takes as arguments a procedure and a list of elements. However,
+       rather than forming a list of the results, for-each just
+       applies the procedure to each of the elements in turn, from
+       left to right. The values returned by applying the procedure to
+       the elements are not used at all -- for-each is used with
+       procedures that perform an action, such as printing. For
+       example,
+
+       #+BEGIN_SRC scheme
+       (for-each (lambda (x) (newline) (display x))
+                 (list 57 321 88))
+       ; (printed)
+       57
+       321
+       88 
+       #+END_SRC
+
+       The value returned by the call to for-each (not illustrated
+       above) can be something arbitrary, such as true. Given an
+       implementation of for-each.
+
+       #+BEGIN_SRC scheme
+       (define (for-each proc items)
+        (if (null? items) 
+            true
+            (and (proc (car items))
+                 (for-each proc (cdr items)))))
+       #+END_SRC
+
+*** 2.2.2. Hierarchical Structures       
+    The representation of sequences in terms of lists generalizes
+    naturally to represent sequences whose elements may themselves be
+    sequences. For example, we can regard the object ((1 2) 3 4)
+    constructed by
+
+    (cons (list 1 2) (list 3 4))
+
+    as a list of three items, the first of which is itself a list, (1
+    2). Indeed, this is suggested by the form in which the result is
+    printed by the interpreter. Figure 2.5 shows the representation of
+    this structure in terms of pairs.
+
+    Another way to think of sequences whose elements are sequences is
+    as _trees_. The elements of the sequence are the branches of the
+    tree, and elements that are themselves sequences are
+    subtrees. Figure 2.6 shows the structure in figure 2.5 viewed as a
+    tree.
+
+    Recursion is a natural tool for dealing with tree structures,
+    since we can often reduce operations on trees to operations on
+    their branches, which reduce in turn to operations on the branches
+    of the branches, and so on, until we reach the leaves of the
+    tree. As an example, compare the length procedure of section 2.2.1
+    with the count-leaves procedure, which returns the total number of
+    leaves of a tree:
+
+    #+BEGIN_SRC scheme
+    (define x (cons (list 1 2) (list 3 4)))
+    (length x)
+    3
+    (count-leaves x)
+    4
+    (list x x)
+    (((1 2) 3 4) ((1 2) 3 4))
+    (length (list x x))
+    2
+    (count-leaves (list x x))
+    8
+    #+END_SRC
+
+    To implement count-leaves, recall the recursive plan for computing
+    length:
+
+    - Length of a list x is 1 plus length of the cdr of x.
+    - Length of the empty list is 0.
+
+    
+    Count-leaves is similar. The value for the empty list is the same:
+
+    - Count-leaves of the empty list is 0.
+
+     
+    But in the reduction step, where we strip off the car of the list,
+    we must take into account that the car may itself be a tree whose
+    leaves we need to count. Thus, the appropriate reduction step is
+
+    - Count-leaves of a tree x is count-leaves of the car of x plus
+      count-leaves of the cdr of x.
+
+      
+    Finally, by taking cars we reach actual leaves, so we need another
+    base case:
+
+    - Count-leaves of a leaf is 1.
+
+      
+    To aid in writing recursive procedures on trees, Scheme provides
+    the primitive predicate pair?, which tests whether its argument is
+    a pair. Here is the complete procedure:
+
+    #+BEGIN_SRC scheme
+    (define (count-leaves x)
+     (cond ((null? x) 0)
+           ((not (pair? x)) 1)
+           (else (+ (count-leaves (car x))
+                    (count-leaves (cdr x))))))
+    #+END_SRC
+
+    - Exercise 2.24. Suppose we evaluate the expression (list 1 (list
+      2 (list 3 4))). Give the result printed by the interpreter, the
+      corresponding box-and-pointer structure, and the interpretation
+      of this as a tree.
+
+      The interpreter will print:
+      (1 (2 (3 4)))
+
+    - Exercise 2.25. Give combinations of cars and cdrs that will pick
+      7 from each of the following lists:
+
+      #+BEGIN_SRC scheme
+      (1 3 (5 7) 9)
+      ((7))
+      (1 (2 (3 (4 (5 (6 7))))))
+      #+END_SRC
+
+      (1 3 (5 7) 9)
+      (car (cdr (car (cdr (cdr items)))))
+      car cdr car cdr cdr
+
+      ((7))
+      (car (car items))
+      car car
+
+      (1 (2 (3 (4 (5 (6 7))))))
+      (car (cdr (car (cdr (car (cdr (car (cdr (car (cdr (car (cdr
+      items))))))))))))
+
+    - Exercise 2.26. Suppose we define x and y to be two lists:
+      #+BEGIN_SRC scheme
+      (define x (list 1 2 3))
+      (define y (list 4 5 6))
+      #+END_SRC
+      
+      What result is printed by the interpreter in response to
+      evaluating each of the following expressions:
+
+      #+BEGIN_SRC scheme
+      (append x y)
+      (cons x y)
+      (list x y)
+      #+END_SRC
+      
+      In order:
+      #+BEGIN_SRC scheme
+      (1 2 3 4 5 6)
+      ((1 2 3) 4 5 6)
+      ((1 2 3) (4 5 6))
+      #+END_SRC
+
+    - Exercise 2.27. Modify your reverse procedure of exercise 2.18 to
+      produce a deep-reverse procedure that takes a list as argument
+      and returns as its value the list with its elements reversed and
+      all sublists deep-reversed as well. For example,
+
+      #+BEGIN_SRC scheme
+      (define x (list (list 1 2) (list 3 4)))
+      x
+      ((1 2) (3 4))
+      (reverse x)
+      ((3 4) (1 2))
+      (deep-reverse x)
+      ((4 3) (2 1))
+      #+END_SRC
+
+      Original reverse:
+
+      #+BEGIN_SRC scheme
+      (define (reverse x)
+       (cond ((null? x) x)
+             (else (append (reverse (cdr x)) (list (car x))))))
+      #+END_SRC
+
+      New reverse:
+
+      #+BEGIN_SRC scheme
+      (define (reverse x)
+       (cond ((null? x) x)
+             ((pair? (car x))
+              (append (reverse (cdr x)) (list (reverse (car x)))))
+             (else
+              (append (reverse (cdr x)) (list (car x))))))
+      #+END_SRC
+
+    - Exercise 2.28. Write a procedure fringe that takes as argument a
+      tree (represented as a list) and returns a list whose elements
+      are all the leaves of the tree arranged in left-to-right
+      order. For example,
+
+      #+BEGIN_SRC scheme
+      (define x (list (list 1 2) (list 3 4)))
+      (fringe x)
+      (1 2 3 4)
+      (fringe (list x x))
+      (1 2 3 4 1 2 3 4)
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (fringe items)
+       (cond ((null? items) '())
+             ((pair? (car items))
+              (append (fringe (car items)) (fringe (cdr items))))
+             (else (cons (car items) (fringe (cdr items))))))
+      #+END_SRC
+
+    - Exercise 2.29. A binary mobile consists of two branches, a left
+      branch and a right branch. Each branch is a rod of a certain
+      length, from which hangs either a weight or another binary
+      mobile. We can represent a binary mobile using compound data by
+      constructing it from two branches (for example, using list):
+
+      #+BEGIN_SRC scheme
+      (define (make-mobile left right)
+       (list left right))
+      #+END_SRC
+
+      A branch is constructed from a length (which must be a number)
+      together with a structure, which may be either a number
+      (representing a simple weight) or another mobile:
+
+      #+BEGIN_SRC scheme
+      (define (make-branch length structure)
+       (list length structure))
+      #+END_SRC
+
+      a. Write the corresponding selectors left-branch and
+      right-branch, which return the branches of a mobile, and
+      branch-length and branch-structure, which return the components
+      of a branch.
+
+      #+BEGIN_SRC scheme
+      (define (left-branch a-mobile)
+       (car a-mobile))
+      (define (right-branch a-mobile)
+       (car (cdr a-mobile)))
+
+      (define (branch-length a-branch)
+       (car a-branch))
+      (define (branch-structure a-branch)
+       (car (cdr a-branch)))
+      #+END_SRC
+      
+      b. Using your selectors, define a procedure total-weight that
+      returns the total weight of a mobile.
+
+      #+BEGIN_SRC scheme
+      (define (branch-weight mobile-branch)
+       (cond ((not (pair? (branch-structure mobile-branch)))
+              (branch-structure mobile-branch))
+             (else (total-weight (branch-structure mobile-branch)))))
+
+      (define (total-weight mobile)
+       (+ (branch-weight (left-branch mobile))
+          (branch-weight (right-branch mobile))))
+      #+END_SRC
+
+      c. A mobile is said to be _balanced_ if the torque applied by
+      its top-left branch is equal to that applied by its top-right
+      branch (that is, if the length of the left rod multiplied by the
+      weight hanging from that rod is equal to the corresponding
+      product for the right side) and if each of the submobiles
+      hanging off its branches is balanced. Design a predicate that
+      tests whether a binary mobile is balanced.
+
+      #+BEGIN_SRC scheme
+      (define (torque a-branch)
+       (* (branch-length a-branch)
+          (branch-weight a-branch)))
+ 
+      (define (balanced? a-mobile)
+       (define (branch-balanced? a-branch)
+        (cond ((pair? (branch-structure a-branch)) 
+               (balanced? (branch-structure a-branch)))
+              (else true)))
+       (and (= (torque (left-branch a-mobile))
+               (torque (right-branch a-mobile)))
+            (and (branch-balanced? (left-branch a-mobile))
+                 (branch-balanced? (right-branch a-mobile)))))
+      #+END_SRC
+
+      d. Suppose we change the representation of mobiles so that the
+      constructors are 
+
+      #+BEGIN_SRC scheme
+      (define (make-mobile left right)
+       (cons left right))
+      (define (make-branch length structure)
+       (cons length structure))     
+      #+END_SRC
+
+      How much do you need to change your programs to convert to the
+      new representation?
+
+      All you have to do is
+
+      #+BEGIN_SRC scheme
+      (define branch-length car)
+      (define branch-structure cdr)
+      (define left-branch car)
+      (define right-branch cdr)
+      #+END_SRC
+
+      And the programs work the same way. There is an abstraction leak
+      when we use pair? and we should probably have defined another
+      predicate, like mobile? instead. But even so the programs work
+      after only changing the selectors.
+
+**** Mapping over trees
+     Just as map is a powerful abstraction for dealing with sequences,
+     map together with recursion is a powerful abstraction for dealing
+     with trees. For instance, the scale-tree procedure, analogous to
+     scale-list of section 2.2.1, takes as arguments a numeric factor
+     and a tree whose leaves are numbers. It returns a tree of the
+     same shape, where each number is multiplied by a factor. The
+     recursive plan for scale-tree is similar to the one for
+     count-leaves:
+
+     #+BEGIN_SRC scheme
+     (define (scale-tree tree factor)
+      (cond ((null? tree) '())
+            ((not (pair? tree)) (* tree factor))
+            (else (cons (scale-tree (car tree) factor)
+                        (scale-tree (cdr tree) factor)))))
+     #+END_SRC
+
+     #+BEGIN_EXAMPLE scheme
+     (scale-tree (list 1 (list 2 (list 3 4) 5) (list 6 7)) 10)
+     (10 (20 (30 40) 50) (60 70))
+     #+END_EXAMPLE
+
+     Another way to implement scale-tree is to regard the tree as a
+     sequence of sub-trees and use map. We map over the sequence,
+     scaling each sub-tree in turn, and return the list of results. In
+     the base case, where the tree is a leaf, we simply multiply by
+     the factor:
+
+     #+BEGIN_SRC scheme
+     (define (scale-tree tree factor)
+      (map (lambda (sub-tree)
+            (if (pair? sub-tree)
+                (scale-tree sub-tree factor)
+                (* sub-tree factor)))
+      tree))
+     #+END_SRC
+
+     Many tree operations can be implemented by similar combinations
+     of sequence operations and recursion.
+
+     - Exercise 2.30. Define a procedure square-tree analogous to
+       square-list procedure of exercise 2.21. That is, square-list
+       should behave as follows:
+
+       #+BEGIN_SRC scheme
+       (square-tree (list 1
+                          (list 2 (list 3 4) 5)
+                          (list 6 7)))
+       (1 (4 (9 16) 25) (36 49))
+       #+END_SRC
+
+       Define square-tree both directly (i.e. without using any
+       higher-order procedures) and also by using map and recursion.
+
+       #+BEGIN_SRC scheme
+       (define (square-tree a-tree)
+        (cond ((null? a-tree) '())
+              ((pair? (car a-tree))
+               (cons (square-tree (car a-tree))
+                     (square-tree (cdr a-tree))))
+              (else (cons (square (car a-tree)) 
+                          (square-tree (cdr a-tree))))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (square-tree-map a-tree)
+        (map (lambda (node) (if (pair? node) (square-tree-map node)
+                                             (square node))) a-tree))
+       #+END_SRC
+
+     - Exercise 2.31. Abstract your answer to exercise 2.30 to produce
+       a procedure tree-map with the property that square-tree could
+       be defined as
+
+       #+BEGIN_SRC scheme
+       (define (square-tree tree) (tree-map square tree))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (tree-map proc tree)
+        (map (lambda (node) (if (pair? node) (tree-map proc node) (proc node))) tree))
+       #+END_SRC
+
+     - Exercise 2.32. We can represent a set as a list of distinct
+       elements, and we can represent the set of all subsets of the
+       set as a list of lists. For example, if the set is (1 2 3),
+       then the set of all subsets is (() (3) (2) (2 3) (1) (1 3)
+       (1 2) (1 2 3)). Complete the following definition of a
+       procedure that generates the set of subsets of a set and give a
+       clear explanation of why it works:
+
+       #+BEGIN_SRC scheme
+       (define (subsets s)
+        (if (null? s)
+            (list nil)
+            (let ((rest (subsets (cdr s))))
+             (append rest (map (lambda (x) (cons (car s) x)) rest)))))
+       #+END_SRC
+
+       So you cdr down the whole list and eventually get to an empty
+       list at which point you start with the base subset, the empty
+       subset. At this point your list of lists, or list of possible
+       subsets is
+
+       (())
+      
+       A list with a single subset, the empty set. Next you have the
+       last element in the list of elements, in this case 3. You
+       preserve your old list of possible subsets which are correct;
+       the recursive solution to the sublist (which starts with (())),
+       and then append that old list to a new generated list where you
+       add the current item in the list to all possible subsets of the
+       old list. If you have a set of items and you generate all
+       possible subsets, and then add an item to that set and want to
+       know the possible subsets of _that_ set, the answer is all the
+       old subsets plus all the old subsets with the new element
+       added. And that's exactly what this procedure does. So if you
+       only have one item (3), you first generate (()). Then you
+       concatenate two lists: the old one, plus a new one with 3 added
+       to each element: (() (3)), and this is the list of all possible
+       subsets. Continue doing this. SO say you also want to, or (2
+       3). THen all you would do is take the old list, and concatenate
+       it to a new list which is the old list with every item having a
+       2 inserted: (() (3) (2) (2 3)). And so on.
+
+*** 2.2.3 Sequences as Conventional Interfaces
+
+    In working with compound data, we've stressed how data abstraction
+    permits us to design programs without becoming enmeshed in the
+    details of data representations. In this section, we introduce
+    another powerful design principle for working with data structures
+    -- the use of _conventional interfaces_. 
+
+    In section 1.3 we saw how program abstractions, implemented as
+    higher-order procedures, can capture common patterns in programs
+    that deal with numerical data. Our ability to formulate analogous
+    operations for working with compound data depends crucially on the
+    style in which we manipulate our data structures. Consider, for
+    example, the following procedure, analogous to the count-leaves
+    procedure of section 2.2.2, which takes a tree as argument and
+    computes the sum of the squares of the leaves that are odd:
+
+    #+BEGIN_SRC scheme
+    (define (sum-odd-squares tree)
+     (cond ((null? tree) 0)
+           ((not (pair? tree))
+            (if (odd? tree) (square tree) 0))
+           (else (+ (sum-odd-squares (car tree))
+                    (sum-odd-squares (cdr tree))))))
+    #+END_SRC
+
+    On the surface, this procedure is very different from the
+    following one, which constructs a list of all the even Fibonacci
+    numbers Fib(k), where k is less than or equal to a given integer
+    n:
+
+    #+BEGIN_SRC scheme
+    (define (even-fibs n)
+     (define (next k)
+      (if (> k n)
+          nil
+          (let ((f (fib k)))
+           (if (even? f)
+               (cons f (next (+ k 1)))
+               (next (+ k 1))))))
+     (next 0))
+    #+END_SRC
+    
+    Despite the fact that these two procedures are structurally very
+    different, a more abstract description of the two computations
+    reveals a great deal of similarity. The first program
+
+    * Enumerates the leaves of a tree;
+    * Filters them, 
+
+
+
