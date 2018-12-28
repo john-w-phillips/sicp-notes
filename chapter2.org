@@ -1,11 +1,19 @@
+from ccf.address import (
+is_string_ip4_address,
+is_string_ip6_address)
+is_string_mac_address,
+
+
 * Chapter 2 Building Abstractions with Data
   We concentrated in chapter 1 on computational processes and on the
   role of procedures in program design. We saw how to use primitive
   data (numbers) and primitive operations (arithmetic operations), how
   to combine procedures to form compound procedures through
+
   composition, conditionals, and the use of parameters, and how to
-  abstract procedures by using define. We saw that a procedure can be
-  regarded as a pattern for the local evolution of a process, and we
+  abstract procedures by using define. We saw that a procedure can
+
+
   classified, reasoned about, and performed simple algorithmic
   analyses of some common patterns for processes as embodied in
   procedures. We also saw that higher-order procedures enhance the
@@ -2109,11 +2117,729 @@
      Accumulations can be implemented by
 
      #+BEGIN_SRC scheme
+     (define (accumulate op initial sequence)
+      (if (null? sequence)
+          initial
+          (op (car sequence)
+              (accumulate op initial (cdr sequence)))))
+     (accumulate + 0 (list 1 2 3 4 5))
+     15
+     (accumulate * 1 (list 1 2 3 4 5))
+     120
+     (accumulate cons nil (list 1 2 3 4 5))
+     (1 2 3 4 5)
+     #+END_SRC
+     
+     All that remains to implement signal-flow diagrams is to
+     enumerate the sequence of elements to be processed. For
+     even-fibs, we need to generate the sequence of integers in a
+     given range, which we can do as follows:
+
+     #+BEGIN_SRC scheme
+     (define (enumerate-interval low high)
+      (if (> low high)
+          nil
+          (cons low (enumerate-interval (+ 1 low) high))))
+     (enumerate-interval 2 7)
+     (2 3 4 5 6 7)
      #+END_SRC
 
+     To enumerate the leaves of a tree, we can use
+
+     #+BEGIN_SRC scheme
+     (define (enumerate-tree tree)
+      (cond ((null? tree) nil)
+            ((not (pair? tree)) (list tree))
+            (else (append (enumerate-tree (car tree))
+                          (enumerate-tree (cdr tree))))))
+     (enumerate-tree (list 1 (list 2 (list 3 4)) 5))
+     (1 2 3 4 5)
+     #+END_SRC
+
+     Now we can reformulate sum-odd-squares and even-fibs as in the
+     signal-flow diagrams. For sum-odd-squares, we enumerate the
+     sequence of leaves of the tree, filter this to keep only the odd
+     numbers in the sequence, square each element, and sum the
+     results:
+
+     #+BEGIN_SRC scheme
+     (define (sum-odd-squares tree)
+      (accumulate +
+                  0
+                  (map square
+                       (filter odd?
+                               (enumerate-tree tree)))))
+     #+END_SRC
+
+     For even-fibs, we enumerate the integers from 0 to n, generate
+     the Fibonacci number for each of these integers, filter the
+     resulting sequence to keep only the even elements, and accumulate
+     the results into a list:
+
+     #+BEGIN_SRC scheme
+     (define (even-fibs n)
+      (accumulate cons
+                  nil
+                  (filter even?
+                          (map fib
+                               (enumerate-interval 0 n)))))
+     #+END_SRC
+
+     The value of expressing programs as sequence operations is that
+     this helps us make program designs that are modular, that is,
+     designs that are constructed by combining relatively independent
+     pieces. We can encourage modular design by providing a library of
+     standard components together with a conventional interface for
+     connecting the components in flexible ways.
+
+     Modular construction is a powerful strategy for controlling
+     complexity in engineering design. In real signal-processing
+     applications, for example, designers regularly build systems by
+     cascading elements selected from standardized families of filters
+     and transducers. Similarly, sequence operations provide a library
+     of standard program elements that we can mix and match. For
+     instance, we can reuse pieces from the sum-odd-squares and
+     even-fibs procedures in a program that constructs a list of the
+     squares of the first _n_ + 1 Fibonacci numbers:
+
+     #+BEGIN_SRC scheme
+     (define (list-fib-squares n)
+      (accumulate cons
+                  nil
+                  (map square
+                       (map fib
+                            (enumerate-interval 0 n)))))
+     (list-fib-squares 10)
+     (0 1 1 4 9 25 64 169 441 1156 3025)
+     #+END_SRC
+
+     We can rearrange the pieces and use them in computing the product
+     of the odd integers in a sequence:
+
+     #+BEGIN_SRC scheme
+     (define (product-of-squares-of-odd-elements sequence)
+      (accumulate *
+                  1
+                  (map square
+                       (filter odd? sequence))))
+     (product-of-squares-of-odd-elements (list 1 2 3 4 5))
+     225
+     #+END_SRC
+
+     We can also formulate conventional data-processing applications
+     in terms of sequence operations. Suppose we have a sequence of
+     personnel records and we want to find the salary of the
+     highest-paid programmer. Assume that we have a selector salary
+     that returns the salary of a record, and a predicate programmer?
+     that tests if a record is for a programmer. Then we can write
+
+     #+BEGIN_SRC scheme
+     (define (salary-of-highest-paid-programmer records)
+      (accumulate max
+                  0
+                  (map salary
+                       (filter programmer? records))))
+     #+END_SRC
+
+     Sequences, implemented here as lists, serve as a conventional
+     interface that permits us to combine processing
+     modules. Additionally, when we uniformly represent structures as
+     sequences, we have localized the data-structure dependencies in
+     our programs to a small number of sequence operations. By
+     changing these, we can experiment with alternative
+     representations of sequence operations, while leaving the overall
+     design of our programs intact. We will exploit this capability in
+     section 3.5, when we generalize the sequence-processing paradigm
+     to admit infinite sequences.
+
+     - Exercise 2.33. Fill in the missing expressions to complete the
+       following definitions of some basic list-manipulation
+       operations as accumulations:
+
+       #+BEGIN_SRC scheme
+       (define (map p sequence)
+        (accumulate (lambda (x y) (cons (p x) y)) nil sequence))
+       (define (append seq1 seq2)
+        (accumulate (lambda (x y) (cons x y)) seq2 seq1))
+       (define (length sequence)
+        (accumulate (lambda (x y) (+ y 1)) 0 sequence))
+       #+END_SRC
+
+     - Exercise 2.34 Evaluating a polynomial in x at a given value of
+       x can be formulated as an accumulation. We evaluate the
+       polynomial
+
+       \begin{poly}
+       a_{n}x^{n} + a_{n - 1}x^{n-1} + ... + a_{1}x + a_{0}
+       \end{poly}
+       
+       using a well-known algorithm called _Horner's rule_, which
+       structures the computation as
+
+       \begin{horner}
+       (...(a_{n}x + a_{n - 1})x + ... + a_{1})x + a_{0}
+       \end{horner}
+
+       In other words, we start with a_n, multiply by x, add a_{n-1},
+       multiply by x, and so on, until we reach a_0. Fill in the
+       following template to produce a procedure that evaluates a
+       polynomial using Horner's rule. Assume that the coefficients of
+       the polynomial are arranged in a sequence, from a_0 through
+       a_n.
+
+       #+BEGIN_SRC scheme
+       (define (horner-eval x coefficient-sequence)
+        (accumulate (lambda (this-coeff higher-terms) (+ this-coeff (* x higher-terms)))
+                    0
+                    coefficient-sequence))
+       #+END_SRC
+
+       For example, to compute 1 + 3x + 5x^3 + x^5 at x = 2 you would
+       evaluate
+
+       #+BEGIN_SRC scheme
+       (horner-eval 2 (list 1 3 0 5 0 1))
+       #+END_SRC
+
+     - Exercise 2.35 Redefine count-leaves from section 2.2.2 as an
+       accumulation:
+
+       #+BEGIN_SRC scheme
+       (define (count-leaves t)
+        (accumulate <??> <??> (map <??> <??>)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (count-leaves t)
+        (accumulate (lambda (x y) (+ x y)) 
+         0 
+         (map (lambda (x) (if (pair? x) (count-leaves x) 1)) t)))
+       #+END_SRC
+
+     - Exercise 2.36. The procedure accumulate-n is similar to
+       accumulate except that it takes as its third argument a
+       sequence of sequences, which are all assumed to have the same
+       number of elements. It applies the designated accumulation
+       procedure to combine all the first elements of the sequences,
+       all the second elements of the sequences, and so on, and
+       returns a sequence of the results. For instance, if s is a
+       sequence containing four sequences, ((1 2 3) (4 5 6) (7 8 9)
+       (10 11 12)), then the value of (accumulate-n + 0 s) should be
+       the sequence (22 26 30). Fill in the missing expressions in the
+       following definition of accumulate-n:
+
+       #+BEGIN_SRC scheme
+       (define (accumulate-n op init seqs)
+        (if (null? (car seqs))
+            '()
+            (cons (accumulate op init (map car seqs))
+                  (accumulate-n op init (map cdr seqs)))))
+       #+END_SRC
+
+     - Exercise 2.37 Suppose we represent vectors v = (v_i) as
+       sequences of numbers, and matrices m = (m_ij) as sequences of
+       vectors (the rows of the matrix). For example, the matrix
+
+       #+BEGIN_EXAMPLE
+       [ 1 2 3 4 ]
+       [ 4 5 6 6 ]
+       [ 6 7 8 9 ]
+       #+END_EXAMPLE
+
+       is represented as a sequence ((1 2 3 4) (4 5 6 6) (6 7 8
+       9)). With this representation, we can use sequence operations
+       to concisely express the basic matrix and vector
+       operations. These operations (which are described in any book
+       on matrix algebra) are the following:
+
+       #+BEGIN_SRC scheme
+       (dot-product v w) ; returns the sum(w_i * v_i)
+       (matrix-*-vector m v) ; returns the vector t, where t_i = sum_{j}m_{i}{j} * v_{j}
+       (matrix-*-matrix m n) ; returns the matrix p, where p_{i}{j} = sum_{k} m_{i}{k} * n
+       (transpose n)         ; returns the matrix n, where n_{i}{j} = m_{j}{i}
+       #+END_SRC 
+
+       We can define the dot product as
+
+       #+BEGIN_SRC scheme
+       (define (dot-product v w)
+        (accumulate + 0 (map * v w)))
+       #+END_SRC
+
+       Fill in the missing expressions in the following procedures for
+       computing the other matrix operations. (The procedure
+       accumulate-n is defined in exercise 2.36.)
+
+       #+BEGIN_SRC scheme
+       (define (matrix-*-vector m v)
+        (map (lambda (matrix-vector) 
+              (dot-product matrix-vector v))
+             m))
+       #+END_SRC
+
+       Beautifully, all you need to do with transpose is:
+       #+BEGIN_SRC scheme
+       (define (transpose mat)
+        (accumulate-n cons '() mat))
+       #+END_SRC
+
+       Because with a matrix ((1 2 3) (4 5 6)) the accumulate function
+       will be passed (1 4) (2 5) (3 6) respectively, if we cons those
+       together we get:
+
+       ((1 4) (2 5) (3 6))
+
+       Which is an effective transposition.
+
+       #+BEGIN_SRC scheme
+       (define (matrix-*-matrix m n)
+        (let ((cols (transpose n)))
+         (map (lambda (n-col)
+               (map 
+                (lambda (m-row)
+                 (dot-product m-row n-col))
+                m)) cols)))
+                 
+       #+END_SRC
+
+     - Exercise 2.38. The accumulate procedure is also known as
+       fold-right, because it combines the first element of the
+       sequence with the result of combining all the elements to the
+       right. There is also a fold-left, which is similar to
+       fold-right, except that it combines elements working in the
+       opposite direction:
+
+       #+BEGIN_SRC scheme
+       (define (fold-left op initial sequence)
+        (define (iter result rest)
+         (if (null? rest)
+             rest
+             (iter (op result (car rest))
+                   (cdr rest))))
+        (iter initial sequence))
+       #+END_SRC
+
+       What are the values of
+       (fold-right / 1 (list 1 2 3)) -> 3/2
+       (fold-left / 1 (list 1 2 3)) -> 1/6
+       (fold-right list nil (list 1 2 3)) -> (1 (2 (3 ())))
+       (fold-left list nil (list 1 2 3)) -> (((() 1) 2) 3)
+       
+       Give a property that op should satisfy to guarantee that
+       fold-right and fold-left will produce the same values for any
+       sequence.
+
+       - Exercise 2.39. Complete the following definitions of reverse
+         (exercise 2.18) in terms of fold-right and fold-left from
+         exercise 2.38:
+
+	 #+BEGIN_SRC scheme
+         (define (reverse sequence)
+          (fold-right (lambda (x y) <??>) nil sequence))
+
+         (define (reverse sequence)
+          (fold-right (lambda (x y) (append y (list x))) nil sequence))
+	 #+END_SRC
      
+	 #+BEGIN_SRC scheme
+         (define (reverse sequence)
+          (fold-left (lambda (x y) <??>) nil sequence))
+ 
+         (define (reverse sequence)
+          (fold-left 
+           (lambda (x y) (cons y x)) '() sequence))
+	 #+END_SRC
+
+**** Nested Mappings
+
+     We can extend the sequence paradigm to include many computations
+     that are commonly expressed using nested loops. Consider this
+     problem: Given a positive integer n, find all ordered pairs of
+     distinct positive integers i and j, where 1<= j < i <= n, such
+     that i + j is prime. For example, if n is 6, then the pairs are
+     the following:
+
+     #+BEGIN_EXAMPLE
+     i     | 2 3 4 4 5 6 6
+     j     | 1 2 1 3 2 1 5
+     i + j | 3 5 5 7 7 7 11
+     #+END_EXAMPLE
+
+     A natural way to organize this computation is to generate the
+     sequence of all ordered pairs of positive integers less than or
+     equal to n, filter to select those pairs whose sum is prime, and
+     then, for each pair (i, j) that passes through the filter,
+     produce the triple (i, j, i + j).
+
+     Here is a way to generate the sequence of pairs: For each integer
+     i <= n, enumerate the integers j < i, and for each such i and j
+     generate a pair (i, j). In terms of sequence operations, we map
+     along the sequence (enumerate-interval 1 n). For each i in this
+     sequence, we map along the sequence (enumerate-interval 1 (- i
+     1)). For each _j_ in this latter sequence, we generate the pair
+     (list i j). This gives us a sequence of pairs for each
+     i. Combining all the sequences for all the _i_ (by accumulating
+     with append) produces the required sequence of pairs:
+
+     #+BEGIN_SRC scheme
+     (accumulate append
+                 nil
+                 (map (lambda (i)
+                       (map (lambda (j) (list i j))
+                            (enumerate-interval 1 (- i 1))))
+                      (enumerate-interval 1 n)))
+     #+END_SRC
+
+     The combination of mapping and accumulating with append is so
+     common in this sort of program that we will isolate it as a
+     separate procedure:
+
+     #+BEGIN_SRC scheme
+     (define (flatmap proc seq)
+      (accumulate append nil (map proc seq)))
+     #+END_SRC
+
+     Now filter this sequence of pairs to find those whose sum is
+     prime. The filter predicate is called for each element of the
+     sequence; its argument is a pair and it must extract the integers
+     from the pair. Thus, the predicate to apply to each element in
+     the sequence is:
+
+     #+BEGIN_SRC scheme
+     (define (prime-sum? pair)
+      (prime? (+ (car pair) (cadr pair))))
+     #+END_SRC
+
+     Finally, generate the sequence of results by mapping over the
+     filtered pairs using the following procedure, which constructs a
+     triple consisting of the two elements of the pair along with
+     their sum:
+
+     #+BEGIN_SRC scheme
+     (define (make-pair-sum pair)
+      (list (car pair) 
+            (cadr pair) 
+            (+ (car pair) (cadr pair))))
+     #+END_SRC
+
+     Combining all these steps yields the complete procedure:
+
+     #+BEGIN_SRC scheme
+     (define (prime-sum-pairs n)
+      (map make-pair-sum
+           (filter prime-sum?
+                   (flatmap
+                    (lambda (i)
+                     (map (lambda (j) (list i j))
+                          (enumerate-interval i (- i 1))))
+                    (enumerate-interval 1 n)))))
+     #+END_SRC
+
+     Nested mappings are also useful for sequences other than those
+     that enumerate intervals. Suppose we wish to generate all the
+     permutations of a set S; that is, all the ways of ordering the
+     items in the set. For instance, the permutations of {1, 2, 3} are
+     {1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {2, 3, 1}, {3, 1, 2}, and {3, 2,
+     1}. Here is a plan for generating the permutations of S: For each
+     item x in S, recursively generate the sequence of permutations of
+     S - x, so and adjoin x to the front of each one. This yields, for
+     each x in S, the sequence of permutations of S that begin with
+     x. Combining these sequences for all x gives all the permutations
+     of S:
+
+     #+BEGIN_SRC scheme
+     (define (permutations s)
+      (if (null? s)
+          (list nil)
+          (flatmap (lambda (x)
+                    (map (lambda (p) (cons x p))
+                         (permutations (remove x s))))
+                   s)))
+     #+END_SRC
+
+     Notice how this strategy reduces the problem of generating
+     permutations of S to the problem of generating the permutations
+     of sets with fewer elements than S. In the terminal case, we work
+     our way down to the empty list, which represents a set of no
+     elements. For this, we generate (list nil), which is a sequence
+     with one item, namely the set with no elements. The remove
+     procedure used in permutations returns all the items in a given
+     sequence except for a given item. This can be expressed as a
+     simple filter:
+
+     #+BEGIN_SRC scheme
+     (define (remove item sequence)
+      (filter (lambda (x) (not (= x item))) sequence))
+     #+END_SRC
+
+     - Exercise 2.40 Define a procedure unique-pairs that, given an
+       integer _n_, generates the sequence of pairs (i, j) with 1 <= j
+       <= i <= n. Use unique-pairs to simplify the definition of
+       prime-sum-pairs given above.
+
+       #+BEGIN_SRC scheme
+       (define (unique-pairs n)
+        (flatmap (lambda (i) 
+              (map (lambda (j) (list i j)) 
+                    (enumerate-interval 1 (- i 1))))
+             (enumerate-interval 1 n)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (prime-sum-pairs n)
+        (map
+         make-prime-sum-triple
+         (filter
+          prime-sum?
+          (unique-pairs n))))
+       #+END_SRC
+
+     - Exercise 2.41 Write a procedure to find all ordered triples of
+       distinct positive integers i, j, and k less than or equal to a
+       given integer n that sum to a given integer s
+
+       #+BEGIN_SRC scheme
+       ;; ordered-triples: integer integer -> (listof triple)
+       ;; find all triples of distinct positive integers i, j, and k
+       ;; less than or equal to a given integer n that sum to a given
+       ;; integer s.
+       (define (ordered-triples n s)
+        (unique-only
+         (filter ordered-triple? 
+          (filter (lambda (x) (triple-adds-to? x s))
+                   (generate-distinct-triples n)))))
+
+       (define (triple=? triple1 triple2)
+        (and (= (car triple1) (car triple2))
+             (= (cadr triple1) (cadr triple2))
+             (= (caddr triple1) (caddr triple2))))
+
+       (define (unique-only list-of-items)
+        (accumulate (lambda (i rest)
+                     (cons i 
+                      (filter (lambda (j)
+                               (not (triple=? i j))) rest))) '() list-of-items))
+
+       (define (ordered-triple? triple)
+        (< (car triple) (cadr triple) (caddr triple)))
+       
+       (define (triple-adds-to? triple s)
+        (= (+ (car triple) (cadr triple) (caddr triple)) s))
+       ;; generate-distinct-triples: integer -> (listof triple)
+       ;; generate a list of all triples less than n where no single 
+       ;; element of the triple is equal to any other.
+       (define (generate-distinct-triples n)
+        (flatmap (lambda (i) 
+              (flatmap (lambda (j)
+                    (map (lambda (k)
+                         (list k j i))
+                         (enumerate-interval 1 (- j 1))))
+                   (enumerate-interval 1 (- i 1))))
+             (enumerate-interval 1 n)))
+
+       ;; (insert-into-triples 4 ((1 2 3))) ->
+       ;; ((1 2 4) (1 4 3) (4 2 3))
+       (define (insert-into-triples n triples)
+        (flatmap (lambda (triple) (insert-into-triple n triple))
+                 triples))
+       (define (insert-into-triple n triple)
+        (map (lambda (index) 
+              (replace-index-with-n index n triple))
+             (enumerate-interval 1 3)))
+
+       (define (replace-index-with-n index n the-triple)
+        (define (iter i input)
+         (cond ((null? input) '())
+               ((= i index) (cons n (iter (+ i 1) (cdr input))))
+               (else (cons (car input) (iter (+ i 1) (cdr input))))))
+        (iter 1 the-triple))
+       #+END_SRC
+
+     - Exercise 2.42.
+
+       The "eight-queens puzzle" asks how to place eight queens on a
+       chessboard so that no queen is in check from any other (i.e. no
+       two queens are in the same row, column, or diagonal). One
+       possible solution is shown in figure 2.8. One way to solve the
+       puzzle is to work across the board, placing a queen in each
+       column. Once we have placed k - 1 queens, we must place the kth
+       queen in a position where it does not check any of the queens
+       already on the board. We can formulate this approach
+       recursively: Assume that we have already generated the sequence
+       of all possible ways to place k - 1 queens in the first k - 1
+       columns of the board. For each of these ways, generate an
+       extended set of positions by placing a queen in each row of the
+       kth column. Now filter these, keeping only the positions for
+       which the queen in the kth column is safe with respect to the
+       other queens. This produces the sequence of all ways to place k
+       queens in the first k columns. By continuing this process, we
+       will produce not only one solution, but all solutions to the
+       puzzle. We implement this solution as a procedure queens, which
+       returns a sequence of all solutions to the problem of placing n
+       queens on an nxn chessboard. Queens has an internal procedure
+       queen-cols that returns the sequence of all ways to place
+       queens in the first k columns of the board.
+
+       #+BEGIN_SRC scheme
+       (define (queens board-size)
+        (define (queen-cols k)
+         (if (= k 0)
+             (list empty-board)
+             (filter
+              (lambda (positions) (safe? k positions))
+              (flatmap
+               (lambda (rest-of-queens)
+                (map (lambda (new-row)
+                      (adjoin-position new-row k rest-of-queens))
+                     (enumerate-interval 1 board-size)))
+               (queen-cols (- k 1))))))
+        (queen-cols board-size))
+       #+END_SRC
+
+       In this procedure rest-of-queens is a way to place k - 1 queens
+       in the first k - 1 columns, and new-row is a proposed row in
+       which to place the queen for the kth column. Complete the
+       program by implementing the representation for sets of board
+       positions, including the procedure adjoin-position, which
+       adjoins a new row-column position to a set of positions, and
+       empty-board, which represents an empty set of positions. You
+       must also write the procedure safe?, which determines for a set
+       of positions, whether the queen in the kth column is safe with
+       respect to others. (Note that we need only check whether the
+       new queen is safe -- the other queens are already guaranteed
+       safe with respect to each other.)
+
+       #+BEGIN_SRC scheme
+       (define (safe? column-number queen-positions)
+        ...)
+       (define (adjoin-position new-row-number number-of-rows rest-of-queen-positions)
+        ...)
+       (define empty-board ...)
+       #+END_SRC
+
+       An initial approximation could be a board as just a list of
+       positions, where a position is a cons of two numbers, the row
+       and column.
+       
+       #+BEGIN_SRC scheme
+       ;; add new positions at new-row-number for every column, given a list of current positions.
+       (define (adjoin-position new-row-number number-of-columns other-positions)
+        (cons (make-queen new-row-number number-of-columns) other-positions))
+       (define empty-board '())
+       (define (safe? column-number queen-positions)
+        ...)
+       #+END_SRC
+
+       Now the hard work is ahead. We need to look at the first
+       position and see if it's safe from all other positions. For a
+       single piece, we need to see if it's on a common row with other
+       pieces (we've been adding columns so it can't be on the same
+       column) and then see if it's on the same diagonal.
+
+       #+BEGIN_SRC scheme
+       (define (queen-row queen)
+        (car queen))
+       (define (queen-column queen)
+        (cdr queen))
+       (define (make-queen row column)
+         (cons row column))
+       (define (safe-from-queen? queen1 queen2)
+        (and (not (= (queen-column queen1) (queen-column queen2)))
+             (not (= (queen-row queen1) (queen-row queen2)))
+             (not (is-same-diagonal? queen1 queen2))))
+       (define (is-same-diagonal? queen1 queen2)
+        (= (abs (- (queen-row queen1) (queen-row queen2)))
+           (abs (- (queen-column queen1) (queen-column queen2)))))
+       (define (safe? column-number queen-positions)
+        (define (safe-from-all-others? a-queen queen-positions)
+          (if (null? queen-positions) true
+             (and (safe-from-queen? a-queen (car queen-positions))
+                  (safe-from-all-others? a-queen (cdr queen-positions)))))
+        (safe-from-all-others? (car queen-positions) (cdr queen-positions)))
+       #+END_SRC
+
+     - Exercise 2.43 Louis Reasoner is having a terrible time doing
+       exercise 2.42. His queens procedure seems to work, but it runs
+       extremely slowly. (Louis never does manage to wait long enough
+       for it to solve even the 6x6 case.) When Louis asks Eva Lu Ator
+       for help, she points out that he has interchanged the order of
+       the nested mappings in the flatmap, writing it as
+
+       #+BEGIN_SRC scheme
+       (flatmap
+        (lambda (new-row)
+         (map (lambda (rest-of-queens)
+               (adjoin-position new-row k rest-of-queens))
+              (queen-cols (- k 1))))
+         (enumerate-interval 1 board-size))
+       #+END_SRC
+
+       You are unecessarily solving (queen-cols (- k 1)) board-size
+       times when you only need to solve it once. The solution for
+       (queen-cols (- k 1)) will always be the same but the row number
+       will not, meaning the positions of queen-cols and
+       enumerate-interval should be swapped. As it is, for each
+       iteration through the loop, you call queen-cols board-size
+       times. If queen-colls for (- k 1) takes T time you're taking
+       board-size times as much, board-size * T. However, that's not a
+       fully accurate picture since the call is recursive. Every
+       recursive call also takes board-size times as long. There are
+       basically the same number of _levels_ of recursion (board-size)
+       with different values of k but each level is board-size times
+       as long. So it would be board-size * board-size * board-size
+       ... or (board-size ^ board-size) * T.
+
+*** 2.2.4 Example: A Picture Language
+    This section presents a simple language for drawing pictures that
+    illustrates the power of data abstraction and closure, and also
+    exploits higher-order procedures in an essential way. The language
+    is designed to make it easy to experiment with patterns such as
+    the ones in figure 2.9, which are composed of repeated elements
+    that are shifted and scaled. In this language, the data objects
+    being combined are represented as porcedures rather than as list
+    structure. Just as cons, which satisfies the closure property,
+    allowed us to easily build arbitrarily complicated list structure,
+    the operation in this language, which also satisfy the closure
+    property, allow us to e asily build arbitrarily complicated
+    patterns.
+
+**** The picture language
+
+     When we began our study of programming in section 1.1, we
+     emphasized the importance of describing a language by focusing on
+     the language's primitives, its means of combination, and its
+     means of abstraction. We'll follow that framework here.
+
+     Part of the elegance of this picture language is that there is
+     only one kind of element, called a _painter_. A painter draws an
+     image that is shifted and scaled to fit within a designated
+     parallelogram-shaped frame. For example, there's a primitive
+     painter we'll call wave that makes a crude line drawing, as shown
+     in figure 2.10. The actual shape of the drawing depends on the
+     frame -- all four images in figure 2.10 are produced by the same
+     wave painter, but with respect to four different frames. Painters
+     can be more elaborate than this: The primitive painter called
+     rogers paints a picture of MIT's founder, William Barton Rogers,
+     as shown in figure 2.11. The four images in figure 2.11 are drawn
+     with respect to the same four frames as the wave images in figure
+     2.10. 
+
+     To combine images, we use various operations that construct new
+     painters from given painters. For example, the beside operation
+     takes two painters and produces a new, compound painter that
+     draws the first painter's image in the left half of the frame and
+     the second painter's image in the right half of the
+     frame. Similarly, below takes two painters and produces a
+     compound painter that draws the first painter's image below the
+     second painter's image. Some operations transform a single
+     painter to produce a new painter. For example, flip-vert takes a
+     painter and produces a painter that draws its image upside-down,
+     and flip-horiz produces a painter that draws the original
+     paitner's image left-to-right reversed.
+
     
 
+     
 
-
+       
 
