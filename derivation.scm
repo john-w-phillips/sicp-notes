@@ -1,3 +1,5 @@
+;; derivation.scm -- symbolic differentiation package.
+
 (define (deriv exp var)
   (cond
    ((number? exp) 0)
