@@ -4287,10 +4287,1583 @@
           (list base '** power))))
        #+END_SRC
      
+*** 2.3.3 Example: Representing sets
 
-       
+    In the previous examples we built representations for two kinds of
+    compound data objects: rational numbers and algebraic
+    expressions. In one of these examples we had the choice of
+    simplifying (reducing) the expressions at either construction time
+    or selection time, but other than that the choice of a
+    representation for these structures in terms of lists was
+    straightforward. When we turn to the representation of sets, the
+    choice of a representation is not so obvious. Indeed, there are a
+    number of possible representations and they differ significantly
+    from one another in several ways.
 
+    Informally, a set is simply a collection of distinct objects. To
+    give a more precise definition we can employ the method of data
+    abstraction. That is, we define "set" by specifying the operations
+    that are to be used on sets. These are union-set,
+    intersection-set, element-of-set?, and adjoin-set. Element-of-set?
+    is a predicate that determines whether a given element is a member
+    of a set. Adjoin-set takes an object and a set as arguments and
+    returns a set that contains the elements of the original set and
+    also the adjoined element. Union-set computes the union of two
+    sets, which is the set containing each element that appears in
+    either argument. Intersection-set computes the intersection of two
+    sets, which is teh set containing only elements that appear in
+    both arguments. From the viewpoint of data abstraction, we are
+    free to design any representation that implements these operations
+    in a way consistent with the interpretations given above.
 
+**** Sets as unordered lists
 
+     One way to represent a set is as a list of its elements in which
+     no element appears more than once. The empty set is represented
+     by the empty list. In this representation, element-of-set? is
+     similar to the procedure memq of section 2.3.1. It uses equal?
+     instead of eq? so that the set elements need not be symbols:
+
+     #+BEGIN_SRC scheme
+     (define (element-of-set? x set)
+      (cond ((null? set) false)
+            ((equal? x (car set)) true)
+            (else (element-of-set? x (cdr set)))))
+     #+END_SRC
+
+     Using this, we can werite adjoin-set. If the object to be
+     adjoined is already in the set, we just return the
+     set. Otherwise, we use cons to add the object to the list that
+     represents the set:
+
+     #+BEGIN_SRC scheme
+     (define (adjoin-set x set)
+      (if (element-of-set? x set)
+          set
+          (cons x set)))
+     #+END_SRC
+
+     For intersection-set we can use a recursive strategy. If we know
+     how to form the intersection of set2 and the cdr of set1, we only
+     need to decide whether to include the car of set1 in this. But
+     this depends on whether (car set1) is also in set2. Here is the
+     resulting procedure:
+
+     #+BEGIN_SRC scheme
+     (define (intersection-set set1 set2)
+      (cond ((or (null? set1) (null? set2)) '())
+            ((element-of-set? (car set1) set2)
+             (cons (car set1) (intersection-set (cdr set1) set2)))
+            (else (intersection-set (cdr set1) set2))))
+     #+END_SRC
+
+     In designing a representation, one of the issues we should bec
+     concerned with is efficiency. Consider the number of steps
+     required by our set operations. Since they all use
+     element-of-set?, the speed of this operation has a major impact
+     on the efficiency of the set implementation as a whole. Now, in
+     order to check whether an object is a member of a set,
+     element-of-set? may have to scan the entire set. (In the worst
+     case, the object turns out not to be in the set.) Hence, if the
+     set has n elements, element-of-set? might take up to n
+     steps. Thus, the number of steps required grows as O(n). The
+     number of steps required by adjoin-set, which uses this
+     operation, also grows as O(n). For intersection-set, which does
+     an element-of-set? check for each element of set1, the number of
+     steps required grows as the product of sizes of the sets
+     involved, or O(n^2) for two sets of size n. The same will be true
+     of union-set.
+
+     - Exercise 2.59. Implement the union-set operation for the
+       unordered-list representation of sets.
+
+       #+BEGIN_SRC scheme
+       (define (union-set set1 set2)
+        (cond 
+         ((null? set1) set2)
+         (else 
+          (let ((rest-of-union (union-set (cdr set1) set2)))
+           (if (not (element-of-set? (car set1) rest-of-union))
+               (cons (car set1) rest-of-union)
+               rest-of-union)))))
+       #+END_SRC
+
+     - Exercise 2.60. We specified that a set would be represented as
+       a list with no duplicates. Now suppose we allow duplicates. For
+       instance, the set {1, 2, 3} could be represented as the list (2
+       3 2 1 3 2 2). Design procedures element-of-set?, adjoin-set,
+       union-set, and intersection-set that operate on this
+       representation. How does the efficiency of each compare with
+       the corresponding procedure for teh non-duplicate
+       representation? Are there applications for which you would use
+       this representation in preference to the non-duplicate one?
+
+       elment-of-set? doesn't have to be changed. adjoin-set doesn't
+       _have_ to be changed but _can_ become:
+
+       #+BEGIN_SRC scheme
+       (define (adjoin-set x set)
+        (cons x set))
+       #+END_SRC
+
+       union-set can literally be an alias of append
+       #+BEGIN_SRC scheme
+       (define union-set append)
+       #+END_SRC
+
+       intersection-set doesn't have to be changed at all. If there
+       was some application that was mostly adjoin-set and union-set
+       with relatively few calls to elelment-of-set? then this
+       duplicate version would be faster.
+
+**** Sets as ordered lists
+
+     One way to speed up our set operations is to change the
+     representation so that the set elements are listed in increasing
+     order. To do this, we need some way to compare two objects so
+     that we can say which is bigger. For example, we could compare
+     symbols lexicographically, or we could agree on some method for
+     assigning a unique number to an object and then compare the
+     elements by comparing the corresponding numbers. To keep our
+     discussion simple, we will consider only the case where the set
+     elements are numbers, so that we can compare elements using > and
+     <. We will represent a set of numbers by listing its elements in
+     increasing order. Whereas our first representation above allowed
+     us to represent the set {1, 3, 6, 10} by listing the elements in
+     any order, our new representation allows only the list (1 3 6
+     10). 
+
+     One advantage of ordering shows up in element-of-set?: In
+     checking for the presence of an item, we no longer have to scan
+     the entire set. If we reach a set element that is larger than the
+     item we are looking for, then we know that the item is not in the
+     set:
+
+     #+BEGIN_SRC scheme
+     (define (element-of-set? x set)
+      (cond ((null? set) false)
+            ((= x (car set)) true)
+            ((< x (car set)) false)
+            (else (element-of-set? x (cdr set)))))
+     #+END_SRC
+
+     How many steps does this save? In the worst case, the item we are
+     looking for may be the largest one in the set, so the number of
+     steps is the same as for the unordered representation. On the
+     other hand, if we search for items of many different sizes we can
+     expect that sometimes we will be able to stop searching at a
+     point near the beginning of the list and that other times we will
+     still need to examine most of the list. On the average we should
+     expect to have to examine about half of the items in the
+     set. Thus, the average number of steps required will be about
+     n/2. This is still O(n) growth, but it does save us, on the
+     average, a factor off 2 in number of steps over the previous
+     implementation.
+
+     We obtain a more impressive speedup with intersection-set. In the
+     unordered representation this operation required O(n^2) steps,
+     because we performed a complete scan of set2 for each element of
+     set1. But with the ordered representation, we can use a more
+     clever method. Begin by comparing the initial elements, x1 and
+     x2, of the two sets. If x1 equals x2, then that gives an element
+     of the intersection, and the rest of the intersection is the
+     intersection of the cdrs of the two sets. Suppose, however, that
+     x1 is less than x2. Since x2 is the smallest element in set2, we
+     can immediately conclude that x1 cannot appear anywhere in set2
+     and hence is not in the intersection. Hence, the intersection is
+     equal to the intersection of set2 with the cdr of
+     set1. Similarly, if x2 is less than x1, then the intersection is
+     given by teh intersection of set1 with the cdr of set2. Here is
+     the procedure:
+
+     #+BEGIN_SRC scheme
+     (define (intersection-set set1 set2)
+      (cond
+       ((or (null? set1) (null? set2)) '())
+       (else (let ((x1 (car set1)) (x2 (car set2)))
+              (cond
+               ((= x1 x2)
+                (cons x1 (intersection-set (cdr set1) (cdr set2))))
+               ((< x1 x2) 
+                (intersection-set (cdr set1) set2))
+               ((< x2 x1) 
+                (intersection-set set1 (cdr set2))))))))
+     #+END_SRC
+
+     To estimate the number of steps required by this process, observe
+     that at each step we reduce the intersection problem to computing
+     intersections of smaller sets -- removing the first element from
+     set1 or set2 or both. Thus, the number of steps required is at
+     most the sum of the sizes of set1 and set2, rather than the
+     product of the sizes as with the unordered representation. This
+     is O(n) growth rather than O(n^2) -- a considerable speedup, even
+     for sets of moderate size.
+
+     - Exercise 2.61. Given an implementation of adjoin-set using the
+       ordered representation. By analogy with element-of-set? show
+       how to take advantage of the ordering to produce a procedure
+       that requires on average about half as many steps as with the
+       unordered representation.
+
+       #+BEGIN_SRC scheme
+       (define (adjoin-set x set)
+        (cond
+         ((null? set) (list x))
+         ((< x (car set)) (cons x set))
+         (else (cons (car set) (adjoin-set x (cdr set))))))
+       #+END_SRC
+
+       Similar to element-of-set?, we look at each element on the list
+       and see if the element to be inserted, x, is less than the
+       first element of the set. If so, then the new set is a list
+       starting with x and having the original input set as the rest
+       of the set, (cons x set). Otherwise, we have a way to go and
+       insert x into the subset of the rest of the list, adding on the
+       first element. Because we can expect that when inserting
+       elements into the list, some are going to be near the
+       beginning, although in the worst case we traverse the whole
+       set, (O(n))we can expect that on average some are near the
+       beginning and we get O(n/2).
+
+     - Exercise 2.62. Give a O(n) implementation of union-set for sets
+       represented as ordered lists.
+
+       #+BEGIN_SRC scheme
+       (define (union-set set1 set2)
+        (cond
+         ((null? set1) set2)
+         ((null? set2) set1)
+         (else (let ((x1 (car set1)) 
+                     (x2 (car set2)))
+                (cond
+                  ((= x1 x2) (cons x1 (union-set (cdr set1) (cdr set2))))
+                  ((< x1 x2)
+                   (let ((rest-of-union (union-set (cdr set1) set2)))
+                    (if (= x1 (car rest-of-union)) 
+                        rest-of-union
+                        (cons x1 rest-of-union))))
+                  ((< x2 x1)
+                   (let ((rest-of-union (union-set set1 (cdr set2))))
+                    (if (= x2 (car rest-of-union))
+                        rest-of-union
+                        (cons x2 rest-of-union)))))))))  
+       #+END_SRC
+
+**** Sets as binary trees
+     We can do better than the ordered-list representation by
+     arranging the set elements in the form of a tree. Each node of
+     the tree holds one element of the set, called the "entry" at that
+     onde, and a link to each of the two other (possibly empty)
+     nodes. The "left" link points to elements smaller than the node,
+     and the "right" link to elements greater than the one at the
+     node. Figure 2.16 shows some trees that represent teh set {1, 3,
+     5, 7, 9, 11}. The same set may be represented by a tree in a
+     number of different ways. The only thing we require for a valid
+     representation is that all elements in the left subtree be
+     smaller than the node entry and that all elements in the right
+     subtree be larger.
+
+     The advantage of the tree representation is this: Suppose we want
+     to check whether a number _x_ is contained in a set. We begin by
+     comparing x with the entry in the top node. If x is less than
+     this, we know that we need only search the left subtree; if x is
+     greater, we need only search the right subtree. Now, if the tree
+     is "balanced", each of these subtrees will be about half the size
+     of the original. Thus, in one step we have reduced the problem of
+     searching a tree of size n to searching a tree of size n/2. Since
+     the size of the tree is halved at each step, we should expect
+     that the number of steps needed to search a tree of size n grows
+     as O(log n). For large sets, this will be a significant speedup
+     over the previous representations.
+
+     We can represent trees by using lists. Each node will be a list
+     of three items: the entry at the node, the left subtree, and the
+     right subtree. A left or right subtree of the empty list will
+     indicate that there is no subtree connected there. We can
+     describe this representation with the following procedures:
+
+     #+BEGIN_SRC scheme
+     (define (entry tree) (car tree))
+     (define (left-branch tree) (cadr tree))
+     (define (right-branch tree) (caddr tree))
+     (define (make-tree entry left right)
+      (list entry left right))
+     #+END_SRC
+
+     Now we can write the element-of-set? procedure using the strategy
+     described above:
+
+     #+BEGIN_SRC scheme
+     (define (element-of-set? x set)
+      (cond ((null? set) false)
+            ((= x (entry set)) true)
+            ((< x (entry set))
+             (element-of-set? x (left-branch set)))
+            ((> x (entry set))
+             (element-of-set? x (right-branch set)))))
+     #+END_SRC
+
+     Adjoining an item to a set is implemented similarly and also
+     requires O(log n) steps. To adjoin an item x, we compare x with
+     the node entry to determine whether x should be added to the
+     right or to the left branch, and having adjoined x to the
+     appropriate branch we piece this newly constructed branch
+     together with the original entry and the other branch. If x is
+     equal to the entry, we just return the node. If we are asked to
+     adjoin x to an empty tree, we generate a tree that has x as the
+     entry and empty left and right branches. Here is the procedure:
      
+     #+BEGIN_SRC scheme
+     (define (adjoin-set x set)
+      (cond ((null? set) (make-tree x '() '()))
+            ((= x (entry set)) set)
+            ((< x (entry set))
+             (make-tree (entry set)
+                        (adjoin-set x (left-branch set))
+                        (right-branch set)))
+            ((> x (entry set))
+             (make-tree (entry set)
+                        (left-branch set)
+                        (adjoin-set x (right-branch set))))))
+     #+END_SRC
+
+     The above claim that searching the tree can be performed in a
+     logarithmic number of steps rets on the assumption that the tree
+     is "balanced," i.e. that the left and right subtree of every tree
+     have approximately the same number of elements, so that each
+     subtree contains about half the elements of its parent. But how
+     can we be certain that ther trees we construct will be balanced?
+     Even if we start with a balanced tree, adding elements with
+     adjoin-set may produce an unbalanced result. Since the position
+     of a newly adjoined element depends on how the element compares
+     with the items already in the set, we can expect that if we add
+     elements "randomly" the tree will tend to be balanced on the
+     average. But this is not a guarantee. For example, if we start
+     with an empty set and adjoin the numbers 1 through 7 in sequence
+     we end up with the highly unbalanced tree shown in figure
+     2.17. In this tree all the left subtrees are empty, so it has no
+     advantage over a simple ordered list. One way to solve this
+     problem is to define an operation that transforms an arbitrary
+     tree into a balanced tree with the same elements. Then we can
+     perform this transformation after every few adjoin-set operations
+     to keep our set in balance. There are also other ways to solve
+     this problem, most of which involve designing new data structures
+     for which searching and insertion both can be done in O(log n)
+     steps.
+
+     - Exercise 2.63. Each of the following two procedures converts a
+       binary tree to a list.
+
+       #+BEGIN_SRC scheme
+       (define (tree->list-1 tree)
+        (if (null? tree)
+            '()
+            (append (tree->list-1 (left-branch tree))
+                    (cons (entry tree)
+                          (tree->list-1 (right-branch tree))))))
+       (define (tree->list-2 tree)
+        (define (copy-to-list tree result-list)
+         (if (null? tree)
+             result-list
+             (copy-to-list (left-branch tree)
+                           (cons (entry tree)
+                                 (copy-to-list (right-branch tree)
+                                               result-list)))))
+        (copy-to-list tree '()))
+       #+END_SRC
+
+       a. Do the two procedures produce the same result for every
+       tree? If not, how do the results differ? What lists do the two
+       procedures produce for the trees in figure 2.16?
+       
+       Yes, they produce the same result, the tree elements, then the
+       element, then the leftmost tree, recursively. This results in a
+       sorted list. The figures in 2.16 become:
+
+       (1 3 5 7 9 11)
+
+       each time for all invocations.
+
+       b. Do the two procedures have the same order of growth in the
+       number of steps required to convert a balanced tree with _n_
+       elements to a list? If not, which one grows more slowly?
+
+       No, the first one grows more quickly. append is an O(n)
+       procedure. For very large sets you end up with something that
+       is roughly O(n log n), because you are appending on each recursive
+       call, but appending a data set that halves. The second is only
+       O(n).
+
+     - Exercise 2.64. The following procedure list->tree converts an
+       ordered list to a balanced binary tree. The helper procedure
+       partial-tree takes as arguments an integer _n_ and a list of at
+       least _n_ elements and constructs a balanced tree containing
+       the first n elements of the list. The result returned by
+       partial-tree is a pair (formed with cons) whose car is the
+       constructed tree and whose cdr is the list of elements not
+       included in the tree.
+
+       #+BEGIN_SRC scheme
+       (define (list->tree elements)
+        (car (partial-tree elements (length elements))))
+       (define (partial-tree elts n)
+        (if (= n 0)
+            (cons '() elts)
+            (let ((left-size (quotient (- n 1) 2)))
+             (let ((left-result (partial-tree elts left-size)))
+              (let ((left-tree (car left-result))
+                    (non-left-elts (cdr left-result))
+                    (right-size (- n (+ left-size 1))))
+               (let ((this-entry (car non-left-elts))
+                     (right-result (partial-tree 
+                                    (cdr non-left-elts) right-size)))
+                (let ((right-tree (car right-result))
+                      (remaining-elts (cdr right-result)))
+                 (cons (make-tree this-entry left-tree right-tree)
+                       remaining-elts))))))))
+       #+END_SRC
+
+       This is an O(n) algorithm. You recursively calculate sizes of
+       subtrees and get the left subtree from the algorithm first. It
+       will return a subtree and a list of elements you haven't
+       consumed yet. You then take that extra list, the first element
+       is taken to be your root, and the rest of these will form the
+       right subtree. Recursively call the same algorithm on the right
+       subtree and make a tree out of those three elements.
+
+     - Exercise 2.65 Use the results of exercises 2.63 and 2.64 to
+       give O(n) implementations of union-set and intersection-set for
+       sets implemented as (balanced) binary trees.
+     
+       #+BEGIN_SRC scheme
+       (define (union-set set1 set2)
+         (define (merge-lists list1 list2)
+           (cond
+            ((null? list1) list2)
+            ((null? list2) list1)
+            (else
+             (let ((x1 (car list1))
+                   (x2 (car list2)))
+              (cond
+               ((= x1 x2)
+                (cons x1 (merge-lists (cdr list1) (cdr list2))))
+               ((< x1 x2)
+                (cons x1 (merge-lists (cdr list1) list2)))
+               ((< x2 x1)
+                (cons x2 (merge-lists list1 (cdr list2)))))))))
+         (let ((list1 (tree->list set1))
+               (list2 (tree->list set2)))
+          (list->tree (merge-lists list1 list2))))
+
+       (define (intersection-set set1 set2)
+        (define (intersection-sorted-list l1 l2)
+         (cond
+          ((or (null? l1) (null? l2)) '())
+          (else
+           (let ((x1 (car l1))
+                 (x2 (car l2)))
+            (cond
+             ((= x1 x2) (cons x1 (intersection-sorted-list (cdr l1) (cdr l2))))
+             ((< x1 x2) (intersection-sorted-list (cdr l1) l2))
+             ((< x2 x1) (intersection-sorted-list l1 (cdr l2))))))))
+        (let ((list1 (tree->list set1))
+              (list2 (tree->list set2)))
+         (list->tree (intersection-sorted-list list1 list2))))
+       #+END_SRC
+
+       Intersection-set has O(n) steps. The first is to convert the
+       two trees to lists, the second is to merge the lists, the third
+       is to convert back to a tree. Each step is O(n) so the whole
+       thing is O(n). Union-set works in almost exactly the same way,
+       except we always cons back onto a list; using an un-modified
+       merge-list algorithm, which is O(n). There are again a total of
+       four O(n) operations, one for each list, one for amerge, and
+       another for converting back into a tree.
+     
+**** Sets and information retrieval
+
+     We have examined options for using lists to represent sets and
+     have seen how the choice of representation for a data object can
+     have a large impact on the performance of the programs that use
+     the data. Another reason for concentrating on sets is that the
+     techniques discussed here appear again and again in applications
+     involving information retrieval.
+
+     Consider a data base containing a large number of individual
+     records, such as the personnel files for a company or the
+     transactions in an accounting system. A typical data-management
+     system spends a large amount of time accessing or modifying the
+     data in the records and therefore requires an efficient method
+     for accessing records. This is done by identifying a part of each
+     record to serve as an identifying _key_. A key can be anything
+     that uniquely identifies the record. For a personnel file, it
+     might be an employee's ID number. For an accounting system, it
+     might be a transaction number. Whatever the key is, when we
+     define the record as a data structure we should include a key
+     selector procedure that retrieves the key associated with a given
+     record.
+
+     Now we represent the data base as a set of records. To locate a
+     record with a given key we use a procedure lookup, which takes as
+     arguments a key and a data base and which returns the record that
+     has that key, or false if there is no such record. Lookup is
+     implemented in almost the same way as element-of-set?. For
+     example, if the set of records is implemented as an unordered
+     list, we could use
+
+     #+BEGIN_SRC scheme
+     (define (lookup given-key set-of-records)
+      (cond ((null? set-of-records) false)
+            ((equal? given-key (key (car set-of-records)))
+             (car set-of-records))
+            (else (lookup given-key (cdr set-of-records)))))
+     #+END_SRC
+
+     Or course, there are better ways to represent large sets than as
+     unordered lists. Information-retrieval systems in which records
+     have to be "randomly accessed" are typically implemented by a
+     tree-based method, such as a binary-tree representation discussed
+     previously. In designing such a system the methodology of data
+     abstraction can be a great help. The designer can create an
+     initial implementation using a simple, straightforward
+     representation such as unordered lists. This will be unsuitable
+     for the eventual system, but it can be useful in providing a
+     "quick and dirty" data base with which to test the rest of the
+     system. Later on, the data representation can be modified to be
+     more sophisticated. If the data base is accessed in terms of
+     abstract selectors and constructors, this change in
+     representation will not require any changes to the rest of the
+     system.
+
+     - Exercise 2.66. Implement the lookup procedure for the case
+       where the set of records is structured as a binary tree,
+       ordered by the numerical values of the keys.
+       
+       #+BEGIN_SRC scheme
+       (define (lookup given-key tree-of-records)
+        (cond ((null? tree-of-records) false)
+              ((equal? given-key (key (entry tree-of-records)))
+               (entry tree-of-records))
+              ((< given-key (key (entry tree-of-records)))
+               (lookup given-key (left-branch tree-of-records)))
+              (else (lookup given-key (right-branch tree-of-records)))))
+       #+END_SRC
+
+*** 2.3.4 Example: Huffman Encoding Trees
+
+    This section provides practice in the use of list structure and
+    data abstraction to manipulate sets and trees. The application is
+    to methods for representing data as sequences of ones and zeros
+    (bits). For example, the ASCII standard code used to represent
+    text in computers encodes each character as a sequence of seven
+    bits. Using seven bits allows us to distinguish 2^7, or 128,
+    possible different characters. In general, if we want to
+    distinguish n different symbols, we will use log2(n) bits per
+    symbol. If all our messages are made up of eight symbols A, B, C,
+    D, E, F, G, and H, we can choose a code with three bits per
+    character, for example
+
+    A 000 C 010 E 100 G 110
+    B 001 D 011 F 101 H 111
+      
+    With this code, the message
+
+    BACADAEAFABBAAAGAH
+
+    is encoded as the string of 54 bits
+
+    001000010000011000100000100000001001000000000110000111
+
+    Codes such as ASCII and the A-through-H code above are known as
+    _fixed-length_ codes, because they represent each symbol in the
+    message with the same number of bits. It is sometimes advantageous
+    to use _variable-length_ codes, in which different symbols may be
+    represented by different numbers of bits. For example, morse code
+    does not use the same number of dots and dashes for each letter of
+    the alphabet. In particular, E, the most frequent letter, is
+    represented by a single dot. In general, if our messages are such
+    that some symbols appear very frequently and some very rarely, we
+    can encode data more efficiently (i.e. using fewer bits per
+    message) if we assign shorter codes to the frequent
+    symbols. Consider the following alternative code for the letters A
+    through H:
+
+    A 0    C 1010 E 1100 G 1110
+    B 100  D 1011 F 1101 H 1111
+
+    With this code, the same message as above is encoded as the string
+
+    1000101001011 ...
+
+    This string contains 42 bits, so its saves more than 20% in space
+    in comparison with the fixed-length code shown above.
+
+    One of the difficulties of using a variable-length code is knowing
+    when you have reached the end of a symbol in reading a sequence of
+    zeros and oens. Morse code solves this problem by using a special
+    _separator code_ (in this case, a pause) after the sequence of
+    dots and dashes for each letter. Another solution is to design the
+    code in such a way that no complete code for any symbol is the
+    beginning (or _prefix_) of the code for another symbol. Such a
+    code is called a _prefix code_. In the example above, A is encoded
+    by 0 and B is encoded by 100, so no other symbol can have a code
+    that begins with 0 or with 100.
+
+    In general, we can attain significant savings if we use
+    variable-length prefix codes that take advantage of the relative
+    frequencies of the symbols in the messages to be encoded. One
+    particular scheme for doing this is called the Huffman encoding
+    method, after its discoverer, David Huffman. A Huffman code can be
+    represented as a binary tree whose leaves are the symbols that are
+    encoded. At each non-leaf node of the tree there is a set
+    containing all the symbols in the leaves that lie below the
+    node. In addition, each symbol at a leaf is assigned a weight
+    (which is its relative frequency), and each non-leaf node contains
+    a weight that is the sum of all the weights of the leaves lying
+    below it. The weights are not used in the encoding or the decoding
+    process. We will see below how they are used to help construct the
+    tree.
+
+    Figure 2.18 shows the Huffman tree for the A-through-H code given
+    above. The weights at the leaves indicate that the tree was
+    designed for messages in which A appears with relative frequency
+    8, B with relative frequency 3, and the other letters each with
+    relative frequency 1. 
+
+    Given a Huffman tree, we can find the encoding of any symbol by
+    starting at the root and moving down until we reach the leaf that
+    holds the symbol. Each time we move down a left branch we add a 0
+    to the code, and each time we move down a right branch we add
+    a 1. (We decide which branch to follow by testing to see which
+    branch either is the leaf node for the symbol or contains the
+    symbol in its set.) For eample, starting from the root of the tree
+    in figure 2.18, we arrive at the leaf for D by following a right
+    branch, then a left branch, then a right branch, then a right
+    branch; hence, the code for D is 1011. 
+
+    To decode a bit sequence using a Huffman tree, we begin at the
+    root and use successive zeros and ones of the bit sequence to
+    determine whether to move down to the left or the right
+    branch. Each time we come to a leaf, we have generated a new
+    symbol in the message, at which point we start over from the root
+    of teh tree to find the next symbol. For example, suppose we are
+    given the tree above and the sequence 10001010. Starting at the
+    root, we move down from the right branch, (since the first bit of
+    the string is 1), then down to the left branch (since the second
+    bit is 0), then down the left branch (since the third bit is also
+    0). This brings us to the leaf for B, so the first symbol of the
+    decoded message is B. Now we start again at the root, and we make
+    a left move because the next bit in the string is 0. This brings
+    us to the leaf for A. Then we start again at the root with the
+    rest of the strign 1010, so we move right, left, right, left and
+    reach C. Thus, the entire message is BAC.
+
+**** Generating Huffman trees
+
+     Given an "alphabet" of symbols and their relative frequencies,
+     how do we construct the "best" code? (In other words, which tree
+     will encode messages with the fewest bits?) Huffman gave an
+     algorithm for doing this and showed that the resulting code is
+     indeed the best variable-length code for messages where the
+     relative frequency of the symbols matches teh frequencies with
+     which the code was constructed. We will not prove this optimality
+     of Huffman codes here, but we will show how Huffman trees are
+     constructed.
+
+     The algorithm for generating a Huffman tree is very simple. The
+     idea is to arrange the tree so that the symbols with the lowest
+     frequency appear farthest away from the root. Begin with the set
+     of leaf nodes, containing symbols and their frequencies, as
+     determined by the initial data from which the code is to be
+     constructed. 
+
+     The algorithm for generating a Huffman tree is very simple. The
+     idea is to arrange the tree so that the symbols with the lowest
+     frequency appear farthest away from the root. Begin with the set
+     of leaf nodes, containing symbols and their frequencies, as
+     determined by the initial data from which the code is to be
+     constructed. Now find two leaves with the lowest weights and
+     merge them to produce a node that has these two nodes as its left
+     and right branches. The weight of the new node is the sum of the
+     two weights. Remove the two leaves from the original set and
+     replace them by this new node. Now continue this process. At each
+     step, merge two nodes with the smallest weights, removing them
+     from the set and replacing them with a node that has these two as
+     its left and right branches. The process stops when there is only
+     one node left, which is the root of the entire tree. Here is how
+     the Huffman tree of figure 2.18 was generated:
+
+     #+BEGIN_EXAMPLE
+     Initial leaves {(A 8) (B 3) (C 1) (D 1) (E 1) (F 1) (G 1) (H 1)}
+     Merge          {(A 8) (B 3) ({C D} 2) (E 1) (F 1) (G 1) (H 1)}
+     Merge          {(A 8) (B 3) ({C D} 2) ({E F} 2)(G 1)(H 1)}
+     Merge          {(A 8) (B 3) ({C D} 2) ({E F} 2) (G 1) (H 1)}
+     Merge          {(A 8) (B 3) ({C D} 2) ({E F} 2) ({G H} 2)}
+     Merge          {(A 8) (B 3) ({C D} 2) ({E F G H} 4)}
+     Merge          {(A 8) ({B C D} 5) ({E F G H} 4)}
+     Merge          {(A 8) ({B C D E F G H} 9)}
+     Merge          {({A B C D E F G H} 17)}  
+     #+END_EXAMPLE
+
+     This algorithm does not always specify a unique tree, because
+     there may not be unique smallest-weight nodes at each step. Also,
+     the choice of the order in which the two nodes are merged
+     (i.e. which will be the right branch and which will be the left
+     branch) is arbitrary.
+
+**** Representing Huffman trees
+
+     In the exercises below we will work with a system that uses
+     Huffman trees to encode and decode messages and generates Huffman
+     trees according to the algorithm outlined above. We will begin by
+     discussing how trees are represented.
+
+     Leaves of the tree are represented by a list consisting of the
+     symbol leaf, the symbol at the leaf, and the weight:
+
+     #+BEGIN_SRC scheme
+     (define (make-leaf symbol weight)
+      (list 'leaf symbol weight))
+     (define (leaf? object)
+      (eq? (car object) 'leaf))
+     (define (symbol-leaf x) (cadr x))
+     (define (weight-leaf x) (caddr x))
+     #+END_SRC
+
+     A general tree will be a list of a left branch, a right branch, a
+     set of symbols, and a weight. The set of symbols will simply be a
+     list of the symbols, rather than some more sophisticated set
+     representation. When we make a tree by merging two nodes, we
+     obtain the weight of the tree as the sum of the weights of the
+     nodes, and the set of symbols as the union of the sets of symbols
+     for the nodes. Since our symbol sets are represented as lists, we
+     can form the union by using the append procedure we defined in
+     section 2.2.1:
+
+     #+BEGIN_SRC scheme
+     (define (make-code-tree left right)
+      (list left
+            right
+            (append (symbols left) (symbols right))
+            (+ (weight left) (weight right))))
+     #+END_SRC
+
+     If we make a tree in this way, we have the following selectors:
+
+     #+BEGIN_SRC scheme
+     (define (left-branch tree) (car tree))
+     (define (right-branch tree) (cadr tree))
+     (define (symbols tree)
+      (if (leaf? tree)
+          (list (symbol-leaf tree))
+          (caddr tree)))
+     (define (weight tree)
+      (if (leaf? tree)
+          (weight-leaf tree)
+          (cadddr tree)))
+     #+END_SRC
+     
+     The procedures symbols and weight must do something slightly
+     different depending on whether they are called with a leaf or a
+     general tree. These are simple examples of _generic procedures_
+     (procedures that can handle more than one kind of data), which we
+     will have much more to say about in sections 2.4 and 2.5.
+
+***** The decoding procedure
+      The following procedure implements the decoding algorithm. It
+      takes as arguments a list of zeros and ones, together with a
+      Huffman tree:
+
+      #+BEGIN_SRC scheme
+      (define (decode bits tree)
+       (define (decode-1 bits current-branch)
+        (if (null? bits)
+            '()
+            (let ((next-branch
+                   (choose-branch (car bits) current-branch)))
+             (if (leaf? next-branch)
+                 (cons (symbol-leaf next-branch)
+                       (decode-1 (cdr bits) tree))
+                 (decode-1 (cdr bits) next-branch)))))
+        (decode-1 bits tree))
+      (define (choose-branch bit branch)
+       (cond ((= bit 0) (left-branch branch))
+             ((= bit 1) (right-branch branch))
+             (else (error "bad bit -- CHOOSE-BRANCH" bit))))
+      #+END_SRC
+
+      The procedure decode-1 takes two arguments: the list of
+      remaining bits and the current position in the tree. It keeps
+      moving "down" the tree, choosing a left or right branch
+      according to whether the next bit in the list is a zero or a
+      one. (This is done with the procedure choose-branch.) When it
+      reaches a leaf, it returns the symbol at that leaf as the next
+      symbol in the message by consing it onto the result of decoding
+      the rest of the message, starting at the root of the tree. Note
+      the error check in the final clause of choose-branch, which
+      complains if the procedure finds something other than a zero or
+      a one in the input data.
+
+***** Sets of weighted elements
+
+      In our representation of trees, each non-leaf node contains a
+      set of symbols, which we have represented as a simple
+      list. However, the tree-generating algorithm discussed above
+      requires that we also work with sets of leaves and trees,
+      successively merging the two smallest items. Since we will be
+      required to repreatedly find the smallest item in a set, it is
+      convenient to sue an ordered representation of this kind of
+      set. 
+
+      We will represent a set of leaves and trees as a list of
+      elements, arranged in increasing order of weight. The following
+      adjoin-set procedure for constructing sets is similar to teh one
+      described in exercise 2.61; however, items are compared by their
+      weights, and the element being added to the set is never already
+      in it.
+
+      #+BEGIN_SRC scheme
+      (define (adjoin-set x set)
+       (cond ((null? set) (list x))
+             ((< (weight x) (weight (car set))) (cons x set))
+             (else (cons (car set)
+                         (adjoin-set x (cdr set)))))) 
+      #+END_SRC
+
+      The following procedure takes a list of symbol-frequency pairs
+      such as ((A 4) (B 2) (C 1) (D 1)) and constructs an initial
+      ordered set of leaves, ready to be merged according to the
+      Huffman algorithm:
+
+      #+BEGIN_SRC scheme
+      (define (make-leaf-set pairs)
+       (if (null? pairs)
+           '()
+           (let ((pair (car pairs)))
+            (adjoin-set (make-leaf (car pair) ; symbol
+                                   (cadr pair)) ;frequency
+                        (make-leaf-set (cdr pairs))))))
+      #+END_SRC
+
+      - Exercise 2.67. Define an encoding tree and a sample message:
+
+	#+BEGIN_SRC scheme
+        (define sample-tree
+         (make-code-tree (make-leaf 'A 4)
+                         (make-code-tree
+                          (make-leaf 'B 2)
+                          (make-code-tree (make-leaf 'D 1)
+                                          (make-leaf 'C 1)))))
+        (define sample-message '(0 1 1 0 0 1 0 1 0 1 1 1 0))
+
+	#+END_SRC
+
+	Use the decode procedure to decode the message, and give the
+        result.
+
+	#+BEGIN_SRC scheme
+        (decode sample-message sample-tree)
+        => (a d a b b c a)
+	#+END_SRC
+
+      - Exercise 2.68. The encode procedure takes as arguments a
+        message and a tree and produces the list of bits that gives
+        the encoded message.
+
+	#+BEGIN_SRC scheme
+        (define (encode message tree)
+         (if (null? message)
+             '()
+             (append (encode-symbol (car message) tree)
+                     (encode (cdr message) tree))))
+	#+END_SRC
+
+	encode-symbol is a procedure, which you must write, that
+        returns the list of bits that encodes a given symbol according
+        to a given tree. You should design encode-symbol so that it
+        signals an error if the symbol is not in the tree at all. Test
+        your procedure by encoding the result you obtained in exercise
+        2.67 with the sample tree and seeing whether it is the same as
+        the original sample message.
+
+	#+BEGIN_SRC scheme
+        (define (encode-symbol sym tree)
+         (define (contains? x listofx)
+          (cond
+           ((null? listofx) false)
+           ((eq? x (car listofx)) true)
+           (else (contains? x (cdr listofx)))))
+
+         (cond
+          ((leaf? tree) '())
+          (else 
+           (let
+            ((left-node (left-branch tree))
+             (right-node (right-branch tree)))
+            (cond
+             ((contains? sym (symbols left-node))
+              (cons 0 (encode-symbol sym left-node)))
+             ((contains? sym (symbols right-node))
+              (cons 1 (encode-symbol sym right-node))))))))
+	#+END_SRC
+
+	Second write:
+
+ 	#+BEGIN_SRC scheme
+        (define (encode-symbol sym tree)
+         (define (contains? x listofx)
+          (cond
+           ((null? listofx) false)
+           (else (or (eq? x (car listofx))
+                     (contains? x (cdr listofx))))))
+         (cond
+          ((leaf? tree) '())
+          ((contains? sym (symbols (left-branch tree)))
+           (cons 0 (encode-symbol sym (left-branch tree))))
+          ((contains? sym (symbols (right-branch tree)))
+           (cons 1 (encode-symbol sym (right-branch tree))))
+          (else
+           (error "unknown symbol -- ENCODE-SYMBOL" symbol))))
+	#+END_SRC
+
+      - Exercise 2.69. The following procedure takes as its argument a
+        list of symbol-frequency pairs (where no symbol appears in
+        more than one pair) and generates a Huffman encoding tree
+        according to the Huffman algorithm.
+
+	#+BEGIN_SRC scheme
+        (define (generate-huffman-tree pairs)
+         (successive-merge (make-leaf-set pairs)))
+	#+END_SRC
+
+	Make-leaf-set is the procedure given above that transforms the
+        list of pairs into an ordered set of leaves. Successive-merge
+        is the procedure you must write, using make-code-tree to
+        successively merge the smallest-weight elements of the set
+        until there is only one element left, which is the desired
+        Huffman tree. (This procedure is slightly tricky, but not
+        really complicated. If you find yourself designing a complex
+        procedure, then you are almost certainly doing something
+        wrong. You can take significant advantage of the fact that we
+        are using an ordered set representation.)
+
+	#+BEGIN_SRC scheme
+        (define (successive-merge set-of-leaves)
+         (define (merge-iter theset)
+          (cond
+           ((null? (cdr theset)) (car theset))
+           (else 
+              (merge-iter (adjoin-set (make-code-tree
+                            (car theset)
+                            (cadr theset))
+                           (cddr theset))))))
+         (merge-iter set-of-leaves))
+
+	#+END_SRC
+
+      - Exercise 2.70. The following eight-symbol alphabet with
+        associated relative frequencies was designed to efficiently
+        encode the lyrics of 1950s rock songs. (Note that the "symbol"
+        of an "alphabet" need not be individual letters.)
+
+	A     2  NA      16
+        BOOM  1  SHA      3
+        GET   2  YIP      9
+        JOB   2  WAH      1
+
+	Use generate-huffman-tree (exercise 2.69) to generate a
+        corresponding Huffman tree, and use encode (exercise 2.68) to
+        encode the following message:
+
+	Get a job
+
+	Sha na na na na na na na na
+
+	Get a job
+
+	Sha na na na na na na na na
+
+	Wah yip yip yip yip yip yip yip yip yip
+
+	Sha boom
+
+	How many bits are required for the encoding? What is the
+        smallest number of bits that would be needed to encode this
+        song if we used a fixed-length code for the eight-symbol
+        alphabet?
+	
+	#+BEGIN_SRC scheme
+        (define fifties-song-tree (generate-huffman-tree
+         '((a 2)
+           (boom 1)
+           (get 2)
+           (job 2)
+           (na 16)
+           (sha 3)
+           (yip 9)
+           (wah 1))))
+        (define message
+         '(get a job
+           sha na na na na na na na na
+           get a job
+           sha na na na na na na na na
+           wah yip yip yip yip yip yip yip yip yip
+           sha boom))
+        (encode message fifties-song-tree)
+        => (1 1 1 1 1 1 1 0 0 1 1 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 0 0 1 1 1 1 0 1 1 1 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 1 1 0 1 1 0 1 1)
+        (length (encode message fifties-song-tree))
+        84
+	#+END_SRC
+
+	If we used a fixed-length code we'd need three bits for eight
+        different symbol values, three times the message length, 36,
+        is 108. So we saved a fair amount of space, on the order of 20%.
+
+      - Exercise 2.71 Suppose we have a Huffman tree for an alphabet
+        of _n_ symbols, and that the relative frequencies of the
+        symbols are 1, 2, 4, ..., 2^n-1. Sketch a tree for n = 5, n
+        = 10. IN such a tree (for general n) how many bits are
+        required to encode the most frequent symbol? the least
+        frequent symbol?
+
+	For the most frequent symbol, always 1 bit. For the least
+        frequent, n - 1 bits are required.
+
+      - Exercise 2.72 Consider the encoding of the procedure that you
+        designed in exercise 2.68. What is the order of growth in the
+        number of steps needed to encode a symbol? Be sure to include
+        the number of steps needed to search the symbol list at each
+        node encountered. To answer this question in general is
+        difficult. Consider the special case where the relative
+        frequencies of the _n_ symbols are as described in exercise
+        2.71, and give the order of growth (as a function of n) of the
+        number of steps needed to encode the most frequent and least
+        frequent symbols in the alphabet.  
+
+	In the worst case, we're accessing one of the least frequent
+        two symbols and searching every node set and going all the way
+        down. You'd have something like
+
+	((n - 1) + (n - 2) + (n - 3) + ... 1) with _n_ terms.
+
+	This is
+
+	(n / 2) * (n + 1)
+        n ^2 / 2 + n /2, or n^2.
+
+	However, in the best case it's O(n) since all symbols are in
+        the set, we search the set, go left, and have the
+        symbol. Actually, since we know the set is sorted from least
+        to greatest we always know it's going to take n. It is much
+        more likely that we are going to do a quick lookup than a
+        small one. The first three or four symbols take up the
+        majority of the symbols and if we do three or four O(n)
+        lookups that's O(4 * n),  or O(n). So average runtime is O(n)
+        and worse case is O(n^2).
+
+** 2.4. Multiple Representations for Abstract Data
+
+   We have introduced data abstraction, a methodology for structuring
+   systems in such a way that much of a program can be specified
+   independent of the choices involved in implementing the data
+   objects that the program manipulates. For example, we saw in
+   section 2.1.1 how to separate the task of designing a program that
+   uses rational numbers from the task of implementing rational
+   numbers (make-rat,numer,denom) -- that isolates the way rational
+   numbers are used from their underlying representation in terms of
+   list structure. A similar abstraction barrier isolates the details
+   of the procedures that perform rational arithmetic (add-rat,
+   sub-rat, mul-rat, and div-rat) from the "higher level" procedures
+   that use rational numbers. The resulting program has the structure
+   shown in figure 2.1.
+
+   These data-abstraction barriers are powerful tools for controlling
+   complexity. By isolating the underlying representations of data
+   objects, we can divide the task of designing a large program into
+   smaller tasks that can be performed separately. But this kind of
+   data abstraction is not yet powerful enough, because it may not
+   always make sense to speak of "the underlying representation" for a
+   data object.
+
+   For one thing, there might be more than one useful representation
+   for a data object, and we might like to design systems that can
+   deal with multiple representations. To take a simple example,
+   complex numbers may be represented in two almost equivalent ways:
+   in rectangular form (real and imaginary parts) and in polar form
+   (magnitude and angle). Sometimes rectangular form is more
+   appropriate and sometimes polar form is more appropriate. Indeed,
+   it is perfectly plausible to imagine a system in which complex
+   numbers are represented in both ways, and in which the procedures
+   for manipulating complex numbers work with either representation.
+
+   More importantly, programming systems are often designed by many
+   people working over extended periods of time, subject to
+   requirements that change over time. In such an environment, it is
+   simply not possible for everyone to agree in advance on choices of
+   data representation. So in addition to the data-abstraction
+   barriers that isolate representation from use, we need abstraction
+   barriers that isolate different design choices from each other and
+   permit different choices to coexist in a single
+   program. Furthermore, since large programs are often created by
+   combining pre-existing modules that were designed in isolation, we
+   need conventions that permit programmers to incorporate modules
+   into larger systems _additively_, that is, without having to
+   redesign or reimplement these modules.
+
+   In this section, we will learn how to cope with data that may be
+   represented in different ways by different parts of a program. That
+   requires constructing _generic procedures_ -- procedures that can
+   operate on data that may be represented in more than one way. Our
+   main technique for building generic procedures will be to work in
+   terms of data objects that have _type tags_, that is, data objects
+   that include explicit information about how they are to be
+   processed. We will also discuss _data-directed_ programming, a
+   powerful and convenient implementation strategy for additively
+   assembling systems with generic operations.
+
+   We begin with the simple complex-number example. We will see how
+   type tags and data-directed style enable us to design separate
+   rectangular and polar representations for complex numbers while
+   maintaining the notion of an abstract "complex-number" data
+   object. We will accomplish this by defining arithmetic procedures
+   for complex numbers (add-complex, sub-complex, mul-complex, and
+   div-complex) in terms of generic selectors that access parts of a
+   complex number independent of how the number is represented. The
+   resulting complex-number system, as shown in figure 2.19, contains
+   two different kinds of abstraction barriers. The "horizontal"
+   abstraction barriers play the same role as the ones in figure
+   2.1. They isolate "higher-level" operations from "lower-level"
+   representations. 
+
+   In section 2.5 we will show how to use type tags and data-directed
+   style to develop a generic arithmetic package. This provides
+   procedures (add, mul, and so on) that can be used to manipulate all
+   sorts of "numbers" and can easily extend when a new kind of number
+   is needed. IN section 2.5.3, we will show how to use generic
+   arithmetic in a system that performs symbolic algebra.
+
+*** 2.5.1 Representations for Complex Numbers
+
+    We will develop a system that performs arithmetic operations on
+    complex numbers as a simple but unrealistic example of a program
+    that uses generic operations. We begin by discussing two plausible
+    representations for complex numbers as ordered pairs: rectangular
+    form (real part and imaginary part) and polar form (magnitude and
+    angle). Section 2.4.2 will show how both representations can be
+    made to coexist in a single system through the use of type tags
+    and generic operations.
+
+    Like rational numbers, complex numbers are naturally represented
+    as ordered pairs. The set of complex numbers can be thought of as
+    a two-dimensional space with two orthogonal axes, the "real" axis
+    and the "imaginary" axis. (See figure 2.20.) From this point of
+    view, the complex number z = x + iy (where i^2 = -1) can be
+    thought of as the point in the plane whose real coordinate is x
+    and whose imaginary coordinate is y. Addition of complex numbers
+    reduces in this representation to addition of coordinates:
+
+    Real-part(z1 + z2) = Real-part(z1) + Real-part(z2)
+    Imaginary-part(z1 + z2) = Imaginary-part(z1) + Imaginary-part(z2)
+
+    When multiplying complex numbers, it is more natural to think in
+    terms of representing a complex number in polar form, as a
+    magnitude and an angle (r and A in figure 2.20). The product of
+    two complex numbers is the vector obtained by stretching one
+    complex number by the length of the other and then rotating it
+    through the angle of the other:
+
+    Magnitude(z1 * z2) = Magnitude(z1) * Magnitude(z2)
+    Angle(z1 * z2) = Angle(z1) + Angle(z2)
+
+    Thus, there are two different representations for complex numbers,
+    which are appropriate for different operations. Yet, from the
+    viewpoint of someone writing a program that uses complex numbers,
+    the principle of data abstraction suggests that all the operations
+    for manipulating complex numbers should be available regardless of
+    which representation is used by the computer. For example, it is
+    often useful to be able to find the magnitude of a complex number
+    that is specified by rectangular coordinates. Similarly, it is
+    often useful to be able to determine the real part of a complex
+    number that is specified by polar coordinates.
+
+    To design such a system, we can follow the same data-based
+    abstraction strategy we followed in designing the rational-number
+    package in section 2.1.1. Assume that the operations on complex
+    numbers are implemented in terms of four selectors: real-part,
+    imag-part, magnitude, and angle. Also assume that we have two
+    procedures for constructing complex numbers: make-from-real-imag
+    returns a complex number with specified real and imaginary parts,
+    and make-from-mag-ang returns a complex number with specified
+    magnitude and angle. These procedures have the property that, for
+    any complex number z, both
+
+    #+BEGIN_SRC scheme
+    (make-from-real-imag (real-part z) (imag-part z))
+    #+END_SRC
+
+    and 
+
+    #+BEGIN_SRC scheme
+    (make-from-mag-ang (magnitude z) (angle z))
+    #+END_SRC
+
+    produce complex numbers that are equal to z.
+
+    Using these constructors and selectors, we can implement
+    arithmetic on complex numbers using the "abstract data" specified
+    by the constructors and selectors, just as we did for rational
+    numbers in section 2.1.1. As shown in the formulas above, we can
+    add and subtract complex numbers in terms of real and imaginary
+    parts while multiplying and dividing complex numbers in terms of
+    magnitudes and angles:
+
+    #+BEGIN_SRC scheme
+    (define (add-complex z1 z2)
+     (make-from-real-imag (+ (real-part z1) (real-part z2))
+                          (+ (imag-part z1) (imag-part z2))))
+    (define (sub-complex z1 z2)
+     (make-from-real-imag (- (real-part z1) (real-part z2))
+                          (- (imag-part z1) (imag-part z2))))
+    (define (mul-complex z1 z2)
+     (make-from-mag-ang (* (magnitude z1) (magnitude z2))
+                        (+ (angle z1) (angle z2))))
+    (define (div-complex z1 z2)
+     (make-from-mag-ang (/ (magnitude z1) (magnitude z2))
+                        (- (angle z1) (angle z2))))
+    #+END_SRC
+
+    To complete the complex-number package, we must choose a
+    representation and we must implement the constructors and
+    selectors in terms of primitive numbers and primitive list
+    structure. There are two obvious ways to do this: We can represent
+    a complex number in "rectangular form" as a pair (real part,
+    imaginary part) or in "polar form" as a pair (magnitude,
+    angle). Which shall we choose?
+
+    In order to make the different choices concrete, imagine that
+    there are two programmers, Ben Bitdiddle and Alyssa P. Hacker, who
+    are independently designing representations for the complex-number
+    system. Ben chooses to represent complex numbers in rectangular
+    form. With this choice, selecting the real and imaginary parts of
+    a complex number is straightforward, as is constructing a complex
+    number with given real and imaginary parts. To find the magnitude
+    and the angle, or to construct a complex number with a given
+    magnitude and angle, he uses the trigonometric relations
+
+    x = r cos A   r = sqrt(x^2 + y^2)
+    y = r sin A   A = arctan(y, x)
+
+    which relate the real and imaginary parts (x, y) to the magnitude
+    and the angle (r, A). Ben's representation is therefore given by
+    the following selectors and constructors:
+
+    #+BEGIN_SRC scheme
+    (define (real-part z) (car z))
+    (define (imag-part z) (cdr z))
+    (define (magnitude z)
+      (sqrt (+ (square (real-part z)) (square (imag-part z)))))
+    (define (angle z)
+      (atan (imag-part z) (real-part z)))
+    (define (make-from-real-imag x y) (cons x y))
+    (define (make-from-mag-ang r a)
+     (cons (* r (cos a)) (* r (sin a))))
+    #+END_SRC
+
+    Alyssa, in contrast, chooses to represent complex numbers in polar
+    form. For her, selecting the magnitude and angle is
+    straightforward, but she has to use trigonometric relations to
+    obtain the real and imaginary parts. Alyssa's representation is:
+
+    #+BEGIN_SRC scheme
+    (define (real-part z)
+     (* (magnitude z) (cos (angle z))))
+    (define (imag-part z)
+     (* (magnitude z) (sin (angle z))))
+    (define (magnitude z) (car z))
+    (define (angle z) (cdr z))
+    (define (make-from-real-imag x y)
+     (cons (sqrt (+ (square x) (square y)))
+           (atan y x)))
+    (define (make-from-mag-ang r a) (cons r a))
+    #+END_SRC
+
+    The discipline of data abstraction ensures that the same
+    implementation of add-complex, sub-complex, mul-complex and
+    div-complex will work with either Ben's representation or Alyssa's
+    representation.
+
+*** 2.4.2 Tagged data
+
+    One way to view data abstraction is as an application of the
+    "principle of least commitment." In implementing the
+    complex-number system in section 2.4.1, we can use either Ben's
+    rectangular representation or Alyssa's polar representation. The
+    abstraction barrier formed by the selectors and constructors
+    permits us to defer to the last possible moment the choice of a
+    concrete representation for our data objects and thus retain
+    maximum flexibility in our system design.
+
+    The principle of least commitment can be carried to even further
+    extremes. If we desire, we can maintain the ambiguity of
+    representation even _after_ we have designed the selectors and
+    constructors, and elect to use both Ben's representation _and_
+    Alyssa's representation. If both representations are included in a
+    single system, however, we will need some way to distinguish data
+    in polar form from data in rectangular form. Otherwise, if we were
+    asked, for instance, to find the magnitude of the pair (3,4), we
+    wouldn't know whether to answer 5 (interpreting the number in
+    rectangular form) or 3 (interpreting the number in polar form). A
+    straightforward way to accomplish this distinction is to include a
+    _type tag_ -- the symbol rectangular or polar -- as part of each
+    complex number. Then when we need to manipulate a complex number
+    we can use the tag to decide which selector to apply. 
+
+    In order to manipulate tagged data, we will assume that we have
+    the procedures type-tag and contents that extract from a data
+    object the tag and the actual contents (the polar or rectangular
+    coordinates, in the case of a complex number). We will also
+    postulate a procedure attach-tag that takes a tag and contents and
+    produces a tagged data object. A straightforward way to implement
+    this is to use ordinary list structure:
+
+    #+BEGIN_SRC scheme
+    (define (attach-tag type-tag contents)
+     (cons type-tag contents))
+    (define (type-tag datum)
+     (if (pair? datum)
+         (car datum)
+         (error "Bad tagged datum -- TYPE-TAG" datum)))
+    (define (contents datum)
+     (if (pair? datum)
+         (cdr datum)
+         (error "Bad tagged datum -- CONTENTS" datum)))
+    #+END_SRC
+    
+    Using these procedures, we can define predicates rectangular? and
+    polar?, which recognize polar and rectangular numbers,
+    respectively:
+
+    #+BEGIN_SRC scheme
+    (define (rectangular? z)
+     (eq? (type-tag z) 'rectangular))
+    (define (polar? z)
+     (eq? (type-tag z) 'polar))
+    #+END_SRC
+    
+    With type tags, Ben and Alyssa can now modify their code so that
+    their two different representations can coexist in the same
+    system. Whenever Ben constructs a complex number, he tags it as
+    rectangular. Whenever Alyssa constructs a complex number, she tags
+    it as polar. In addition, Ben and Alyssa must make sure that the
+    names of their procedures do not conflict. One way to do this is
+    for Ben to append the suffix rectangular to the name of each of
+    his representation procedures and for Alyssa to append polar to
+    the names of hers. Here is Ben's revised rectangular
+    representation from section 2.4.1:
+
+    #+BEGIN_SRC scheme
+    (define (real-part-rectangular z) (car z))
+    (define (imag-part-rectangular z) (cdr z))
+    (define (magnitude-rectangular z)
+     (sqrt (+ (square (real-part-rectangular z))
+              (square (imag-part-rectangular z)))))
+    (define (angle-rectangular z)
+     (atan (imag-part rectangular z)
+           (real-part-rectangular z)))
+    (define (make-from-real-imag-rectangular x y)
+     (attach-tag 'rectangular (cons x y)))
+    (define (make-from-mag-ang-rectangular r a)
+     (attach-tag 'rectangular
+                 (cons (* r (cos a)) (* r (sin a)))))
+    #+END_SRC
+
+    and here is Alyssa's revised polar representation:
+
+    #+BEGIN_SRC scheme
+    (define (real-part-polar z)
+     (* (magnitude-polar z) (cos (angle-polar z))))
+    (define (imag-part-polar z)
+     (* (magnitude-polar z) (sin (angle-polar z))))
+    (define (magnitude-polar z) (car z))
+    (define (angle-polar z) (cdr z))
+    (define (make-from-real-imag-polar x y)
+     (attach-tag 'polar
+                 (cons (sqrt (+ (square x) (square y)))
+                       (atan x y))))
+    (define (make-from-mag-ang-polar r a)
+     (attach-tag 'polar (cons r a)))
+    #+END_SRC
+    
+    Each generic selector is implemented as a procedure that checks
+    the tag of its argument and calls the appropriate procedure for
+    handling data of that type. For example, to obtain the real part
+    of a complex number, real-part examines the tag to determine
+    whether to use Ben's real-part-rectangular or Alyssa's
+    real-part-polar. In either case, we use contents to extract the
+    bare, untagged datum and send this to the rectangular or polar
+    procedure as required:
+
+    #+BEGIN_SRC scheme
+    (define (real-part z)
+     (cond ((rectangular? z)
+            (real-part-rectangular (contents z)))
+           ((polar? z)
+            (real-part-polar (contents z)))
+           (else (error "Unknown type -- REAL-PART" z))))
+
+    (define (imag-part z)
+     (cond ((rectangular? z)
+            (imag-part-rectangular (contents z)))
+           ((polar? z)
+            (imag-part-polar (contents z)))
+           (else (error "Unknown type -- IMAG-PART" z))))
+     
+    (define (magnitude z)
+     (cond ((rectangular? z) 
+            (magnitude-rectangular (contents z)))
+           ((polar? z)
+            (magnitude-polar (contents z)))
+           (else (error "Unknown type -- MAGNITUDE" z))))
+            
+    (define (angle z)
+     (cond ((rectangular? z)
+            (angle-rectangular (contents z)))
+           ((polar? z)
+            (angle-polar (contents z)))
+           (else (error "Unknown type -- ANGLE" z))))
+    #+END_SRC
+
+    To implement the complex-number arithmetic operations, we can use
+    the same procedures add-complex, sub-complex, mul-complex, and
+    div-complex from section 2.4.1, because the selectors they call
+    are generic, and so will work with either representation. For
+    example, the procedure add-complex is still
+
+    #+BEGIN_SRC scheme
+    (define (add-complex z1 z2)
+     (make-from-real-imag (+ (real-part z1) (real-part z2))
+                          (+ (imag-part z1) (imag-part z2))))
+    #+END_SRC
+
+    Finally, we must choose whether to construct complex numbers using
+    Ben's representation or Alyssa's representation. One reasonable
+    choice is to construct rectangular numbers whenever we have real
+    and imaginary parts and to construct polar numbers whenever we
+    have magnitudes and angles:
+
+    #+BEGIN_SRC scheme
+    (define (make-from-real-imag x y)
+     (make-from-real-imag-rectangular x y))
+    (define (make-from-mag-ang r a)
+     (make-from-mag-ang-polar r a))
+    #+END_SRC
+    
+    The resulting complex-number system has the structure shown in
+    figure 2.21. The system has been decomposed into three relatively
+    independent parts: the complex-number-arithmetic operations,
+    Alyssa's polar implementation, and Ben's rectangular
+    implementation. The polar and rectangular implementations could
+    have been written by Ben and Alyssa working separately, and both
+    of these can be used as underlying representations by a third
+    programmer implementing the complex-arithmetic procedures in terms
+    of the abstract constructor/selector interface.
+
+    Since each data object is tagged with its type, the selectors
+    operate on the data in a generic manner. That is, each selector is
+    defined to have a behavior that depends on the particular type of
+    data it is applied to. Notice that the general mechanism for
+    interfacing the separate representations: Within a given
+    representation implementation (say, Alyssa's polar package) a
+    complex number is an untyped pair (magnitude, angle). When a
+    generic selector operates on a number of polar type, it strips off
+    the tag and passes the contents on to Alyssa's code. Conversely,
+    when Alyssa constructs a number for general use, she tags it with
+    a type so that it can be appropriately recognized by the
+    higher-level procedures. This discipline of stripping off and
+    attaching tags as data objects are passed from level to level can
+    be an important organizational strategy, as we shall see in
+    section 2.5.
+
+*** 2.4.3 Data-Directed Programming and Additivity
+
+    The general strategy of checking the type of a datum and calling
+    an appropriate procedure is called _dispatching on type_. This is
+    a powerful strategy for obtaining modularity in system design. On
+    the other hand, implementing the dispatch as in section 2.4.2 has
+    two significant weaknesses. One weakness is that the generic
+    interface procedures (real-part, imag-part, magnitude, and angle)
+    must know about all the different representations. For instance,
+    suppose we wanted to incorporate a new representation for complex
+    numbers into our complex-number system. We would need to identify
+    this new representation with a type, and then add a clause to each
+    of the generic interface procedures to check for the new type and
+    apply the appropriate selector for that representation.
+
+    Another weakness of the technique is that even though the
+    individual representations can be designed separately, we must
+    guarantee that no two procedures in the entire system have the
+    same name. This is why Ben and Alyssa had to change the names of
+    their original procedures from section 2.4.1.
+
+    The issue underlying both of these weaknesses is that the
+    technique for implementing generic interfaces is not
+    _additive_. The person implementing the generic selector
+    procedures must modify those procedures each time a new
+    representation is installed, and the people interfacing the
+    individual representations must modify their code to avoid name
+    conflicts. In each of these cases, the changes that must be made
+    to the code are straightforward, but they must be made
+    nonetheless, and this is a source of inconvenience and error. This
+    is not much of a problem for the complex-number system as it
+    stands, but suppose there were not two but hundreds of different
+    representations for complex numbers. And suppose that there were
+    many generic selectors to be maintained in the abstract-data
+    interface. Suppose, in fact, that no one programmer knew all
+    the interface procedures or all the representations. The problem
+    is real and must be addressed in such programs as large-scale
+    data-base-management systems.
+
+    What we need is a means for modularizing the system design even
+    further. This is provided by the programming technique known as
+    _data-directed programming_. To understand how data-directed
+    programming works, begin with the observation that whenever we
+    deal with a set of generic operations that are common to a set of
+    different types we are, in effect, dealing with a two-dimensional
+    table that contains the possible operations on one axis and the
+    possible types on another axis. The entries in the table are the
+    procedures that implement each operation for each type of argument
+    presented. In the complex-number system developed in the previous
+    section, the correspondence between operation name, data type, and
+    actual procedure was spread out among the various conditional
+    clauses in the generic interface procedures. But the same
+    information could have been organized in a table, as shown in
+    figure 2.22.
+
+    Data-directed programming is the technique of designing programs
+    to work with such a table directly. Previously, we implemented the
+    mechanism that interfaces the complex-arithmetic code with the two
+    representation packages as a set of procedures that each perform
+    an explicit dispatch on type. Here we will implement the interface
+    as a single procedure that looks up the combination of the
+    operation name and the argument type in the table to find the
+    correct procedure to apply, and then applies it to the contents of
+    the argument. If we do this, then to add a new representation
+    package to the system we need not change any existing procedures;
+    we need only  add new entries to the table. 
+
+    To implement this plan, assume that we have two procedures, put
+    and get, for manipulating the operation-and-type table:
+
+    - (put <op> <type> <item>)
+      installs the <item> into the table, indexed by <op> and the <type>.
+    - (get <op> <type>)
+      looks up the <op>, <type> entry in the table and returns the
+      item found there. If no item is found, get returns false.
+
+      
+    For now, we can assume.
+
+
+      
+
       
