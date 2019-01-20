@@ -3,7 +3,7 @@
 (define (put op type item)
   (cond
    ((hash-table-exists? *op-table* op)
-    (has-table-set! (hash-table-ref *op-table* op) type item))
+    (hash-table-set! (hash-table-ref *op-table* op) type item))
    (else
     (begin
       (let ((new-table (make-hash-table)))
