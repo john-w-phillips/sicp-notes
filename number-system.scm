@@ -54,16 +54,24 @@
        (lambda (x y)(tag (mul-rat x y))))
   (put 'div '(rational rational)
        (lambda (x y) (tag (div-rat x y))))
+  (put 'numer '(rational) numer)
+  (put 'denom '(rational) denom)
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
   'done)
 
 (define (make-rational n d)
   ((get 'make 'rational) n d))
+(define (numer n)
+  (apply-generic 'numer n))
+(define (denom n)
+  (apply-generic 'denom n))
 
 (define (install-complex-package)
   (load "complex.scm")
-  ;; imported procedures from rectangular and polar packages
+  (install-polar-package)
+  (install-rectangular-package)
+  ;; imported procedur es from rectangular and polar packages
   (define (make-from-real-imag x y) 
     ((get 'make-from-real-imag 'rectangular) x y))
   (define (make-from-mag-ang r a)

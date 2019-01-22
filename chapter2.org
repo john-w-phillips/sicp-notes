@@ -6687,6 +6687,153 @@
     other: we could simply name them add, sub, mul and div in both
     packages.
 
+    - Exercise 2.77. Louis Reasoner tries to evaluate the expression
+      (magnitude z) where z is the object shown in figure 2.24. To his
+      surprise, instead of the answer 5 he getse an error message from
+      apply-generic, saying there is no method for the operation
+      magnitude on the types (complex). He shows this interaction to
+      Alyssa P. Hacker, who says "The problem is that the
+      complex-number selectors were never defined for complex numbers,
+      just for polar and rectangular numbers. All you have to do to
+      make this work is add the following to the complex package:"
+
+      #+BEGIN_SRC scheme
+      (put 'real-part '(complex) real-part)
+      (put 'imag-part '(complex) imag-part)
+      (put 'magnitude '(complex) magnitude)
+      (put 'angle '(complex) angle)
+      #+END_SRC
+
+      Describe in detail why this works. As an example, trace through
+      all the procedures called in evaluating the expression
+      (magnitude z) where z is the object shown in figure 2.24. In
+      particular, how many times is apply-generic invoked? What
+      procedure is dispatched to in each case?
+
+      This works because if z is the object shown in figure 2.24, it
+      has two type tags, 'complex and 'polar. The first tag pulled off
+      is 'complex, so the apply-generic procedure looks in the
+      operations table for an entry in {'(complex), 'magnitude}, and
+      there is not one. There is only one in {'(polar) 'magnitude}
+      because that's the only one we install in the complex
+      package. By adding another entry under {'(complex), 'magnitude}
+      we tell the table to use our already defined procedure
+      magnitude. What then happens is that apply-generic is actually
+      applied twice. 
+
+      #+BEGIN_SRC scheme
+      (magnitude (complex polar 3 . 4))
+      (apply-generic 'magnitude (complex polar 3. 4))
+      (let ((type-tags (map type-tag ((complex polar 3 . 4)))))
+
+       (let ((proc (get op type-tags)))
+        (apply proc (map contents args))))
+
+      (let ((type-tags (complex)))
+       (let ((proc (get 'magnitude type-tags)))
+        (apply proc (map contents ((complex polar 3 . 4))))))
+       
+    
+      (let ((proc magnitude))  ;; this magnitude is the one we installed earlier which actually is a recursive call to apply-generic.
+                               ;; this time the call is different though because we will take the contents
+                               ;; of z and return (polar 3 . 4) which is still tagged. This is why we
+                               ;; are calling apply-generic a second time.
+       (apply proc (map contents ((complex polar 3 . 4)))))
+    
+      (apply magnitude (map contents ((complex polar 3 . 4))))
+   
+      (apply magnitude ((polar 3 . 4)))
+      (magnitude (polar 3. 4))
+      (apply-generic 'magnitude (polar 3 . 4))
+      
+      (let ((type-tags (map type-tag ((polar 3 . 4)))))
+       (let ((proc (get 'magnitude type-tags)))
+        (apply proc (map contents ((polar 3 . 4))))))
+
+      (let ((type-tags (polar)))
+       (let ((proc (get 'magnitude type-tags)))
+        (apply proc (map contents ((polar 3 . 4))))))
+
+       (let ((proc (get 'magnitude (polar))))
+        (apply proc (map contents ((polar 3 . 4))))))
+
+       (let ((proc magnitude)) ;; from the internal definitions of the install-complex package procedure.
+        (apply proc (map contents ((polar 3 . 4)))))
+
+      (apply magnitude (map contents ((polar 3 . 4))))
+      (apply magnitude ((3 . 4)))
+      (magnitude (3 . 4))
+      (car (3 . 4))
+      3
+      #+END_SRC
+
+      apply-generic strips of the complex tag and looks in the table
+      for (complex), and finds it. It so happens that the procedure is
+      the same one we're calling, so we have a kind of indirect
+      recursion; the reduction step is that we stripped off the
+      (compelx) tag and now only have a (polar) tag. When we look in
+      the table again for the (polar) tag we find the actual procedure
+      that operates on the data.
+
+    - Exercise 2.78. The internal procedures in the scheme-number
+      package are essentially nothing more than calls to the primitive
+      procedures +, -, etc. It was not possible to use the primitives
+      of the language directly because our type-tag system requires
+      that each data object have a type attached to it. In fact,
+      however, all Lisp implementations do have a type system, which
+      they use internally. Primitive predicates such as symbol? and
+      number? determine whether data objects have particular
+      types. Modify the definitions of type-tag, contents, and
+      attach-tag from section 2.4.2 so that our generic system takes
+      advantage of Scheme's internal type system. That is to say, the
+      system should work as before except that ordinary numbers should
+      be represented simply as Scheme numbers rather than as pairs
+      whose car is the symbol scheme-number.
+
+      #+BEGIN_SRC scheme
+      (define (attach-tag tag datum)
+       (cond
+        ((eq? 'scheme-number tag) datum)
+        (else (cons tag datum))))
+
+      (define (type-tag datum)
+       (cond
+        ((number? datum) 'scheme-number)
+        (else (car datum))))
+
+      (define (contents datum)
+       (cond
+        ((number? datum) datum)
+        (else (cdr datum))))
+      #+END_SRC
+
+    - Exercise 2.79. Define a generic equality predicate equ? that
+      tests the equality of two numbers, and install it in the generic
+      arithmetic package. This operation should work for ordinary
+      numbers, rational numbers, and complex numbers.
+
+      #+BEGIN_SRC scheme
+      (define (install-equ)
+       (define (complex-equ? x y)
+        (and (= (real-part x) (real-part y))
+             (= (imag-part x) (imag-part y))))
+       (put 'equ? '(complex complex) complex-equ?)
+
+       (define (rational-equ? x y)
+        (and (= (numer x) (numer y))
+             (= (denom x) (denom y))))
+       (put 'equ? '(rational rational) rational-equ?)
+
+       (define (scheme-number-equ? x y)
+        (= x y))
+       (put 'equ? '(scheme-number scheme-number) scheme-number-equ?)
+       'done)
+      (define (equ? x y)
+       (apply-generic 'equ? x y))
+      #+END_SRC
+
+      
+    
     
 
     
