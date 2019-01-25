@@ -7632,8 +7632,20 @@
 
        (define (install-rational-package)
         ; ...
-        (put-projection 'real 'rational (lambda (x) 
-                                         (make-rational (floor x) 1))))
+        (define MAX-DIGITS 15)
+        (define (coerce-to-rational areal)
+         (define (coerce-to-rational-inner num denom digit-counter)
+          (cond
+           ((or (= digit-counter 0)
+                (= (floor num) num))
+            (make-rational (floor num) (floor denom)))
+           (else
+            (coerce-to-rational-inner (* num 10)  (* 10 denom) (- digit-counter 1)))))
+         (coerce-to-rational-inner areal 1 MAX-DIGITS))
+                
+            
+         
+        (put-projection 'real 'rational coerce-to-rational)
 
        (define (install-integer-package)
         ; ...
@@ -7644,7 +7656,7 @@
         ((get-projection (type-tag x)) x))
        (define (drop x)
         (cond
-         ((equ? (project x) (raise (project x)))
+         ((and (projectable? (type-tag x)) (equ? x (raise (project x))))
           (drop (project x)))
          (else x)))
 
@@ -7657,8 +7669,95 @@
          	  (let ((raised-list (raise-args op args)))
         	        (apply apply-generic (cons op raised-list)))))))
        #+END_SRC
+       
+       The implementations of all these had to be changed
+       considerably. This is now drop:
+
+       #+BEGIN_SRC scheme
+       (define (drop x)
+         (let ((x-tag (type-tag x)))
+           (cond
+            ((and (projectable? (type-tag x)) ((get 'equ? (list x-tag x-tag))
+       					(contents x) (contents (raise (project x)))))
+             (drop (project x)))
+            (else x))))
+       #+END_SRC
+
+       It was changed because equ? is defined as an apply-generic
+       alias. drop would work fine if I didn't put it in
+       apply-generic, but because I did, any call to equ? results in
+       infinite recursion, because the beginning of the drop procedure
+       calls itself transitively without ever actually evaluating a
+       condition. In general, the entire inheritance system, the more
+       integrated it became with the system, had to very carefully
+       avoid apply-generic procedures for this reason. 
+
+       This makes it so that apply-generic can really only be used
+       strictly by higher-level clients, and that it's layer in the
+       stratified design becomes pretty clearly higher than any
+       inheritance procedure, which wasn't at first apparent, at least
+       to me. 
+       
+       The next problem with our apply-generic procedure as modified
+       is that any procedure that returns values outside the type
+       hierarchy -- like equ? must not be dropped. This led to a
+       modification:
+
+       #+BEGIN_SRC scheme
+       (define (apply-generic op . args)
+         (let ((type-tags (map type-tag args)))
+           (let ((proc (get op type-tags)))
+             (if proc 
+       	         (let ((val (apply proc (map contents args))))
+       	          (if (type-in-system? val)
+       		      (drop val)
+       		      val))
+       	         (let ((raised-list (raise-args op args)))
+       	          (apply apply-generic (cons op raised-list)))))))       
+       (define (type-in-system? datum)
+         (cond
+          ((or
+            (number? datum)
+            (and (pair? datum)
+       	         (not (false? (memq (car datum) (get-type-tower))))))
+           true)
+          (else
+           false)))
+       #+END_SRC
+
+       which only drops values that are in the type system. Finally, I
+       also had to change the definition of raise, which had been an
+       apply-generic procedure. Finally, I had to change raise, which
+       had been defined as a apply-generic procedure. It had more or
+       less gotten away with being defined as apply-generic since it
+       only asked for raises that were in the system. However, if it
+       asks for a raise not in the system, it will recursively call
+       itself.
+
+       #+BEGIN_SRC scheme
+       (define (raise x)
+        ((get-coercion (type-tag x) (get-parent (type-tag x))) x))
+       #+END_SRC
+
+       With the previous definition, if you asked for a nonexistent
+       procedure to apply, apply-generic would hang and blow the
+       recursion limit. The final draft works.
+
+
+     - Exercise 2.86: Suppose we want to handle complex numbers whose
+       real parts, imaginary parts, magnitudes, and angles can be
+       either ordinary numbers, rational numbers, or other numbers we
+       might wish to add to the system. Describe and implement the
+       changes to the system needed to accomodate this. You will have
+       to define operations such as sine and cosine that are generic
+       over ordinary numbers and rational numbers.
+
+       You need to replace all the operations on the numbers like
+       +, -, /, with add, sub, and div. Then define cosine, sine, atan
+       on those numbers.  
 
        
+
 
        
 

@@ -41,8 +41,19 @@
       (cons (/ n g) (/ d g))))
   (define (=zero-rational? x)
     (= 0 (numer x)))
-  (put-projection 'real (lambda (x) 
-			  (make-rat (floor x) 1)))
+  (define MAX-DIGITS 15)
+  (define (coerce-to-rational areal)
+    (define (coerce-to-rational-inner num denom digit-counter)
+      (cond
+       ((or (= digit-counter 0)
+	    (= (floor num) num))
+	(make-rational (inexact->exact (floor num)) (inexact->exact (floor denom))))
+       (else
+	(coerce-to-rational-inner (* num 10)  (* 10 denom) (- digit-counter 1)))))
+    (coerce-to-rational-inner areal 1 MAX-DIGITS))
+  
+  (put-projection 'real coerce-to-rational)
+
   (define (add-rat x y)
     (make-rat (+ (* (numer x) (denom y))
 		 (* (numer y) (denom x)))
@@ -75,12 +86,12 @@
        (lambda (x y) (tag (div-rat x y))))
   (put 'numer '(rational) numer)
   (put 'denom '(rational) denom)
-  (put-raise 'rational 'real
-       (lambda (x) (make-real (* 1.0 (exact->inexact (/ (numer x) (denom x)))))))
+
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
   'done)
-
+(put-raise 'rational 'real
+	   (lambda (x) (make-real (* 1.0 (exact->inexact (/ (numer x) (denom x)))))))
 (define (make-rational n d)
   ((get 'make 'rational) n d))
 (define (numer n)
@@ -91,7 +102,7 @@
 (define (install-real-package)
   (define (tag x)
     (attach-tag 'real x))
-  (put-projection 'complex (lambda (x) (real-part x)))
+  (put-projection 'complex (lambda (x) (* 1.0 (real-part x))))
   (put '=zero? '(real) (lambda (x) (= x 0)))
   (put 'add '(real real)
        (lambda (x y) (tag (+ x y))))

@@ -3,11 +3,17 @@
 (define *inheritance-graph* '())
 (define *projection-table* (make-hash-table))
 
+(define (projectable? x)
+  (not (false? (get-projection x))))
+
 (define (drop x)
-  (cond
-   ((equ? (project x) (raise (project x)))
-    (drop (project x)))
-   (else x)))
+  (let ((x-tag (type-tag x)))
+    (cond
+     ((and (projectable? (type-tag x)) ((get 'equ? (list x-tag x-tag))
+					(contents x) (contents (raise (project x)))))
+      (drop (project x)))
+     (else x))))
+
   
 (define (put op type item)
   (cond
@@ -62,15 +68,29 @@
 (define (put-inheritance t1 t2)
   (set! *inheritance-graph* (cons (list t1 t2) *inheritance-graph*)))
 
+(define (get-parent t1)
+  (define (search-list inlist)
+    (cond
+     ((null? inlist) #f)
+     ((eq? (caar inlist) t1)
+      (cadar inlist))
+     (else
+      (search-list (cdr inlist)))))
+  (search-list *inheritance-graph*))
+
 (define (apply-generic op . args)
   (let ((type-tags (map type-tag args)))
     (let ((proc (get op type-tags)))
       (if proc 
-	  (apply proc (map contents args))
+	  (let ((val (apply proc (map contents args))))
+	    (if (type-in-system? val)
+		(drop val)
+		val))
 	  (let ((raised-list (raise-args op args)))
 	    (apply apply-generic (cons op raised-list)))))))
 
-(define (raise x) (apply-generic 'raise x))
+(define (raise x)
+  ((get-coercion (type-tag x) (get-parent (type-tag x))) x))
 
 (define (raise-args op args)
   (cond
@@ -210,3 +230,13 @@
   (cond
    ((number? datum) datum)
    (else (cdr datum))))
+
+(define (type-in-system? datum)
+  (cond
+   ((or
+     (number? datum)
+     (and (pair? datum)
+	  (not (false? (memq (car datum) (get-type-tower))))))
+    true)
+   (else
+    false)))
