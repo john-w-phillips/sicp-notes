@@ -6832,9 +6832,747 @@
        (apply-generic 'equ? x y))
       #+END_SRC
 
+      This was my original attempt but you run into a problem. numer
+      and denom are not defined. If you define them by putting them
+      into the table -- (put 'numer '(rational) numer) -- inside the
+      install-rational package, you have problems because the tag gets
+      stripped in apply-generic. So, if you have a separate package
+      using the numer defined outside of the installrational package
+      procedure referencing the table, this numer expects there to be
+      a tag to strip. There will not be, it's a number. It looks in
+      the table for a number and can't find it. SO you have an
+      error. You need to use the internally-defined numer or retag the
+      data. I went with splitting up the equ? procedure into the
+      separate packages.
+
+      #+BEGIN_SRC scheme
+      (define (install-rational-package)
+        ;; ...
+        (define (rational-equ? x y)
+         (and (= (numer x) (numer y))
+              (= (denom x) (denom y))))
+        (put 'equ? '(rational rational) rational-equ?)
+        ;; ...)
+      (define (install-scheme-number-package)
+        ;; ...
+       (define (scheme-number-equ? x y)
+        (= x y))
+       (put 'equ? '(scheme-number scheme-number) scheme-number-equ?)
+        ;; ....)
+      (define (install-complex-package)
+         ;; ...
+       (define (complex-equ? x y)
+        (and (= (real-part x) (real-part y))
+             (= (imag-part x) (imag-part y))))
+       (put 'equ? '(complex complex) complex-equ?)
+         ;; ...
+        ) 
+      (define (equ? x y)
+       (apply-generic 'equ? x y))
+      #+END_SRC
       
-    
-    
+      This is somewhat inconvenient because if we want to add a new
+      generic operation, we have to go and edit all types
+      separately. There is no way for a developer to add equ? to the
+      system additively.
 
-    
+    - Exercise 2.80. Define a generic predicate =zero? that tests if
+      its argument is zero, and install it in the generic arithmetic
+      package. This operation should work for ordinary numbers,
+      rational numbers, and complex numbers.
 
+      #+BEGIN_SRC scheme
+      (define (install-scheme-number-package)
+       (put '=zero? '(scheme-number) (lambda (x) (= x 0)))
+      )
+
+      (define (install-complex-package)
+       (define (=zero-complex? x)
+        (and (= 0 (real-part x)) (= 0 (imag-part x))))
+       (put '=zero? '(complex) =zero-complex?)
+       )
+
+      (define (install-rational-package)
+       (define (=zero-rational? x)
+        (= 0 (numer x)))
+       (put '=zero? '(rational) =zero-rational?)
+       )
+      #+END_SRC
+
+*** 2.5.2 Combining Data of Different Types
+
+    We have seen how to define a unified arithmetic system that
+    encompasses ordinary numbers, complex numbers, rational numbers,
+    and any other type of number we might decide to invent, but we
+    have ignored an important issue. The operations we have defined so
+    far treat the different data types as being completely
+    independent. Thus, there are separate packages for adding, say,
+    two ordinary numbers, or two complex numbers. What we have not yet
+    considered is the fact that it is meaningful to define operations
+    that cross type boundaries, such as the addition of a complex
+    number to an ordinary number. We have gone to great pains to
+    introduce barriers between parts of our programs so that they can
+    be developed and understood separately. We would like to introduce
+    the cross-type operations in some carefully controlled way, so
+    that we can support them without seriously violating our module
+    boundaries.
+
+    One way to handle cross-type operations is to design a different
+    procedure for each possible combination of types for which the
+    operation is valid. For example, we could extend the
+    complex-number package sot hat it provides a procedure for adding
+    complex numbers to ordinary numbers and installs this in the table
+    using the tag (complex scheme-number):
+
+    #+BEGIN_SRC scheme
+    (define (add-complex-to-schemenum z x)
+     (make-from-real-imag (+ (real-part z) x)
+                          (imag-part z))
+     (put 'add '(complex scheme-number)
+          (lambda (z x) (tag (add-complex-to-schemenum z x)))))
+    #+END_SRC
+
+    This technique works, but it is cumbersome. With such a system,
+    the cost of introducing a new type is not just the construction of
+    the package of procedures for that type but also the construction
+    and installation of the procedures that implement the cross-type
+    operations. This can easily be much more code than is needed to
+    define the operations on the type itself. The method also
+    undermines our ability to combine separate packages additively, or
+    at least to limit the extend to which the implementors of the
+    individual packages need to take account of other packages. For
+    instance, in the example above, it seems reasonable that handling
+    mixed operations on complex numbers and ordinary numbers should be
+    the responsibility of the complex-number package. Combining
+    rational numbers and complex numbers, however, might be done by
+    the complex package, by the rational package, or by some third
+    package that uses operations extracted from these two
+    packages. Formulating coherent policies on the division of
+    responsibility among packages can be an overwhelming task in
+    designing systems with many packages and many cross-type
+    operations.
+
+**** Coercion
+     In the general situation of completely unrelated operations
+     acting on completely unrelated types, implementing explicit
+     cross-type operations, cumbersome though it may be, is the best
+     that one can hope for. Fortunately, we can usually do better by
+     taking advantage of additional structure that may be latent in
+     our type system. Often the different data types are not
+     completely independent, and there may be ways by which objects of
+     one type may be viewed as being another type. This process is
+     called _coercion_. For example, if we are asked to arithmetically
+     combine an ordinary number with a complex number, we can view the
+     ordinary number as a complex number whose imaginary part is
+     zero. This transforms the problem to that of combining two
+     complex numbers, which can be handled in the ordinary way by the
+     complex-arithmetic package. 
+
+     In general, we can implement this idea by designing coercion
+     procedure that transform an object of one type into an equivalent
+     object of another type. Here is a typical coercion procedure,
+     which transforms a given ordinary number to a complex number with
+     that real part and zero imaginary part:
+
+     #+BEGIN_SRC scheme
+     (define (scheme-number->complex n)
+      (make-complex-from-real-imag (contents n) 0))
+     #+END_SRC
+
+     We install these coercion procedures in a special coercion table,
+     indexed under the names of the two types:
+
+     #+BEGIN_SRC scheme
+     (put-coercion 'scheme-number 'complex scheme-number->complex)
+     #+END_SRC
+     
+     (We assume that there are put-coercion and get-coercion
+     procedures available for manipulating this table.) Generally some
+     of the slots in the table will be empty, because it is not
+     generally possible to coerce an arbitrary data object of each
+     type into all other types. For example, there is no way to coerce
+     an arbitrary complex number to an ordinary number, so there will
+     be no general complex->scheme-number procedure included in the
+     table. 
+
+     Once the coercion table has been set up, we can handle coercion
+     in a uniform manner by modifying the apply-generic procedure for
+     section 2.4.3. When asked to apply an operation, we first check
+     whether the operation is defined for the arguments' types, just
+     as before. If so, we dispatch to the procedure found in the
+     operation-and-type table. Otherwise, we try coercion. For
+     simplicity, we consider only the case where there are two
+     arguments. We check the coercion table to see if objects of the
+     first type can be coerced to the second type. If so, we coerce
+     the first argument and try the operation again. If objects of the
+     first type cannot in general be coerced to the second type, we
+     try the coercion the other way around to see if there is a way to
+     coerce the second argument to the type of the first
+     argument. Finally, if there is no known way to coerce either type
+     to the other type, we give up. Here is the procedure:
+
+     #+BEGIN_SRC scheme
+     (define (apply-generic op . args)
+      (let ((type-tags (map type-tag args)))
+       (let ((proc (get op type-tags)))
+        (if proc
+            (apply proc (map contents args))
+            (if (= (length args) 2)
+                (let ((type1 (car type-tags))
+                      (type2 (cadr type-tags))
+                      (a1 (car args))
+                      (a2 (cadr args)))
+                 (let ((t1->t2 (get-coercion type1 type2))
+                       (t2->t1 (get-coercion type2 type1)))
+                  (cond (t1->t2
+                         (apply-generic op (t1->t2 a1) a2))
+                        (t2->t1
+                         (apply-generic op a1 (t2->t1 a2)))
+                        (else 
+                         (error "No method for these types"
+                                (list op type-tags))))))
+                 (else "No method for these types"
+                       (list op type-tags)))))))
+     #+END_SRC
+
+     This coercion scheme has many advantages over the method of
+     defining explicit cross-type operations, as outlined
+     above. Although we still need to write coercion procedures to
+     relate the types (possible n^2 procedures for a system with n
+     types), we need to write only one procedure for each pair of
+     types rather than a different procedure for each collection of
+     types and each generic operation.  What we are counting on here
+     is the fact that the appropriate transformation between types
+     depends only on the types themselves, not on the operation to be
+     applied.
+
+     On the other hand, there may be applications for which our
+     coercion scheme is not general enough. Even when neither of the
+     objects to be combined can be converted to the type of the other
+     it may still be possible to perform the operation by converting
+     both objects to a third type. In order to deal with such
+     complexity and still preserve modularity in our programs, it is
+     usually necessary to build systems that take advantage of still
+     further structure in the relations among types, as we discuss
+     next.
+
+**** Hierarchies of types
+
+     The coercion scheme presented above relied on the existence of
+     natural relations between pairs of types. Often there is more
+     "global" structure in how the different types relate to each
+     other. For instance, suppose we are building a generic arithmetic
+     system to handle integers, rational numbers,real numbers, and
+     complex numbers. In such a system, it is quite natural to regard
+     an integer as a special kind of rational number, which is in turn
+     a special kind of real number, which is in turn a special kind of
+     complex number. What we actually have is a so-called _hierarchy
+     of types_, in which, for example, integers are a _subtype_ of
+     rational numbers (i.e., any operation that can be applied to a
+     rational number can be automatically be applied to an
+     integer). Conversely, we say that rational numbers form a
+     _supertype_ of integer. The particular hierarchy we have here is
+     of a very simple kind, in which each type has at most one
+     supertype and at most one subtype. Such a structure, called a
+     _tower_, is illustrated in figure 2.25.
+
+     complex 
+       ^
+     real
+       ^
+     rational
+       ^
+     integer
+
+     If we have a tower structure, then we can greatly simplify the
+     problem of adding a new type to the hierarchy, for we need only
+     specify how the new type is embedded in the next supertype above
+     it and how it is the supertype of the type below it. For example,
+     if we want to add an integer to a complex number, we need not
+     explicitly define a special coercion procedure
+     integer->complex. Instead, we define how an integer can be
+     transformed into a rational number, how a rational number is
+     transformed into a real number, and how a real number is
+     transformed into a complex number. We then allow the system to
+     transform the integer into a complex number through these steps
+     and then add the two complex numbers. 
+
+     We can redesign our apply-generic procedure in the following way:
+     For each type, we need to supply a raise procedure, which
+     "raises" objects of that type one level in the tower. Then when
+     the system is required to operate on objects of different types
+     it can successively raise the lower types until all the objects
+     are at the same level in the tower. Then when the system is
+     required to operate on objects of different types it can
+     successively raise the lower types until all the objects are at
+     teh same level in the tower. 
+
+     Another advantage of a tower is that we can easily implement the
+     notion that every type "inherits" all operations defined on a
+     supertype. For instance, if we do not supply a special procedure
+     for finding the real part of an integer, we should nevertheless
+     expect that real-part will be defined for integers by virtue of
+     the fact that integers are a subtype of complex numbers. In a
+     tower, we can arrange for this to happen in a uniform way by
+     modifying apply-generic. If the required operation is not
+     directly defined for the type of the object given, we raise the
+     object to its supertype and try again. We thus crawl up the
+     tower, transforming our argument as we go, until we either find a
+     level at which the desired operation can be performed or hit the
+     top (in which case we give up). Yet another advantage of a tower
+     over a more general hierarchy is that it gives us a simple way to
+     "lower" a data object to the simplest representation. For
+     example, if we add 2 + 3i to 4 - 3i, it would be nice to obtain
+     the answer as the integer 6 rather than as the complex number 6 +
+     0i. Exercise 2.85 discusses a way to implement such a lowering
+     operation. (The trick is that we need a general way to
+     distinguish those objects that can be lowered, such as 6 + 0i,
+     from those that cannot, such as 6 + 2i.)
+
+**** Inadequacies of hierarchies
+
+     If the data types in our system can be naturally arranged in a
+     tower, this greatly simplifies the problems of dealing with
+     generic operations on different types, as we have
+     seen. Unfortunately, this is usually not the case. Figure 2.26
+     illustrates a more complex arrangement of mixed types, this one
+     showing relations among different types of geometric figures. We
+     see that, ingeneral, a type may have more than one supertype. For
+     example, an isosceles right triangle may be regarded either as an
+     isoceles triangle or as a right triangle. This
+     multiple-supertypes issue is particularly thorny, since it means
+     that there is no unique way to "raise" a type in the
+     hierarchy. Finding teh "correct" supertype in which to apply an
+     operation to an object may involve considerable searching through
+     the entire type network on the part of a procedure such as
+     apply-generic. Since there generally are multiple subtypes for a
+     type, there is a similar problem in coercing a value "down" the
+     type hierarchy. Dealing with large numbers of interrelated types
+     while still preserving modularity in the design of large systems
+     is very difficult, and is an area of much current research.
+
+     - Exercise 2.81 Louis Reasoner has noticed that apply-generic may
+       try to coerce the arguments to each other's type even if they
+       already have the same type. Therefore, he reasons, we need to
+       put procedures in the coercion table to _coerce_ arguments of
+       each type to their own type. For example, in addition to the
+       scheme-number->complex coercion shown above, he would do:
+
+       #+BEGIN_SRC scheme
+       (define (scheme-number->scheme-number n) n)
+       (define (complex->complex z) z)
+       (put-coercion 'scheme-number
+                     'scheme-number
+                     scheme-number->scheme-number)
+       (put-coercion 'complex 'complex complex->complex)
+       #+END_SRC
+
+       a. With Louis' coercion procedures installed, what happens if
+       apply-generic is called with two arguments of type
+       scheme-number or two arguments of type complex for an operation
+       that is not found in the table for those types? For example,
+       assume that we've defined a generic exponentiation operation:
+
+       #+BEGIN_SRC scheme
+       (define (exp x y) (apply-generic 'exp x y))
+       #+END_SRC
+
+       and have put a procedure for exponentiation in the
+       scheme-number package but not in any other package:
+
+       #+BEGIN_SRC scheme
+       ;; following added to scheme-number package
+       (put 'exp '(scheme-number scheme-number)
+            (lambda (x y) (tag (expt x y))))
+            ; using primitive expt
+       #+END_SRC
+
+       What happens if we call exp with two complex numbers as
+       arguments?
+
+       If you call exp with two complex numbers, apply-generic will
+       not find a procedure with a matching signature. So it will then
+       try to coerce the types to each others' type. Because Louis
+       installed coercion procedures for complex->complex, it finds
+       these and applies them. Because complex->complex is the
+       identity function, apply-generic ends up calling itself with
+       the exact same arguments and loops forever. So Louis Reasoner
+       broke the system for undefined operations between objects of
+       the same type.
+
+       b. Is Louis correct that something had to be done about
+       coercion with arguments of the same type, or does apply-generic
+       work correctly as is?
+
+       apply-generic works correctly. It's true that it will try to
+       coerce a type to itself. But if no coercions are installed that
+       coerce a type to itself, it will give an error message -- the
+       exact same error message it gives if it can't look up a
+       procedure in the table.
+
+       c. Modify apply-generic so that it doesn't try coercion if the
+       two arguments have the same type.
+
+       #+BEGIN_SRC scheme
+       (define (apply-generic op . args)
+        (let ((type-tags (map type-tag args)))
+         (let ((proc (get op type-tags)))
+          (if proc
+              (apply proc (map contents args))
+              (cond
+               ((and (= (length args) 2)
+                     (not (eq? (car type-tags) (cadr type-tags))))
+                (let ((type1 (car type-tags))
+                      (type2 (cadr type-tags))
+                      (a1 (car args))
+                      (a2 (cadr args)))
+                 (let ((t1->t2 (get-coercion type1 type2))
+                       (t2->t1 (get-coercion type2 type1)))
+                  (cond
+                   (t1->t2
+                    (apply-generic op (t1->t2 a1) a2))
+                   (t2->t1
+                    (apply-generic op a1 (t2->t1 a2)))
+                   (else
+                    (error "No method for these types"
+                           (list op type-tags)))))))
+               (else
+                (error "No method for these types"
+                       (list op type-tags))))))))
+       #+END_SRC
+
+     - Exercise 2.82. Show how to generalize apply-generic to handle
+       coercion in the general case of multiple arguments. One
+       strategy is to attepmt to coerce all the arguments to the type
+       of the first argument, then to the type of the second argument,
+       and so on. Give an example of a situation where this strategy
+       (and likewise the two-argument version given above) is not
+       sufficiently general. (Hint: Consider the case where there are
+       some suitable mixed-type operations present in the table that
+       will not be tried.)
+
+       If you try to just coerce all arguments to the types of one of
+       the arguments, you miss a mixed-type operation. Say we have
+       arguments of types (complex real rational) and we have an operation
+       defined for (complex real real), and say we only have the
+       coercion rational->real in the table. If we only try to coerce
+       each type so that all types are the same, we miss this in the
+       lookup table. So we need to use a recursive procedure.
+
+       #+BEGIN_SRC scheme
+       (define (apply-generic op . args)
+        (let ((type-tags (map type-tag args)))
+         (let ((proc (get op type-tags)))
+          (if proc
+              (apply-proc (map contents args))
+              (find-matching-coercion op args)))))
+
+       ;; find-matching-coercion -- find a coercion that can be used on the arguments
+       ;; to get a procedure using get, and apply it to the coerced arguments.
+       (define (find-matching-coercion op args)
+        (let ((coercion-typetag-list (get-listof-possible-coercions (map type-tag args))))
+         (let ((found-types-and-proc (find-working-typetag-list op coercion-typetag-list args)))
+          (if found-types-and-proc
+           (apply-proc (car found-types-and-proc) (map contents (cdr found-types-and-proc)))
+           (error "Unable to find coercion -- FIND-MATCHING-COERCION" op args)))))
+
+       (define (get-listof-possible-coercions listof-typetags)
+        (cond
+         ((null? listof-typetags) '())
+         (else
+          (append
+           (map (lambda (x) (cons (car listof-typetags) x))
+                (get-listof-possible-coercions (cdr listof-typetags)))
+           (map (lambda (x) (cons x (cdr listof-typetags)))
+                (get-listof-coerced-types (car listof-typetags)))))))
+
+       (define (get-listof-coerced-types a-type)
+        (let ((coercions (get-coercions-list)))
+         (map (lambda (coercion) (cadr coercion)) 
+              (filter (lambda (coercion) (eq? (car coercion) a-type)) coercions))))
+
+       (define (find-working-typetag-list op listof-possible-typetags original-args-list)
+        (cond
+         ((null? listof-typetags) false)
+         (else
+          (let ((coercions (map (lambda (sym1 sym2) 
+                                 (if (eq? sym1 sym2)
+                                     false
+                                     (get-coercion sym1 sym2)))
+                                (map type-tag original-args-list)
+                                (car listof-possible-typetags))))
+           (let ((coerced (map (lambda (proc arg) (if proc (proc arg) arg))
+                               coercions
+                               original-args-list)))
+            (let ((proc (get op (car listof-possible-typetags))))
+             (if proc
+                 (cons proc coerced)
+                 (find-working-typetag-list (cdr listof-possible-typetags)
+                                            original-args-list))))))))
+       #+END_SRC
+
+       This procedure assumes the exisence of get-coercions which
+       returns a list of triples, the input symbol, the output symbol,
+       and a procedure. It returns all possible coercions of
+       anything. It's an exhaustive search of all possible coercions,
+       and is not efficient. But it allows us to apply a procedure
+       where, for example, perhaps all three arguments are of a
+       different type but they all three have a way to coerce to a
+       fourth type. This procedure will find that type and apply
+       it. The above is a first draft, and doesn't work. The final
+       draft:
+
+       #+BEGIN_SRC scheme
+       (define (apply-generic op . args)
+         (let ((type-tags (map type-tag args)))
+           (let ((proc (get op type-tags)))
+             (if proc
+       	  (apply proc (map contents args))
+       	  (find-matching-coercion op args)))))
+       
+       ;; find-matching-coercion -- find a coercion that can be used on the arguments
+       ;; to get a procedure using get, and apply it to the coerced arguments.
+       (define (find-matching-coercion op args)
+         (let ((coercion-typetag-list (get-listof-possible-coercions (map type-tag args))))
+           (let ((found-types-and-proc (find-working-typetag-list op coercion-typetag-list args)))
+             (if found-types-and-proc
+       	  (apply (car found-types-and-proc) (map contents (cdr found-types-and-proc)))
+       	  (error "Unable to find coercion -- FIND-MATCHING-COERCION" op args)))))
+       
+       (define (flatmap proc elems)
+         (cond
+          ((null? elems) '())
+          (else
+           (append (proc (car elems))
+       	    (flatmap proc (cdr elems))))))
+       
+       (define (get-listof-possible-coercions listof-typetags)
+         (cond
+          ((null? listof-typetags) '(()))
+          (else
+           (let ((rest-possible-coercions
+       	   (get-listof-possible-coercions (cdr listof-typetags)))
+       	  (coercion-destinations-for-this-type
+       	   (get-listof-coerced-types (car listof-typetags))))
+             (flatmap
+              (lambda (first)
+       	 (map
+       	  (lambda (rest) (cons first rest))
+       	  rest-possible-coercions))
+              (cons (car listof-typetags) coercion-destinations-for-this-type))))))
+       
+       (define (get-listof-coerced-types a-type)
+         (let ((coercions (get-coercions-list)))
+           (map (lambda (coercion) (cadr coercion)) 
+       	 (filter (lambda (coercion) (eq? (car coercion) a-type)) coercions))))
+       
+       (define (find-working-typetag-list op listof-possible-typetags original-args-list)
+         (cond
+          ((null? listof-possible-typetags) false)
+          (else
+           (let ((coercions (map (lambda (sym1 sym2) 
+       			    (if (eq? sym1 sym2)
+       				false
+       				(get-coercion sym1 sym2)))
+       			  (map type-tag original-args-list)
+       			  (car listof-possible-typetags))))
+             (let ((coerced (map (lambda (proc arg) (if proc (proc arg) arg))
+       			  coercions
+       			  original-args-list)))
+       	(let ((proc (get op (car listof-possible-typetags))))
+       	  (if proc
+       	      (cons proc coerced)
+       	      (find-working-typetag-list
+       	       op
+       	       (cdr listof-possible-typetags)
+       	       original-args-list))))))))
+       #+END_SRC
+       
+       The indenting doesn't work but polymorph.scm has the
+       results. This is an exhuastive solution. A potentially more
+       resource-sparing solution would be to only look for coercions
+       that involve at least some types that exist in the original
+       argument list. Finally, we could try to chain coercions
+       somehow. If we have an argument list (a b) and we have a
+       coercion a->c and c->b, we could try to apply it that way.
+
+     - Exercise 2.83. Suppose you are designing a generic arithmetic
+       system for dealing with the tower of types shown in figure
+       2.25: integer, rational, real, complex. For each type (except
+       complex), design a procedure that raises objects of that type
+       one level in the tower. Show how to install a generic raise
+       operation that will work for each type (except complex).
+
+       #+BEGIN_SRC scheme
+       (define (install-real)
+        ;; package-specific
+        (define (raise x)
+         (make-complex-from-real-imag x 0))
+        ;; interface to system
+        (put 'raise '(real) raise)
+        ;; .. other stuff
+        )
+
+       (define (install-rational)
+        ;; package-specific procedures
+        (define (raise x)
+         (/ (* 1.0 (numer x)) (denom x)))
+        ;; interfacing to the system
+        (put 'raise '(rational) raise)
+        ;; other stuff
+        )
+
+       (define (install-integer)
+        ;; package-specific procedures
+        (define (raise x)
+         (make-rational x 1))
+        ;; interfacing to the system
+        (put 'raise '(integer) raise))
+       (define (raise x) (apply-generic 'raise x))
+       #+END_SRC
+
+       here, raise is not a special procedure. It is sort of like a
+       coercion.
+
+     - Exercise 2.84. Using the raise operation of Exercise 2.83,
+       modify the apply-generic procedure so that it coerces its
+       arguments to have the same type by the method of successive
+       raising, as discussed in this section. You will need to devise
+       a way to test which of the two types is higher in the tower. Do
+       this in a manner that is "compatible" with the rest of the
+       system and will not lead to problems in adding new levels to
+       the tower.
+
+       #+BEGIN_SRC scheme
+       (define (apply-generic op . args)
+        (let ((type-tags (map type-tag args)))
+         (let ((proc (get op type-tags)))
+          (if proc 
+              (apply-proc (map contents args))
+              (let ((raised-list (raise-args op args)))
+               (apply apply-generic (cons op raised-list)))))))
+
+       (define (raise-args op args)
+        (let ((highest-type-tag (get-highest-type args)))
+         (map (lambda (arg) (raise-to highest-type-tag arg)))))
+
+       (define (get-highest-type objects)
+        (define (iter-highest highest objs)
+         (cond
+          ((null? objs) highest)
+          ((higher? highest (car objs))
+           (iter-highest highest (cdr objs)))
+          ((higher? (car objs) highest)
+           (iter-highest (car objs) (cdr objs)))
+          (else (error "No matching procedure for types" objects))))
+        (iter-highest (car objs) (cdr objs)))
+ 
+       (define (raise-to a-type-tag object)
+        (cond
+         ((eq? (type-tag object) a-type-tag)
+          object)
+         (else (raise-to a-type-tag (raise object)))))
+
+        (define (higher? type1 type2)
+         (let ((type-map (get-type-tower)))
+          (let ((type1-in-list (memq type1 type-map))
+                (type2-in-list (memq type2 type-map)))
+           (if (and type1-in-list type2-in-list)
+            (not (memq type1 type2-in-list))
+            false))))
+
+        (define (unsorted-pairs-to-chain listof-pairs)
+         (define (insertable? element resultlist)
+          (cond
+           ((null? resultlist) false)
+           ((eq? (cadr element) (caar resultlist))
+            true)
+           ((eq? (car element) (cadar resultlist))
+            true)
+           (else (insertable? element (cdr resultlist)))))
+
+         (define (insert-one-element elem listof-pairs)
+          (cond
+           ((null? listof-pairs) (list elem))
+           ((eq? (cadr elem) (caar listof-pairs))
+            (cons elem listof-pairs))
+           ((eq? (car elem) (cadar listof-pairs))
+            (cons (car listof-pairs) (cons elem (cdr listof-pairs))))
+           (else (cons (car listof-pairs) (insert-one-element elem (cdr listof-pairs))))))
+
+         (define (find-insertable listof-pairs result)
+          (cond
+           ((null? result) listof-pairs)
+           ((null? listof-pairs) 
+            (error "Can't insert any element from this into that -- FIND-INSERTABLE"
+                   listof-pairs result))
+           (else
+            (let ((first (car listof-pairs)))
+             (if (insertable? first result)
+                 listof-pairs
+                 (let ((insertable-list (find-insertable (cdr listof-pairs) result)))
+                  (cons (car insertable-list) 
+                   (cons first (cdr insertable-list)))))))))
+
+         (define (iter-pairs result listof-pairs)
+          (cond 
+           ((null? listof-pairs) result)
+           (else
+            (let ((insertable-first (find-insertable listof-pairs result)))
+             (iter-pairs (insert-one-element (car insertable-first) result)
+                         (cdr insertable-first))))))
+          (iter-pairs '() listof-pairs))
+
+        (define (sorted-pairs->list sorted-pairs)
+         (cond
+          ((null? sorted-pairs)
+           (error "Must have a list of at least length one -- SORTED-PAIRS"))
+          ((null? (cdr sorted-pairs))
+           (list (caar sorted-pairs) (cadar sorted-pairs)))
+          (else
+           (cons (caar sorted-pairs) (sorted-pairs->list (cdr sorted-pairs))))))
+
+        (define (make-table-into-tower listof-pairs)
+         (sorted-pairs->list (unsorted-pairs-to-chain listof-pairs)))
+
+        (define (get-type-tower)
+         (let ((raise-table 
+                (hash-table->alist (hash-table->ref *op-table* 'raise))))
+          (make-table-into-tower (map car raise-table)))
+       #+END_SRC
+       
+       This actually doesn't work, given the way we defined raise
+       earlier. I assume that the lists returned by getting raise
+       entries out of the procedure table are pairs, but they are only
+       lists of a single element, because we only define the type it
+       takes. So, in order for the apply procedure to work, we need to
+       treat raise procedures like coercions. In fact we could do
+       something like tie the coercion and raise table together. But
+       we do need for our program to be informed about the type tower
+       some way or another, and it should be informed by how people
+       define the raise procedures. If we just naively define a raise
+       procedure, that will not allow the 'interpreter' we've built to
+       raise things intelligently. A potential application is to 'test
+       raise' things, but this would be extremely inefficient.
+
+       I will define a procedure used like this:
+
+       #+BEGIN_SRC scheme
+       (put-raise '(x y) (lambda (x) ...))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define *inheritance-table* '())
+       (define (put-raise t1 t2 proc)
+         (put 'raise (list t1) proc)
+         (put-coercion t1 t2 proc)
+         (put-inheritance t1 t2))
+       (define (put-inheritance t1 t2)
+        (set! *inheritance-table* (cons (list t1 t2) *inheritance-table*)))
+       #+END_SRC
+
+       put-inheritance defines the start of a new system designed just
+       to keep track of who inherits from whom. We are only required
+       to redefine get-type-tower in this case.
+
+       

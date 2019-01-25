@@ -1,4 +1,4 @@
-(load "polymorph.scm")
+(load "polymorph-inheritance.scm")
 
 (define (add x y) (apply-generic 'add x y))
 (define (sub x y) (apply-generic 'sub x y))
@@ -6,27 +6,29 @@
 (define (div x y) (apply-generic 'div x y))
 (define (add4 a b c d) (apply-generic 'add4 a b c d))
 
-(define (install-scheme-number-package)
+(define (install-integer)
   (define (tag x)
-    (attach-tag 'scheme-number x))
-  (put '=zero? '(scheme-number) (lambda (x) (= x 0)))
-  (put 'add '(scheme-number scheme-number)
+    (attach-tag 'integer x))
+  (put '=zero? '(integer) (lambda (x) (= x 0)))
+  (put 'add '(integer integer)
        (lambda (x y) (tag (+ x y))))
-  (put 'sub '(scheme-number scheme-number)
+  (put 'sub '(integer integer)
        (lambda (x y) (tag (- x y))))
-  (put 'mul '(scheme-number scheme-number)
+  (put 'mul '(integer integer)
        (lambda (x y) (tag (* x y))))
-  (put 'div '(scheme-number scheme-number)
-       (lambda (x y) (tag (/ x y))))
-  (put 'make 'scheme-number
+  (put 'div '(integer integer)
+       (lambda (x y) (attach-tag 'rational (make-rational x y))))
+  (put 'make 'integer
        (lambda (x) (tag x)))
   (define (scheme-number-equ? x y)
     (= x y))
-  (put 'equ? '(scheme-number scheme-number) scheme-number-equ?)
+  (put 'equ? '(integer integer) scheme-number-equ?)
+  (put-raise 'integer 'rational (lambda (integer)
+				  (make-rational integer 1)))
   'done)
 
-(define (make-scheme-number n)
-  ((get 'make 'scheme-number) n))
+(define (make-integer n)
+  ((get 'make 'integer) n))
 
 (define (install-rational-package)
   ;; internal procedures
@@ -69,6 +71,8 @@
        (lambda (x y) (tag (div-rat x y))))
   (put 'numer '(rational) numer)
   (put 'denom '(rational) denom)
+  (put-raise 'rational 'real
+       (lambda (x) (make-real (* 1.0 (exact->inexact (/ (numer x) (denom x)))))))
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
   'done)
@@ -79,6 +83,30 @@
   (apply-generic 'numer n))
 (define (denom n)
   (apply-generic 'denom n))
+
+(define (install-real-package)
+  (define (tag x)
+    (attach-tag 'real x))
+  (put '=zero? '(real) (lambda (x) (= x 0)))
+  (put 'add '(real real)
+       (lambda (x y) (tag (+ x y))))
+  (put 'sub '(real real)
+       (lambda (x y) (tag (- x y))))
+  (put 'mul '(real real)
+       (lambda (x y) (tag (* x y))))
+  (put 'div '(real real)
+       (lambda (x y) (/ x y)))
+  (put 'make 'real
+       (lambda (x) (tag x)))
+  (define (real-equ? x y)
+    (= x y))
+  (put 'equ? '(real real) real-equ?)
+  (put-raise 'real 'complex (lambda (real)
+			      (make-complex-from-real-imag real 0)))
+  'done)
+
+(define (make-real x)
+  ((get 'make 'real) x)) 
 
 (define (install-complex-package)
   (load "complex.scm")
