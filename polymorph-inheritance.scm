@@ -1,7 +1,14 @@
 (define *op-table* (make-hash-table))
 (define *coercion-table* (make-hash-table))
 (define *inheritance-graph* '())
+(define *projection-table* (make-hash-table))
 
+(define (drop x)
+  (cond
+   ((equ? (project x) (raise (project x)))
+    (drop (project x)))
+   (else x)))
+  
 (define (put op type item)
   (cond
    ((hash-table-exists? *op-table* op)
@@ -32,6 +39,21 @@
    (else
     (hash-table-ref *coercion-table* (list in-type out-type)))))
 
+(define (put-projection t1 proc)
+  (hash-table-set! *projection-table*
+		   t1
+		   proc))
+
+(define (get-projection t1)
+  (cond
+   ((not (hash-table-exists? *projection-table* t1))
+    false)
+   (else
+    (hash-table-ref *projection-table* t1))))
+
+(define (project x)
+  ((get-projection (type-tag x)) x))
+
 (define (put-raise t1 t2 proc)
   (put 'raise (list t1) proc)
   (put-coercion t1 t2 proc)
@@ -51,18 +73,50 @@
 (define (raise x) (apply-generic 'raise x))
 
 (define (raise-args op args)
-  (let ((highest-type-tag (get-highest-type args)))
-    (map (lambda (arg) (raise-to highest-type-tag arg)))))
+  (cond
+   ((all-same-type? args)
+    (raise-all-or-fail args))
+   (else
+    (let ((highest-type-tag (get-highest-type args)))
+      (map (lambda (arg) (raise-to highest-type-tag arg))
+	   args)))))
 
+(define (raise-all-or-fail args)
+  (map (lambda (x) (if (raiseable? x) (raise x)
+		       (error "can't raise object to another type RAISE-ALL-OR-FAIL"
+			      x
+			      args)))
+       args))
+
+(define (raiseable? x)
+  (let ((type-tower (get-type-tower))
+	(tag (type-tag x)))
+    (and (not (false? (memq tag type-tower)))
+	 (not (eq? tag (car type-tower))))))
+
+(define (all-same-type? args)
+  (let ((types (map type-tag args)))
+    (let ((first (car types))
+	  (rest (cdr types)))
+    (not (false? (fold (lambda (a r)
+			 (if (eq? a r)
+			     a
+			     #f))
+		       first
+		       rest))))))
+ 
 (define (get-highest-type objects)
   (define (iter-highest highest objs)
     (cond
      ((null? objs) highest)
-     ((higher? highest (car objs))
+     ((or (higher? highest (car objs))
+	  (eq? highest (car objs)))
       (iter-highest highest (cdr objs)))
      ((higher? (car objs) highest)
       (iter-highest (car objs) (cdr objs)))
-     (else (error "No matching procedure for types" objects))))
+     (else (error
+	    "No matching procedure for types, they are not in the same type hierarchy"
+	    objects))))
   (iter-highest (type-tag (car objects)) (map type-tag (cdr objects))))
 
 (define (raise-to a-type-tag object)
@@ -131,7 +185,7 @@
     (cons (caar sorted-pairs) (sorted-pairs->list (cdr sorted-pairs))))))
 
 (define (make-table-into-tower listof-pairs)
-  (sorted-pairs->list (unsorted-pairs-to-chain listof-pairs)))
+  (reverse (sorted-pairs->list (unsorted-pairs-to-chain listof-pairs))))
 
 (define (get-type-tower)
     (make-table-into-tower

@@ -7575,4 +7575,91 @@
        to keep track of who inherits from whom. We are only required
        to redefine get-type-tower in this case.
 
+       The finished system (which doesn't have all the errors this
+       does) is in polymorph-inheritance.scm and
+       number-system-inheritance.scm. It has some limitations. It
+       doesn't raise types to the right type if a procedure is defined
+       that has a list of types where we could satisfy the signature
+       by raising some and not others, it only coerces to the first
+       common type, and then keeps coercing up in case there is a
+       procedure defined further up the heirarchy. It doesn't disturb
+       any extra additions to the tower.
+
+     - Exercise 2.85. This section mentioned a method for
+       "simplifying" a data object by lowering it in the tower of
+       types as far as possible. Design a procedure drop that
+       accomplishes this for the tower described in exercise 2.83. The
+       key is to decide, in some general way, whether an object can be
+       lowered. For example, the complex number 1.5 + 0i can be
+       lowered as far as real, the complex number 1 + 0i can be
+       lowered as far as integer, and the complex number 2 + 3i cannot
+       be lowered at all. Here is a plan for determining whether an
+       object can be lowered: Begin by defining a generic operation
+       project that "pushes" an object down in the tower. For example,
+       projecting a complex number would involve throwing away the
+       imaginary part. Then a number can be dropped if, when we
+       project it and raise the result back to the type we started
+       with, we end up with something equal to what we started
+       with. Show how to implement this idea in detail, by writing a
+       drop procedure that drops an object as far as possible. You
+       will need to design the various projection operations and
+       install project as a generic operation in the system. You will
+       also need to make use of a generic equality predicate, such as
+       described in exercise 2.79. Finally, use drop to rewrite
+       apply-generic from exercise 2.84 so it "simplifies" its
+       answers.
+
+       We must define a project operation for each type, that is,
+       inside the type-specific package is the best place for us to
+       define projections, although we could put them
+       elsewhere. Projections should not use apply-generic and should
+       not be applied with apply-generic, because we don't want tags
+       to be stripped. We want to be able to deal with both types as
+       abstract. So technically we could put projections outside the
+       package definition, but it makes less sense outside.
+
+       We define two more procedures, put-projection and
+       get-projection, that behave the same as type coercions. project
+       is then a procedure that gets a projection and applies it. We
+       already have the equ? procedure defined. drop will then simply
+       drop things, raise them back, and compare if the two are
+       equal. If so, keep dropping.
+
+       #+BEGIN_SRC scheme
+       (define (install-real-package)
+        ; ...
+        (put-projection 'complex 'real (lambda (x) (real-part x))))
+
+       (define (install-rational-package)
+        ; ...
+        (put-projection 'real 'rational (lambda (x) 
+                                         (make-rational (floor x) 1))))
+
+       (define (install-integer-package)
+        ; ...
+        (put-projection 'rational 'integer
+          (lambda (x) (floor (/ (numer x) (denom x))))))
+
+       (define (project x)
+        ((get-projection (type-tag x)) x))
+       (define (drop x)
+        (cond
+         ((equ? (project x) (raise (project x)))
+          (drop (project x)))
+         (else x)))
+
+
+       (define (apply-generic op . args)
+         (let ((type-tags (map type-tag args)))
+           (let ((proc (get op type-tags)))
+             (if proc 
+     	          (drop (apply proc (map contents args)))
+         	  (let ((raised-list (raise-args op args)))
+        	        (apply apply-generic (cons op raised-list)))))))
+       #+END_SRC
+
+       
+
+       
+
        
