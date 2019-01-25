@@ -90,7 +90,9 @@
 	    (apply apply-generic (cons op raised-list)))))))
 
 (define (raise x)
-  ((get-coercion (type-tag x) (get-parent (type-tag x))) x))
+  ((get-coercion
+    (type-tag x)
+    (get-parent (type-tag x))) x))
 
 (define (raise-args op args)
   (cond

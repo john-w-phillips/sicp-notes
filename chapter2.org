@@ -7754,7 +7754,22 @@
 
        You need to replace all the operations on the numbers like
        +, -, /, with add, sub, and div. Then define cosine, sine, atan
-       on those numbers.  
+       on those numbers. This has interesting implications for the
+       'layering' of our design. complex becomes a number that is made
+       up of the other numbers. On the other hand, it doesn't _know_
+       what numbers it's made up of. But earlier I was thinking of
+       this as a normal object hierarchy in an OO language. However,
+       you rarely have a concrete supertype made up of descended
+       subtypes. That doesn't actually mean you can't. 
+
+       But we also have to modify the entire complex package and all
+       representations of complex numbers. Rather than tyep the thing
+       out here I just modified complex.scm,
+       number-system-inheritance.scm, and polymorph-inheritance.scm to
+       work with the new system.
+
+
+  
 
        
 
