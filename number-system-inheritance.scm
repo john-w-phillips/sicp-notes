@@ -1,10 +1,17 @@
 (load "polymorph-inheritance.scm")
 
 (define (add x y) (apply-generic 'add x y))
-(define (sub x y) (apply-generic 'sub x y))
+(define (sub x y) (add x (negate y)))
+(define (negate x) (apply-generic 'negate x))
 (define (mul x y) (apply-generic 'mul x y))
 (define (div x y) (apply-generic 'div x y))
+(define (sqr x) (mul x x))
+(define (square-root x) (apply-generic 'square-root x))
+(define (cosine x) (apply-generic 'cosine x))
+(define (sine x) (apply-generic 'sine x))
+(define (arctan x y) (apply-generic 'arctan x y))
 (define (add4 a b c d) (apply-generic 'add4 a b c d))
+(define (=zero? x) (apply-generic '=zero? x))
 
 (define (install-integer)
   (define (tag x)
@@ -12,6 +19,7 @@
   (put-projection 'rational
 		  (lambda (x) (floor (/ (numer x) (denom x)))))
   (put '=zero? '(integer) (lambda (x) (= x 0)))
+  (put 'negate '(integer) -)
   (put 'add '(integer integer)
        (lambda (x y) (tag (+ x y))))
   (put 'sub '(integer integer)
@@ -24,6 +32,7 @@
        (lambda (x) (tag x)))
   (put 'cosine '(integer)
        cos)
+  (put 'square-root '(integer) sqrt)
   (put 'sine '(integer) sin)
   (put 'arctan '(integer integer) atan)
 
@@ -58,11 +67,6 @@
     (coerce-to-rational-inner areal 1 MAX-DIGITS))
   
   (put-projection 'real coerce-to-rational)
-  (put 'cosine '(rational) (lambda (x) (cos (/ (num x) (denom x)))))
-  (put 'sine '(rational) (lambda (x) (sin (/ (num x) (denom x)))))
-  (put 'arctan '(rational rational)
-       (lambda (x y)
-	 (atan (/ (num x) (denom x)) (/ (num y) (denom y)))))
 
   (define (add-rat x y)
     (make-rat (+ (* (numer x) (denom y))
@@ -81,6 +85,7 @@
   (define (rational-equ? x y)
     (and (= (numer x) (numer y))
 	 (= (denom x) (denom y))))
+  (define (negate-rat x) (make-rational (- (numer x)) (denom x)))
 
   ;; interface to rest of the system
   (define (tag x) (attach-tag 'rational x))
@@ -96,12 +101,28 @@
        (lambda (x y) (tag (div-rat x y))))
   (put 'numer '(rational) numer)
   (put 'denom '(rational) denom)
-
+  (put 'negate '(rational) negate-rat)
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
+  (put 'cosine '(rational) (lambda (x) (cos (/ (numer x) (denom x)))))
+  (put 'sine '(rational) (lambda (x) (sin (/ (numer x) (denom x)))))
+  (put 'square-root '(rational)
+       (lambda (x)
+	 (sqrt (/ (numer x) (denom x)))))
+  (put 'negate '(rational) -)
+  
+  (put 'arctan '(rational rational)
+       (lambda (x y)
+	 (atan (/ (numer x) (denom x)) (/ (numer y) (denom y)))))
+
+  (put-raise 'rational 'real
+	     (lambda (x)
+	       (let ((x-contents (contents x)))
+		 (make-real (* 1.0 (exact->inexact
+				    (/ (numer x-contents) (denom x-contents))))))))
   'done)
-(put-raise 'rational 'real
-	   (lambda (x) (make-real (* 1.0 (exact->inexact (/ (numer x) (denom x)))))))
+
+
 (define (make-rational n d)
   ((get 'make 'rational) n d))
 (define (numer n)
@@ -137,6 +158,7 @@
   (put 'cosine '(real) cos)
   (put 'sine '(real) sin)
   (put 'arctan '(real real) atan)
+  (put 'negate '(real) -)
   'done)
 
 (define (make-real x)
@@ -178,6 +200,9 @@
   (define (complex-equ? x y)
     (and (equ? (real-part x) (real-part y))
 	 (equ? (imag-part x) (imag-part y))))
+  (define (negate-complex x)
+    (mul (make-complex-from-real-imag -1 0) x))
+
   ;; interface to the rest of the system 
   (define (tag z) (attach-tag 'complex z))
   (put '=zero? '(complex) =zero-complex?)
@@ -204,6 +229,7 @@
        (lambda (x) (apply-generic 'magnitude x)))
   (put 'angle '(complex)
        (lambda (x) (apply-generic 'angle x)))
+  (put 'negate '(complex) negate-complex)
   'done)
 
 (define (make-complex-from-real-imag x y)
