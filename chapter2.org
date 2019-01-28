@@ -8184,27 +8184,24 @@
 
        #+BEGIN_SRC scheme
        (define (adjoin-term term term-list)
-        (define (merge-lists l1 l2)
-         (let ((len-l1 (length l1))
-               (len-l2 (length l2)))
-          (cond 
-           ((null? l1) l2)
-           ((null? l2) l1)
-           ((= len-l1 len-l2)
-            (cond
-             ((=zero? (car l1))
-              (cons (car l2)
-                    (merge-lists (cdr l1) (cdr l2))))
-             ((=zero? (car l2))
-              (cons (car l1)
-                    (merge-lists (cdr l1) (cdr l2))))
-             (else
-              (cons (add (car l1) (car l2))
-                    (merge-lists (cdr l1) (cdr l2))))))
-         ((> len-l1 len-l2)
-          (cons (car l1) (merge-lists (cdr l1) l2)))
-         (else (cons (car l2) (merge-lists l1 (cdr l2)))))))
-        (merge-lists term term-list))
+        (define (insert-term order coeff list listlen)
+         (cond
+          ((null? list) (error 
+                         "There is a mistake in the insert-term coding -- ADJOIN-TERM"))
+          ((= order (- listlen 1)) 
+           (cons (add coeff (car list)) (cdr list)))
+          (else (cons (car list) (insert-term order coeff (cdr list) (- listlen 1))))))
+        (define (repeat-zero n)
+         (cond ((= n 0) '())
+               (else (cons 0 (repeat-zero (- n 1))))))
+        (let ((term-order (order term))
+              (term-coeff (coeff term)))
+         (cond
+          ((< term-order (length term-list))
+           (insert-term term-order term-coeff term-list (length term-list)))
+          (else
+           (append (cons term-coeff (repeat-zero (- term-order (length term-list))))
+                    term-list)))))
 
        (define (the-empty-termlist) '())
        (define (first-term term-list) term-list)
@@ -8243,6 +8240,28 @@
 
        We need to create two packages, sparse-term-list-package and
        dense-term-list-package, and insert their operations into the table.
+
+       You must define a term as separate from the lists, a termlist
+       is a strictly separate concept from its atom. Otherwise, you
+       can't have generic applications of add-to-list, cons,
+       etc. Because you have to design a particular atom for a
+       particular list and then know a-priori the list type.
+
+       Then there is another problem which is that we have to define
+       adjoin-list for two items, a term and a list. We need the list
+       to differ but we already know what the term is, and don't need
+       it tagged. But our type system doesn't allow this, to satisfy
+       the put requirement we have to tag each argument.  It only
+       makes sense to have one representaiton of a term list right
+       now. So we do not need it tagged. Furthermore, because
+       apply-generic applies the contents function to each argument,
+       we get the _internal_ representation of the term when we do not
+       really want it. My solution was to make make-term tag its
+       returned term object but to not define order or coeff as
+       generic procedures, but to just use the ones directly
+       manipulating the list everywhere. 
+
+
 
      
 
