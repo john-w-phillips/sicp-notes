@@ -27,7 +27,7 @@
   (put 'mul '(integer integer)
        (lambda (x y) (tag (* x y))))
   (put 'div '(integer integer)
-       (lambda (x y) (attach-tag 'rational (make-rational x y))))
+       (lambda (x y) (make-rational x y)))
   (put 'make 'integer
        (lambda (x) (tag x)))
   (put 'cosine '(integer)
@@ -109,7 +109,7 @@
   (put 'square-root '(rational)
        (lambda (x)
 	 (sqrt (/ (numer x) (denom x)))))
-  (put 'negate '(rational) -)
+  (put 'negate '(rational) negate-rat)
   
   (put 'arctan '(rational rational)
        (lambda (x y)

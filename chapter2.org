@@ -8259,13 +8259,380 @@
        really want it. My solution was to make make-term tag its
        returned term object but to not define order or coeff as
        generic procedures, but to just use the ones directly
-       manipulating the list everywhere. 
+       manipulating the list everywhere.  This required one change to
+       the add-terms procedure, I couldn't just use adjoin-list with a
+       term from a list but re-make a term so it was tagged.
 
+       There were just generally some strange consequences to the fact
+       that we wanted to manipulate term objects in two different
+       layers and between three different types. It required that all
+       three types manipulate terms assuming they aren't tagged, and
+       that they tag them when they pass them back out, for the most
+       part. Or at least tag them when passing them to procedures they
+       don't own. The result is in polynomials.scm.
 
+     - Exercise 2.91: A univariate polynomial can be divided by
+       another one to produce a polynomial quotient and a polynomial
+       remainder. For example,
+
+       \begin{polydiv}
+       \frac{x^5 - 1}{x^2 - 1} = x^3 + x, remainder x - 1.
+       \end{poly}
+
+       Division can be performed via long division. That is, divide
+       the highest-order term of the dividend by the highest-order
+       term of the divisor. The result is the first term of the
+       quotient. Next, multiply the result by the divisor, subtract
+       that from the dividend, and produce the rest of the answer by
+       recursively dividing the difference by the divisor. Stop when
+       the order of the divisor exceeds the order of the dividend and
+       declare the dividend to be the remainder. Also, if the dividend
+       ever becomes zero, return zero as both quotient and remainder.
+
+       We can design a div-poly procedure on the model of add-poly and
+       mul-poly. The procedure checks to see if the two polys have the
+       same variable. If so, div-poly strips off the variable and
+       passes the problem to div-terms, which performs the division
+       operation on term lists. div-poly finally reattaches the
+       variable to the result supplied by div-terms. It is convenient
+       to design div-terms to compute both the quotient and the
+       remainder of a division. div-terms can take two term lists as
+       arguments and return a list of the quotient term list and the
+       remainder term list.
+
+       Complete the following definition of div-terms by filling in
+       the missing expressions. Use this to implement div-poly, which
+       takes two polys as arguments and returns a list of the quotient
+       and remainder polys.
+
+       #+BEGIN_SRC scheme
+       (define (div-terms L1 L2)
+        (if (empty-termlist? L1)
+            (list (the-empty-termlist) (the-empty-termlist))
+            (let ((t1 (first-term L1)))
+                 ((t2 (first-term L2)))
+             (if (> (order t2) (order t1))
+                 (list (the-empty-termlist) L1)
+                 (let ((new-c (div (coeff t1) (coeff t2)))
+                       (new-o (- (order t1) (order t2))))
+                  (let ((rest-of-result
+                         <compute rest of result recursively> ))
+                   <form complete result> ))))))
+       #+END_SRC
+       #+BEGIN_SRC scheme
+       (define (div-terms L1 L2)
+        (if (empty-termlist? L1)
+            (list (the-empty-termlist) (the-empty-termlist))
+            (let ((t1 (first-term L1))
+                  (t2 (first-term L2)))
+             (if (> (order t2) (order t1))
+                 (list (the-empty-termlist) L1)
+                 (let ((new-c (div (coeff t1) (coeff t2)))
+                       (new-o (- (order t1) (order t2))))
+                  (let ((rest-of-result
+                         (div-terms 
+                          (add-terms 
+                           L1
+                           (negate-coefficients 
+                            (mul-term-by-all-terms 
+                             (make-untagged-term new-o new-c)
+                             L2)))
+                           L2)))
+                    (let ((remainder (cadr rest-of-result))
+                          (div-result (car rest-of-result)))
+                     (list
+                      (adjoin-term
+                       (make-term new-o new-c)
+                        div-result)
+                      remainder))))))))
+       #+END_SRC 
+       
+       Here is div-terms. I didn't add this to the 'div tag since it
+       doesn't return anything that is recognized by the number
+       system. I instead created a div-poly function visible outside
+       the polynomial package.
+
+       I modified it as below to work in the multiple-list system:
+
+       #+BEGIN_SRC scheme
+       (define (div-terms L1 L2)
+        (if (empty-termlist? L1)
+  	;; (list (the-empty-termlist) (the-empty-termlist))
+	    (list L1 L1)
+	   (let ((t1 (first-term L1))
+	         (t2 (first-term L2)))
+	     (if (> (order t2) (order t1))
+	         (list (the-empty-sparse-termlist) L1)
+	         (let ((new-c (div (coeff t1) (coeff t2)))
+	   	    (new-o (- (order t1) (order t2))))
+	   	(let ((rest-of-result
+	   	       (div-terms 
+	   		(add-terms 
+	   		 L1
+	   		 (negate-coefficients 
+	   		  (mul-term-by-all-terms 
+	   		   (make-untagged-term new-o new-c)
+	   		   L2)))
+	   		L2)))
+	   	  (let ((remainder (cadr rest-of-result))
+	   		(div-result (car rest-of-result)))
+	   	    (list
+	   	     (adjoin-term
+	   	      (make-term new-o new-c)
+	   	      div-result)
+	   	     remainder))))))))
+       #+END_SRC
+
+**** Hierarchies of types in symbolic algebra
+
+     Our polynomial system illustrates how objects of one type
+     (polynomials) may in fact be complex objects that have objects of
+     many different types as parts. This poses no real difficulty in
+     defining generic operations. We need only install appropriate
+     generic operations for performing the necessary manipulations of
+     the parts of the compound types. In fact, we saw that polynomials
+     form a kind of "recursive data abstraction," in that parts of a
+     polynomial may themselves be polynomials. Our generic operations
+     and our data-directed programming style can handle this
+     complication without much trouble.
+
+     On the other hand, polynomial algebra is a system for which the
+     data types cannot be naturally arranged in a tower. For instance,
+     it is possible to have polynomials in _x_ whose coefficients are
+     polynomials in _y_. It is also possible to have polynomials in
+     _y_ whose coefficients are polynomials in _x_. Neither of these
+     types is "above" the other in any natural way, yet it is often
+     necessary to add together elements from each set. There are
+     several ways to do this. One possibility is to convert one
+     polynomial to the type of the other by expanding and rearranging
+     terms so that both polynomials have the same principal
+     variable. One can impose a towerlike structure on this by
+     ordering the variables and thus always converting any polynomial
+     to a "canonical form" with the highest-priority variable dominant
+     and the lower-priority variables buried in the coefficients. This
+     strategy works fairly well, except that the conversion may expand
+     a polynomial unnecessarily, making it hard to read and perhaps
+     less efficient to work with. The tower strategy is certainly not
+     natural for this domain or any domain where the user can invent
+     new types dynamically using old types in various combining forms,
+     such as trigonometric functions, power series, and integrals. 
+
+     It should not be surprising that controlling coercion is a
+     serious problem in the design of large-scale
+     algebraic-manipulation systems. Much of the complexity of such
+     systems is concerned with relationships among diverse
+     types. Indeed, it is fair to say that we do not yet completely
+     understand coercion. In fact, we do not yet completely understand
+     the concept of a data type.
+
+     - Exercise 2.92: By imposing an ordering on variables, extend the
+       polynomial package so that addition and multiplication of
+       polynomials works for polynomials in different variables. (This
+       is not easy!)
+
+       I suppose what this means is that the polynomial x^3 + 2y + x
+       should be converted to a polynomial in x with coefficients in y
+       all the time, even though we could look at it as a polynomial
+       in y with coefficients in x. So
+
+       #+BEGIN_SRC scheme
+       (make-polynomial 'x (list 'dense-term-list 
+                                 1
+                                 0
+                                 1
+                                 (make-polynomial 'y '(dense-term-list 2 0))))
+       #+END_SRC
+
+       Should be the same as
+
+       #+BEGIN_SRC scheme
+       (make-polynomial 'y (list 'dense-term-list
+                            2
+                            (make-polynomial 'x
+                             '(dense-term-list 1 0 1 0))))
+       #+END_SRC
+
+       That way, we can always add two polynomials. The simplest way
+       to do this is in the make-polynomial procedure itself. We can
+       define an ordering with a list:
+       
+       #+BEGIN_SRC scheme
+       (define VARIABLE-ORDER '(x y z a b c))
+       #+END_SRC
+
+       Let's look at some examples:
+
+       (y^2 + 2y)x^3 + x^2 + 2y*x + 1 -- 
+       (x^3)y^2 + (2 * x^3 + 2 *x) * y + (x^2 + 1)
+       #+BEGIN_SRC scheme
+       ;; canonical representation
+       (make-polynomial 'x (list 'dense-term-list
+                                  (make-polynomial 'y '(dense-term-list 1 2 0))
+                                  2
+                                  (make-polynomial 'y '(dense-term-list 2 0))
+                                  1))
+       (make-polynomial 'y (list 'dense-term-list
+                                 (make-polynomial 'x '(dense-term-list 1 0 0 0))
+                                 (make-polynomial 'x '(dense-term-list 2 0 2 0))
+                                 (make-polynomial 'x '(dense-term-list 1 0 1))))
+       #+END_SRC
+
+       We need a procedure to transform the second to the first. We do
+       this by looking at the polynomial lists and building terms in X
+       for that. For example, we take all the highest-degree terms
+       from the x polynomials and combine them, we'd look thorugh the
+       list and see x^3 with coefficients of 1 for y^2 and 2 for y. So
+       that means we have a term (y^2 + 2*y) * x^3
+
+       #+BEGIN_SRC scheme
+       (define (add-to-coefficient-from-poly
+                new-var
+                new-term
+                poly-term)
+         (let ((term-order (order new-term))
+               (new-term-coeff-poly (coeff new-term)))
+          (define (iter poly-termlist new-coeff-termlist)
+           (if (empty-termlist? poly-termlist)
+               new-coeff-termlist
+               (cond
+                ((= (order (first-term poly-termlist)) term-order)
+                 (adjoin-term (make-term 
+                               (order poly-term) 
+                               (coeff (first-term poly-termlist)))
+                              new-coeff-termlist))
+                (else (iter (rest-terms poly-termlist) new-coeff-termlist)))))
+          (make-term term-order 
+                     (make-poly 
+                       (variable new-term-coeff-poly) 
+                       (iter (term-list (coeff poly-term))
+                             (term-list new-term-coeff-poly))))))
+
+       (define (add-to-coefficient-from-constant
+                new-variable
+                term
+                first-term)
+        (if (= 0 (order term)) 
+            (make-term
+             (order term)
+              (make-poly
+               (variable (coeff term))
+               (adjoin-term
+                (make-term (order first-term)
+                           (coeff first-term))
+                (term-list (coeff term)))))
+             term))
+
+       ;; transform poly to be in terms of new-variable.
+       (define (make-term-of-order-in new-variable order poly)
+        (define (iter termlist term)
+         (if (empty-termlist? termlist)
+             term
+         (let ((first-term (first-term termlist))
+               (rest-terms (rest-terms termlist)))
+          (if (polynomial-in? new-variable (coeff first-term))
+              (iter rest-terms (add-to-coefficient-from-poly
+                                new-variable
+                                term
+                                first-term))
+              (iter rest-terms (add-to-coefficient-from-constant
+                                new-variable
+                                term
+                                first-term))))))
+         (iter (term-list poly) 
+                (make-term 
+                 order 
+                 (make-poly (variable poly) (the-empty-termlist)))))
+
+       (define (polynomial-in? var poly)
+        (same-variable? var (variable poly)))
 
      
 
-  
+       (define (transform-terms new-variable poly)
+        (define (iter termlist order)
+         (if (< order 0)
+             termlist
+             (let ((new-term (make-term-of-order-in new-variable order poly)))
+                  (iter (adjoin-term new-term
+                                     termlist)
+                        (- order 1)))))
+         (make-poly new-variable (iter (the-empty-termlist) 
+                                       (highest-order-of new-variable poly))))
+
+       (define (highest-order-of var poly)
+        (define (highest-term-of-list term-list)
+         (cond
+          ((empty-termlist? (rest-terms term-list)) (order (first-term term-list)))
+          (else
+           (highest-term-of-list (rest-terms term-list)))))
+
+        (define (highest-order-term var poly)
+         (if (same-variable? (variable poly) var)
+             (highest-term-of-list (term-list poly))
+             false))
+        
+
+        (define (iter-poly-list highest termlist)
+         (if (empty-termlist? termlist) 
+             highest
+            (let ((this-order (highest-order-term var (coeff (first-term termlist)))))
+             (if (and this-order (> this-order highest))
+                 (iter-poly-list this-order (rest-terms termlist))
+                 (iter-poly-list highest (rest-terms termlist))))))
+        (iter-poly-list -1 (term-list poly)))
+       #+END_SRC
+
+       This basic algorithm is hacky but it does work. What's left is
+       to refine it, and then add a layer to work recursively for
+       large lists of variables. Also, it needs to be refined not to
+       just count down in order but to obtain a list of orders, to not
+       make polynomial coefficients in terms of another variable when
+       it doesn't need to be.
+
+       After many trials and tribulations, I got this code refined and
+       working in the package structure in polynomials.scm. Right now
+       I redefined add to coerce polynomials of a lower variable to
+       polynomials of a higher variable. It works for 
+
+       #+BEGIN_SRC
+       (add (make-polynomial 'y (list 'sparse-term-list '(3 2) '(2 1) (list 1 (make-polynomial 'x '(sparse-term-list (2 2) (1 3)))))) (make-polynomial 'x '(sparse-term-list (2 2) (1 1))))
+
+       ;Value 80: (polynomial x sparse-term-list (2 (polynomial y sparse-term-list (0 2) (1 2))) (1 (polynomial y sparse-term-list (0 1) (1 3))) (0 (polynomial y sparse-term-list (2 1) (3 2))))
+       #+END_SRC
+
+       Which is a correct result; both polynomials have been coerced
+       to be in terms of x and then added. There are some problems,
+       however.
+
+       1. What happpens when we have deep polys in terms of three
+          variables?
+
+       2. The package structure is hacky. Because the polys being
+          passed in to the coercion procedure are tagged, we have to
+          apply the contents procedure all over the place. It also
+          means we have to keep track of which parts of a procedure
+          are expected to produce tagged polynomials and which
+          not. Using the contents procedure inside a package is
+          odd. In order to be understood by the rest of the packaging
+          system we should probably keep the polynomials tagged
+          though, so it makes sense that when destructuring one and
+          restructuring it we keep everything tagged and use
+          make-polynomial, the external make function, rather than
+          make-poly. In general tag management is a complex
+          task. Other languages manage tagging transparently or at
+          least seem to -- then again, we don't normally manage
+          interactions between this many types. This is a fairly
+          complicated scenario; although there aren't a lot of lines
+          of code the logic is dense. Typically objects are not made
+          of so many densely nested, composite structures as this. 
+
+	  We can mitigate some of these problems by writing procedures
+          whose purpose is to handle this, like writing a procedure
+          designed to take the contents of polys and assert that they
+          are, indeed, polys. Another thing that makes sense is simply
+          designing a set of procedures called poly-termlist and so
+          on that use apply-generic. Probably that should be a next step.
+	
 
        
 
