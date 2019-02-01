@@ -1,4 +1,10 @@
 (load "polymorph-inheritance.scm")
+(load "number-system-inheritance.scm")
+(install-integer)
+(install-rational-package)
+(install-real-package)
+(install-complex-package)
+
 (define VAR-ORDER
   '(x y z t u v w a b c p q))
 
@@ -122,6 +128,8 @@
 
 (define (install-polynomial-package)
   (install-term-package)
+  (install-sparse-term-list-package)
+  (install-dense-term-list-package)
   (define (add-terms L1 L2)
     (cond ((empty-termlist? L1) L2)
 	  ((empty-termlist? L2) L1)
@@ -279,7 +287,9 @@
     (let ((constructed-term (iter (term-list poly) 
 				  (make-term 
 				   term-order 
-				   (make-polynomial (variable poly) (the-empty-termlist))))))
+				   (make-polynomial
+				    (variable poly)
+				    (the-empty-termlist))))))
       (cond
        ((should-be-constant? constructed-term)
 	(make-term term-order (constant-coefficient constructed-term)))
@@ -405,18 +415,24 @@
 	   (negate-coefficients rest)))))
 
   ;; interface to rest of system
+  (define (coerce-up-op op)
+    (lambda (p1 p2)
+      (tag
+       (let ((coerced (coerce-to-highest-variable-pair p1 p2)))
+	 (op (car coerced) (cdr coerced))))))
+
   (define (tag p) (attach-tag 'polynomial p))
   (put 'add '(polynomial polynomial)
-       (lambda (p1 p2)
-	 (tag
-	  (let ((coerced (coerce-to-highest-variable-pair p1 p2)))
-	    (add-poly (car coerced) (cdr coerced))))))
+       (coerce-up-op add-poly))
   (put 'add '(polynomial integer)
        (lambda (p1 i)
 	 (tag (make-poly (variable p1) (adjoin-term (make-term 0 i) (term-list p1))))))
+  (put 'add '(integer polynomial)
+       (lambda (i p1)
+	 (tag (make-poly (variable p1) (adjoin-term (make-term 0 i) (term-list p1))))))
 
   (put 'mul '(polynomial polynomial)
-       (lambda (p1 p2) (tag (mul-poly p1 p2))))
+       (coerce-up-op mul-poly))
   (put 'make 'polynomial
        (lambda (var terms) (tag (make-poly var terms))))
   (put 'negate '(polynomial) (lambda (p) (tag (negate-poly p))))

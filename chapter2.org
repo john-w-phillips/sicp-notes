@@ -8632,7 +8632,54 @@
           are, indeed, polys. Another thing that makes sense is simply
           designing a set of procedures called poly-termlist and so
           on that use apply-generic. Probably that should be a next step.
-	
+
+**** Extended exercise: Rational functions
+     We can extend our generic arithmetic system to include _rational
+     functions_. These are "fractions" whose numerator and denominator
+     are polynomials, such as
+
+     \begin{ratfunc}
+     \frac{x + 1}{x^3 - 1}
+     \end{ratfunc}
+
+     The system should be able to add, subtract, multiply, and divide
+     rational functions, and to perform such computations as
+
+     \begin{ratfunc}
+     \frac{x + 1}{x^3 - 1} + \frac{x}{x^2 - 1} = \frac{x^3 + 2x^2 + 3x + 1}{x^4 + x^3 - x - 1}
+     \end{ratfunc}
+
+     (Here the sum has been simplified by removing common
+     factors. Ordinary "cross multiplication" would have produced a
+     fourth-degree polynomial over a fifth-degree polynomial.)
+
+     If we modify our rational-arithmetic package so that it uses
+     generic operations, then it will do what we want, except for the
+     problem of reducing fractions to lowest terms.
+
+     - Exercise 2.93. Modify the rational-arithmetic package to use
+       generic operations, but change make-rat so that it does not
+       attempt to reduce fractions to lowest terms. Test your systems
+       by calling make-rational on two polynomials to produce a
+       rational function
+
+       #+BEGIN_SRC scheme
+       (define p1 (make-polynomial 'x '((2 1) (0 1))))
+       (define p2 (make-polynomial 'x '((3 1) (0 1))))
+       (define rf (make-rational p2 p1))
+       #+END_SRC
+
+       Now add rf to itself, using add. You will observe that this
+       addition procedure does not reduce fractions to lowest terms.
+
+       We can reduce polynomial fractions to lowest terms using the
+       same idea we used with integers: modifying make-rat to divide
+       both the numerator and the denominator by their greatest common
+       divisor. The notion of "greatest common divisor" makes sense
+       for polynomials. In fact, we can compute the GCD of two
+       polynomials using essentially the same Euclid's Algorithm that
+       works for integers. 
+
 
        
 
