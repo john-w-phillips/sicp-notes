@@ -1,3 +1,4 @@
+(load "inheritance-graphs.scm")
 (define *op-table* (make-hash-table))
 (define *coercion-table* (make-hash-table))
 (define *inheritance-graph* '())
@@ -98,10 +99,24 @@
   (cond
    ((all-same-type? args)
     (raise-all-or-fail args))
+   ((not (args-in-same-heirarchy? args))
+    (error
+     (string-append
+      "Can't apply any function to these arguments."
+      "They are not in the same type heirarchy and can't be coerced via "
+      "inheritance to any other type -- RAISE-ARGS")
+     args))
    (else
     (let ((highest-type-tag (get-highest-type args)))
       (map (lambda (arg) (raise-to highest-type-tag arg))
 	   args)))))
+
+(define (args-in-same-heirarchy? args)
+  (let ((type-towers (map get-type-tower-for args)))
+    (not (false? (reduce-right
+		  (lambda (x r) (if (equal? x r) r false))
+		  '()
+		  (map type-tag type-towers))))))
 
 (define (raise-all-or-fail args)
   (map (lambda (x) (if (raiseable? x) (raise x)
@@ -111,7 +126,7 @@
        args))
 
 (define (raiseable? x)
-  (let ((type-tower (get-type-tower))
+  (let ((type-tower (get-type-tower-for (type-tag x)))
 	(tag (type-tag x)))
     (and (not (false? (memq tag type-tower)))
 	 (not (eq? tag (car type-tower))))))
@@ -148,70 +163,22 @@
    (else (raise-to a-type-tag (raise object)))))
 
 (define (higher? type1 type2)
-  (let ((type-map (get-type-tower)))
-    (let ((type1-in-list (memq type1 type-map))
-	  (type2-in-list (memq type2 type-map)))
-      (if (and type1-in-list type2-in-list)
-	  (not (memq type1 type2-in-list))
-	  false))))
+  (let ((type-map1 (get-type-tower-for type1))
+	(type-map2 (get-type-tower-for type2)))
+    (if (not (equal? type-map1 type-map2))
+	false
+	(let ((type1-in-list (memq type1 type-map1))
+	      (type2-in-list (memq type2 type-map1)))
+	  (if (and type1-in-list type2-in-list)
+	      (not (memq type1 type2-in-list))
+	      false)))))
 
-(define (unsorted-pairs-to-chain listof-pairs)
-  (define (insertable? element resultlist)
-    (cond
-     ((null? resultlist) false)
-     ((eq? (cadr element) (caar resultlist))
-      true)
-     ((eq? (car element) (cadar resultlist))
-      true)
-     (else (insertable? element (cdr resultlist)))))
-
-  (define (insert-one-element elem listof-pairs)
-    (cond
-     ((null? listof-pairs) (list elem))
-     ((eq? (cadr elem) (caar listof-pairs))
-      (cons elem listof-pairs))
-     ((eq? (car elem) (cadar listof-pairs))
-      (cons (car listof-pairs) (cons elem (cdr listof-pairs))))
-     (else (cons (car listof-pairs) (insert-one-element elem (cdr listof-pairs))))))
-
-  (define (find-insertable listof-pairs result)
-    (cond
-     ((null? result) listof-pairs)
-     ((null? listof-pairs) 
-      (error "Can't insert any element from this into that -- FIND-INSERTABLE"
-	     listof-pairs result))
-     (else
-      (let ((first (car listof-pairs)))
-	(if (insertable? first result)
-	    listof-pairs
-	    (let ((insertable-list (find-insertable (cdr listof-pairs) result)))
-	      (cons (car insertable-list) 
-		    (cons first (cdr insertable-list)))))))))
-
-  (define (iter-pairs result listof-pairs)
-    (cond 
-     ((null? listof-pairs) result)
-     (else
-      (let ((insertable-first (find-insertable listof-pairs result)))
-	(iter-pairs (insert-one-element (car insertable-first) result)
-		    (cdr insertable-first))))))
-  (iter-pairs '() listof-pairs))
-
-(define (sorted-pairs->list sorted-pairs)
-  (cond
-   ((null? sorted-pairs)
-    (error "Must have a list of at least length one -- SORTED-PAIRS"))
-   ((null? (cdr sorted-pairs))
-    (list (caar sorted-pairs) (cadar sorted-pairs)))
-   (else
-    (cons (caar sorted-pairs) (sorted-pairs->list (cdr sorted-pairs))))))
-
-(define (make-table-into-tower listof-pairs)
-  (reverse (sorted-pairs->list (unsorted-pairs-to-chain listof-pairs))))
-
-(define (get-type-tower)
-    (make-table-into-tower
+(define (get-type-towers)
+    (make-table-into-towers
      *inheritance-graph*))
+
+(define (get-type-tower-for x)
+  (car (filter (lambda (tower) (memq x tower)) (get-type-towers))))
  
 (define (attach-tag tag datum)
   (cond
@@ -234,11 +201,9 @@
    (else (cdr datum))))
 
 (define (type-in-system? datum)
-  (cond
-   ((or
-     (number? datum)
-     (and (pair? datum)
-	  (not (false? (memq (car datum) (get-type-tower))))))
-    true)
-   (else
-    false)))
+  (fold-right
+   (lambda (x r) (or (not (false? x))
+		      r))
+   false
+   (map (lambda (tower) (memq datum tower))
+	(get-type-towers))))

@@ -11,11 +11,17 @@
 (define (sine x) (apply-generic 'sine x))
 (define (arctan x y) (apply-generic 'arctan x y))
 (define (add4 a b c d) (apply-generic 'add4 a b c d))
+(define (gcd a b) (apply-generic 'gcd a b))
 (define (=zero? x) (apply-generic '=zero? x))
 
 (define (install-integer)
   (define (tag x)
     (attach-tag 'integer x))
+  (define (gcd-int a b)
+    (if (= b 0)
+	a
+	(gcd-int b (remainder a b))))
+     
   (put-projection 'rational
 		  (lambda (x) (floor (/ (numer x) (denom x)))))
   (put '=zero? '(integer) (lambda (x) (= x 0)))
@@ -27,7 +33,10 @@
   (put 'mul '(integer integer)
        (lambda (x y) (tag (* x y))))
   (put 'div '(integer integer)
-       (lambda (x y) (make-rational x y)))
+       (lambda (x y)
+	 (if (=zero? (remainder x y))
+	     (/ x y)
+	     (make-rational x y))))
   (put 'make 'integer
        (lambda (x) (tag x)))
   (put 'cosine '(integer)
@@ -38,6 +47,7 @@
 
   (define (scheme-number-equ? x y)
     (= x y))
+  (put 'gcd '(integer integer) gcd-int)
   (put 'equ? '(integer integer) scheme-number-equ?)
   (put-raise 'integer 'rational (lambda (integer)
 				  (make-rational integer 1)))
@@ -52,40 +62,42 @@
   (define (denom x) (cdr x))
   (define (make-rat n d)
     (let ((g (gcd n d)))
-      (cons (/ n g) (/ d g))))
+      (cons (div n g) (div d g))))
+  ;; (define (make-rat n d)
+  ;;   (cons n d))
   (define (=zero-rational? x)
-    (= 0 (numer x)))
-  (define MAX-DIGITS 15)
-  (define (coerce-to-rational areal)
-    (define (coerce-to-rational-inner num denom digit-counter)
-      (cond
-       ((or (= digit-counter 0)
-	    (= (floor num) num))
-	(make-rational (inexact->exact (floor num)) (inexact->exact (floor denom))))
-       (else
-	(coerce-to-rational-inner (* num 10)  (* 10 denom) (- digit-counter 1)))))
-    (coerce-to-rational-inner areal 1 MAX-DIGITS))
+    (=zero? (numer x)))
+  ;; (define MAX-DIGITS 15)
+  ;; (define (coerce-to-rational areal)
+  ;;   (define (coerce-to-rational-inner num denom digit-counter)
+  ;;     (cond
+  ;;      ((or (= digit-counter 0)
+  ;; 	    (= (floor num) num))
+  ;; 	(make-rational (inexact->exact (floor num)) (inexact->exact (floor denom))))
+  ;;      (else
+  ;; 	(coerce-to-rational-inner (* num 10)  (* 10 denom) (- digit-counter 1)))))
+  ;;   (coerce-to-rational-inner areal 1 MAX-DIGITS))
   
-  (put-projection 'real coerce-to-rational)
+  ;; (put-projection 'real coerce-to-rational)
 
   (define (add-rat x y)
-    (make-rat (+ (* (numer x) (denom y))
-		 (* (numer y) (denom x)))
-	      (* (denom x) (denom y))))
+    (make-rat (add (mul (numer x) (denom y))
+		 (mul (numer y) (denom x)))
+	      (mul (denom x) (denom y))))
   (define (sub-rat x y)
-    (make-rat (- (* (numer x) (denom y))
-		 (* (numer y) (denom x)))
-	      (* (denom x) (denom y))))
+    (make-rat (sub (mul (numer x) (denom y))
+		 (mul (numer y) (denom x)))
+	      (mul (denom x) (denom y))))
   (define (mul-rat x y)
-    (make-rat (* (numer x) (numer y))
-	      (* (denom x) (denom y))))
+    (make-rat (mul (numer x) (numer y))
+	      (mul (denom x) (denom y))))
   (define (div-rat x y)
-    (make-rat (* (numer x) (denom y))
-	      (* (denom x) (numer y))))
+    (make-rat (mul (numer x) (denom y))
+	      (mul (denom x) (numer y))))
   (define (rational-equ? x y)
-    (and (= (numer x) (numer y))
-	 (= (denom x) (denom y))))
-  (define (negate-rat x) (make-rational (- (numer x)) (denom x)))
+    (and (equ? (numer x) (numer y))
+	 (equ? (denom x) (denom y))))
+  (define (negate-rat x) (make-rational (negate (numer x)) (denom x)))
 
   ;; interface to rest of the system
   (define (tag x) (attach-tag 'rational x))
@@ -115,11 +127,11 @@
        (lambda (x y)
 	 (atan (/ (numer x) (denom x)) (/ (numer y) (denom y)))))
 
-  (put-raise 'rational 'real
-	     (lambda (x)
-	       (let ((x-contents (contents x)))
-		 (make-real (* 1.0 (exact->inexact
-				    (/ (numer x-contents) (denom x-contents))))))))
+  ;; (put-raise 'rational 'real
+  ;; 	     (lambda (x)
+  ;; 	       (let ((x-contents (contents x)))
+  ;; 		 (make-real (* 1.0 (exact->inexact
+  ;; 				    (/ (numer x-contents) (denom x-contents))))))))
   'done)
 
 
@@ -238,3 +250,10 @@
   ((get 'make-from-mag-ang 'complex) r a))
 (define (equ? x y)
   (apply-generic 'equ? x y))
+
+(begin
+  (install-integer)
+  (install-rational-package)
+  (install-real-package)
+  (install-complex-package)
+  'done)

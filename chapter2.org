@@ -8672,13 +8672,54 @@
        Now add rf to itself, using add. You will observe that this
        addition procedure does not reduce fractions to lowest terms.
 
-       We can reduce polynomial fractions to lowest terms using the
-       same idea we used with integers: modifying make-rat to divide
-       both the numerator and the denominator by their greatest common
-       divisor. The notion of "greatest common divisor" makes sense
-       for polynomials. In fact, we can compute the GCD of two
-       polynomials using essentially the same Euclid's Algorithm that
-       works for integers. 
+       One interesting thing about this is that it breaks the type
+       tower, or seems to. Normally we had a rational as a special
+       case of real. But although a rational _function_ is a special
+       case of real functions, our real data type does not have the
+       ability to represent functions. So we logically should remove
+       it from our type tower, it seems. So, for now, I'm commenting
+       out the raise. 
+
+       One problem is that right now the type system only supports a
+       single heirarchy of types. We should find a way to make
+       disjoint type heirarchies or this is going to keep plaguing
+       us. This is unfortunately quite a bit of work.
+
+       
+     We can reduce polynomial fractions to lowest terms using the same
+     idea we used with integers: modifying make-rat to divide both the
+     numerator and the denominator by their greatest common
+     divisor. The notion of "greatest common divisor" makes sense for
+     polynomials. In fact, we can compute the GCD of two polynomials
+     using essentially the same Euclid's Algorithm that works for
+     integers. The integer version is
+
+     #+BEGIN_SRC scheme
+     (define (gcd a b)
+      (if (= b 0)
+          a
+          (gcd b (remainder a b))))
+     #+END_SRC
+
+     Using this, we could make the obvious modification to define a
+     GCD operation that works on term lists:
+
+     #+BEGIN_SRC scheme
+     (define (gcd-terms a b)
+      (if (empty-termlist? b)
+          a
+          (gcd-terms b (remainder-terms a b))))
+     #+END_SRC
+
+     where remainder-terms picks out the remainder component of the
+     list returned by the term-list division operation div-terms that
+     was implemented in exercise 2.91. 
+
+     - Exercise 2.94: Using div-terms, implement the procedure
+       remainder-terms 
+
+
+
 
 
        

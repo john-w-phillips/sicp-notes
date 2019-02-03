@@ -192,7 +192,15 @@
 		      (make-term new-o new-c)
 		      div-result)
 		     remainder))))))))
+  (define (remainder-terms L1 L2)
+    (let ((div-terms-result (div-terms L1 L2)))
+      (cadr div-terms-result)))
 
+  (define (gcd-terms a b)
+    (if (empty-termlist? b)
+	a
+	(gcd-terms b (remainder-terms a b))))
+	 
   ;; representation of poly
   (define (make-poly variable term-list) (cons variable term-list))
   (define (variable p) (car p))
@@ -377,6 +385,16 @@
 		(iter-poly-list highest (rest-terms termlist))))))
     (iter-poly-list -1 (term-list poly)))
 
+  (define (gcd-poly p1 p2)
+    (cond
+     ((same-variable? (variable p1) (variable p2))
+      (make-poly (variable p1)
+		 (gcd-terms (term-list p1) (term-list p2))))
+     (else
+      (error 
+       "These polynomials are not in the same variable -- GCD-POLY"
+       p1 p2))))
+
   (define (add-poly p1 p2)
     (cond
      ((same-variable? (variable p1) (variable p2))
@@ -442,9 +460,17 @@
 	   (let ((quotient (car result))
 		 (remainder (cadr result)))
 	     (list (tag quotient) (tag remainder))))))
+
   (put 'div '(polynomial polynomial)
        (lambda (p1 p2)
 	 (tag (car (div-poly p1 p2)))))
+
+  (put 'gcd '(polynomial polynomial)
+       (coerce-up-op gcd-poly))
+ 
+  (put 'remainder '(polynomial polynomial)
+       (lambda (p1 p2)
+	 (tag (cadr (div-poly p1 p2)))))
   'done)
 
 (define (div-poly p1 p2)
@@ -452,3 +478,6 @@
 
 (define (make-polynomial var terms)
   ((get 'make 'polynomial) var terms))
+
+(begin
+  (install-polynomial-package))
