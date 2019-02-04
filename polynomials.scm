@@ -417,8 +417,10 @@
   (define (div-poly p1 p2)
     (if
      (same-variable? (variable p1) (variable p2))
-     (make-poly (variable p1)
-		(div-terms (term-list p1) (term-list p2)))
+     (let ((divided-terms (div-terms (term-list p1)
+				     (term-list p2))))
+       (make-poly (variable p1)
+		  (car divided-terms)))
      (error
       "These polys cannot be divided, they are not in the same variable -- DIV-POLY"
       p1 p2)))
@@ -463,7 +465,7 @@
 
   (put 'div '(polynomial polynomial)
        (lambda (p1 p2)
-	 (tag (car (div-poly p1 p2)))))
+	 (tag (div-poly p1 p2))))
 
   (put 'gcd '(polynomial polynomial)
        (coerce-up-op gcd-poly))

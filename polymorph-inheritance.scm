@@ -116,7 +116,7 @@
     (not (false? (reduce-right
 		  (lambda (x r) (if (equal? x r) r false))
 		  '()
-		  (map type-tag type-towers))))))
+		  type-towers)))))
 
 (define (raise-all-or-fail args)
   (map (lambda (x) (if (raiseable? x) (raise x)
@@ -178,7 +178,13 @@
      *inheritance-graph*))
 
 (define (get-type-tower-for x)
-  (car (filter (lambda (tower) (memq x tower)) (get-type-towers))))
+  (let ((filtered
+	 (filter (lambda (tower)
+		   (memq x tower))
+		 (get-type-towers))))
+    (if (not (null? filtered))
+	(car filtered)
+	'())))
  
 (define (attach-tag tag datum)
   (cond
