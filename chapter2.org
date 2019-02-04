@@ -8716,7 +8716,256 @@
      was implemented in exercise 2.91. 
 
      - Exercise 2.94: Using div-terms, implement the procedure
-       remainder-terms 
+       remainder-terms and use this to define gcd-terms as above. Now
+       write a procedure gcd-poly that computes the polynomial GCD of
+       two polys. (The procedure should signal an error if the two
+       polys are not in the same variable.) Install in the system a
+       generic operation greatest-common-divisor that reduces to
+       gcd-poly for polynomials and to ordinary gcd for ordinary
+       numbers. As a test, try
+
+       #+BEGIN_SRC scheme
+       (define p1 (make-polynomial
+                   'x
+                   '((4 1) (3 -1) (2 -2) (1 2))))
+       (define p2 (make-polynomial
+                   'x
+                   '((3 1) (1 -1))))
+       (greatest-common-divisor p1 p2)
+       #+END_SRC
+
+       The GCD according to my algorithm is 
+       #+BEGIN_SRC scheme
+       (polynomial x sparse-term-list (2 -1) (1 1))
+       #+END_SRC
+
+     - Exercise 2.95: Define P_1, P_2, and P_3 to be the polynomials:
+
+       \begin{polys}
+       P_1: x^2 - 2x + 1,
+       P_2: 11x^2 + 7,
+       P_3: 13x + 5.
+       \end{polys}
+
+       Now define Q_1 to be the product of P_1 and P_2 and Q_2 to be
+       the product of P_1 and P_3, and use greatest-common-divisor to
+       compute the GCD of Q_1 and Q_2. Note that the answer is not the
+       same as P_1. This example introduces noninteger operations into
+       the computation, causing difficulties with the GCD
+       algorithm. To understand what is happening, try tracing
+       gcd-terms while computing the GCD or try performing the
+       division by hand.
+
+       #+BEGIN_SRC scheme
+       (define p1 (make-polynomial 'x '(sparse-term-list (2 1) (1 -2) (0 1))))
+       (define p2 (make-polynomial 'x '(sparse-term-list (2 11) (0 7))))
+       (define p3 (make-polynomial 'x '(sparse-term-list (1 13) (0 5))))
+       (define q1 (mul p1 p2))
+       (define q2 (mul p1 p3))
+       (define the-gcd (gcd q1 q2)
+       the-gcd
+       ; => (polynomial x sparse-term-list 
+                          (2 (rational 1458 . 169)) 
+                          (1 (rational -2916 . 169)) 
+                          (0 (rational 1458 . 169)))
+       #+END_SRC
+
+       What happens is that in div-terms we get strange fractional
+       coefficients in the remainder from the division, and these
+       carry on in the next iteration of GCD. The fractions get worse
+       and worse as gcd continues to get remainders, because our
+       fraction division doesn't try to make it human readable and
+       just makes the fractions work.
+
+       
+     We can solve the problem exhibited in exercise 2.95 if we use the
+     following modification of the GCD algorithm (which really works
+     only in the case of polynomials with integer
+     coefficients). Before performing any polynomial division in the
+     GCD computation, we multiply the dividend by an integer constant
+     factor, chosen to guarantee that no fractions will arise during
+     the division process. Our answer will thus differ from the actual
+     GCD by an integer constant factor, but this does not matter in
+     the case of reducing rational functions to lowest terms; the GCD
+     will be used to divide both the numerator and denominator, so the
+     integer constant factor will cancel out.
+
+     More precisely, if P and Q are polynomials, let O_1 be the order
+     of P (i.e. the order of the largest term of P) and let O_2 be the
+     order of Q. Let c be the leading coefficient of Q. Then it can be
+     shown that, if we multiply P by the _integerizing factor_ c^{1 +
+     O_q - O_2}, the resulting polynomial can be divided by Q by using
+     the div-terms algorithm without introducing any fractions. The
+     operation of multiplying the divided by this constant and then
+     dividing is sometimes called the _pseudodivision_ of P by Q. The
+     remainder of the division is called the _pseudoremainder_.
+
+     - Exercise 2.96:
+
+       a. Implement the procedure pseudoremainder-terms, which is just
+       like remainder-terms except that it multiplies the dividend by
+       the integerizing factor described above before calling
+       div-terms. Modify the gcd-terms to use pseudoremainder-terms,
+       and verify that greatest-common-divisor now produces an answer
+       with integer coefficients on the example in Exercise 2.95. 
+
+       #+BEGIN_SRC scheme
+       (define (mul-term-coefficients c terms-list)
+        (cond
+         ((empty-termlist? terms-list) terms-list)
+         (else
+          (let ((first (first-term terms-list)))
+    	(adjoin-term
+    	 (make-term
+    	  (order first)
+    	  (mul (coeff first) c))
+    	 (mul-term-coefficients c (rest-terms terms-list)))))))
+       (define (terms-order terms-list)
+        (order (first-term terms-list)))
+    
+        (define (pseudoremainder-terms L1 L2)
+         (let ((c (expt (coeff (first-term L2))
+    		   (+ 1 (- (terms-order L1) (terms-order L2))))))
+           (remainder-terms
+            (mul-term-coefficients c L1)
+             L2)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       1 (user) => (gcd q1 q2)
+       ;Value 68: (polynomial x sparse-term-list (2 1458) (1 -2916) (0 1458))
+       #+END_SRC
+
+       b. The GCD now has integer coefficients, but they are larger
+       than those of P_1. Modify gcd-terms so that it removes common
+       factors from the coefficients of the answer by dividing all the
+       coefficients by their (integer) greatest common divisor.
+
+       #+BEGIN_SRC scheme
+       (define (get-int-coeffs terms-list)
+         (cond
+          ((empty-termlist? terms-list) '())
+          ((eq? (type-tag (coeff (first-term terms-list))) 'integer)
+           (cons (coeff (first-term terms-list))
+     	    (get-int-coeffs (rest-terms terms-list))))
+          (else
+           (get-int-coeffs (rest-terms terms-list)))))
+     
+       (define (gcd-coeffs listof-ints)
+         (cond
+          ((null? listof-ints) 1)
+          ((null? (cdr listof-ints))
+           (car listof-ints))
+          (else
+           (gcd (car listof-ints)
+     	   (gcd-coeffs (cdr listof-ints))))))
+     
+       (define (divide-all-coeffs-by an-integer terms-list)
+         (cond
+          ((empty-termlist? terms-list) terms-list)
+          (else
+           (let ((first (first-term terms-list)))
+     	(adjoin-term
+     	 (make-term (order first)
+     		    (div (coeff first) an-integer))
+     	 (divide-all-coeffs-by an-integer (rest-terms terms-list)))))))
+     
+       (define (divide-integers-by-their-gcd terms-list)
+         (let ((int-coeffs (get-int-coeffs terms-list)))
+           (let ((gcd-coeffs (gcd-coeffs int-coeffs)))
+     	(divide-all-coeffs-by gcd-coeffs terms-list))))
+     
+       (define (gcd-terms a b)
+         (if (empty-termlist? b)
+     	(divide-integers-by-their-gcd a)
+     	(gcd-terms b (pseudoremainder-terms a b))))
+
+       (gcd q2 q1)
+       ;Value 70: (polynomial x sparse-term-list (2 1) (1 -2) (0 1))
+       #+END_SRC
+       
+       
+
+     Thus, here is how to reduce a rational function to lowest terms:
+
+     * Compute the GCD of the numerator and denominator, using the
+       version of gcd-terms from exercise 2.96.
+     * When you obtain the GCD, multiply both numerator and
+       denominator by the same integerizing factor before dividing
+       through by the GCD, so that division by the GCD will not
+       introduce any noninteger coefficients. As the factor you can
+       use the leading coefficient of the GCD raised to the power 1 +
+       O_1 - O_2, where O_2 is the order of the GCD and O_1 is the
+       maximum order of the orders of the numerator and
+       denominator. This will ensure that dividing the numerator and
+       denominator by the GCD will not introduce any fractions.
+     * The result of this operation will be a numerator and
+       denominator with integer coefficients. The coefficients will
+       normally be very large because of all the integerizing factors,
+       so the last step is to remove the redundant factors by
+       computing the (integer) greatest common divisor of all the
+       coefficients of the numerator and the denominator by dividing
+       through by this factor.
+
+
+     - Exercise 2.97:
+
+       a. Implement this algorithm as a procedure reduce-terms that
+       takes two term lists n and d as arguments and returns a list
+       nn, dd, which are n and d reduced to lowest terms via the
+       algorithm given above. Also write a procedure reduce-poly,
+       analogous to add-poly, that checks to see if the two polys have
+       the same variable. If so, reduce-poly strips of the variable
+       and passes the problem to reduce-terms, then reattaches the
+       variable to the two term lists supplied by reduce-terms.
+
+       b. Define a procedure analogous to reduce-terms that does what
+       the original make-rat did for integers:
+
+       #+BEGIN_SRC scheme
+       (define (reduce-integers n d)
+        (let ((g (gcd n d)))
+         (list (/ n g) (/ d g))))
+       #+END_SRC
+
+       and define reduce as a generic operation that calls
+       apply-generic to dispatch to either reduce-poly or
+       reduce-integers. You can now easily make the rational
+       arithmetic package reduce fractions to lowest terms by having
+       make-rat call reduce before combining the given numerator and
+       denominator to form a rational number. The system now handles
+       rational expressions in either integers or polynomials. To test
+       your program, try the example at the beginning of this extended
+       exercise:
+
+       #+BEGIN_SRC scheme
+       (define p1 (make-polynomial 'x '((1 1) (0 1))))
+       (define p2 (make-polynomial 'x '((3 1) (0 -1))))
+       (define p3 (make-polynomial 'x '((1 1))))
+       (define p4 (make-polynomial 'x '((2 1) (0 -1))))
+       (define rf1 (make-rational p1 p2))
+       (define rf2 (make-rational p3 p4))
+       (add rf1 rf2)
+       #+END_SRC
+
+       See if you get the correct answer, correctly reduced to lowest
+       erms.
+
+       The GCD computation is at the heart of any system that does
+       operations on rational functions. The algorithm used above,
+       although mathematically straightforward, is extremely slow. The
+       slowness is due partly to the large number of division
+       operations and partly to the enormous size of the intermediate
+       coefficients generated by teh pseudodivisions. One of the
+       active areas in the development of algebraic-manipulation
+       systems is the design of better algorithms for computing
+       polynomial GCDs.
+
+       
+
+       
+
+       
 
 
 

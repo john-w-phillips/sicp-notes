@@ -195,12 +195,90 @@
   (define (remainder-terms L1 L2)
     (let ((div-terms-result (div-terms L1 L2)))
       (cadr div-terms-result)))
+  (define (mul-term-coefficients c terms-list)
+    (cond
+     ((empty-termlist? terms-list) terms-list)
+     (else
+      (let ((first (first-term terms-list)))
+	(adjoin-term
+	 (make-term
+	  (order first)
+	  (mul (coeff first) c))
+	 (mul-term-coefficients c (rest-terms terms-list)))))))
+  (define (terms-order terms-list)
+    (order (first-term terms-list)))
+
+  (define (pseudoremainder-terms L1 L2)
+    (let ((c (expt (coeff (first-term L2))
+		   (+ 1 (- (terms-order L1) (terms-order L2))))))
+      (remainder-terms
+       (mul-term-coefficients c L1)
+       L2)))
+
+  (define (get-int-coeffs terms-list)
+    (cond
+     ((empty-termlist? terms-list) '())
+     ((eq? (type-tag (coeff (first-term terms-list))) 'integer)
+      (cons (coeff (first-term terms-list))
+	    (get-int-coeffs (rest-terms terms-list))))
+     (else
+      (get-int-coeffs (rest-terms terms-list)))))
+
+  (define (gcd-coeffs listof-ints)
+    (cond
+     ((null? listof-ints) 1)
+     ((null? (cdr listof-ints))
+      (car listof-ints))
+     (else
+      (gcd (car listof-ints)
+	   (gcd-coeffs (cdr listof-ints))))))
+
+  (define (divide-all-coeffs-by an-integer terms-list)
+    (cond
+     ((empty-termlist? terms-list) terms-list)
+     (else
+      (let ((first (first-term terms-list)))
+	(adjoin-term
+	 (make-term (order first)
+		    (div (coeff first) an-integer))
+	 (divide-all-coeffs-by an-integer (rest-terms terms-list)))))))
+
+  (define (divide-integers-by-their-gcd terms-list)
+    (let ((int-coeffs (get-int-coeffs terms-list)))
+      (let ((gcd-coeffs (gcd-coeffs int-coeffs)))
+	(divide-all-coeffs-by gcd-coeffs terms-list))))
 
   (define (gcd-terms a b)
     (if (empty-termlist? b)
-	a
-	(gcd-terms b (remainder-terms a b))))
-	 
+	(divide-integers-by-their-gcd a)
+	(gcd-terms b (pseudoremainder-terms a b))))
+
+  (define (reduce-terms n d)
+    (let ((gcd-of-terms (gcd-terms n d)))
+      (let ((c
+	     (expt (coeff (first-term gcd-of-terms))
+		   (+ 1 (- (max (terms-order n)
+				(terms-order d))
+			   (terms-order gcd-of-terms))))))
+	(let ((integerized-num (mul-term-coefficients c n))
+	      (integerized-den (mul-term-coefficients c d)))
+	  (let ((divided-num (car (div-terms integerized-num
+					gcd-of-terms)))
+		(divided-denom
+		 (car (div-terms integerized-den
+			    gcd-of-terms))))
+	    (let ((reduction-factor
+		   (gcd-coeffs
+		    (append
+		     (get-int-coeffs divided-num)
+		     (get-int-coeffs divided-denom)))))
+	      (list (divide-all-coeffs-by
+		     reduction-factor
+		     divided-num)
+		    (divide-all-coeffs-by
+		     reduction-factor
+		     divided-denom))))))))
+	
   ;; representation of poly
   (define (make-poly variable term-list) (cons variable term-list))
   (define (variable p) (car p))
@@ -214,6 +292,22 @@
 		true
 		(term-list poly)))
   (put '=zero? '(polynomial) =poly-zero?)
+  (define (reduce-poly poly1 poly2)
+    (cond
+     ((same-variable? (variable poly1)
+		      (variable poly2))
+      (let ((reduced (reduce-terms (term-list poly1)
+				   (term-list poly2))))
+	(list
+	 (make-poly
+	  (variable poly1)
+	  (car reduced))
+	 (make-poly
+	  (variable poly1)
+	  (cadr reduced)))))
+     (else
+      (error "These polynomials don't have the same variable -- REDUCE-POLY"
+	     poly1 poly2))))
 
   ;; is v1 higher than v2?
   (define (higher-variable? v1 v2)
@@ -469,7 +563,12 @@
 
   (put 'gcd '(polynomial polynomial)
        (coerce-up-op gcd-poly))
- 
+  (put 'reduce '(polynomial polynomial)
+       (lambda (p1 p2)
+	 (let ((reduced (reduce-poly p1 p2)))
+	   (list
+	    (tag (car reduced))
+	    (tag (cadr reduced))))))
   (put 'remainder '(polynomial polynomial)
        (lambda (p1 p2)
 	 (tag (cadr (div-poly p1 p2)))))

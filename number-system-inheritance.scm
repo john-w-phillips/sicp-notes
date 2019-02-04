@@ -12,16 +12,21 @@
 (define (arctan x y) (apply-generic 'arctan x y))
 (define (add4 a b c d) (apply-generic 'add4 a b c d))
 (define (gcd a b) (apply-generic 'gcd a b))
+(define (reduce a b) (apply-generic 'reduce a b))
 (define (=zero? x) (apply-generic '=zero? x))
 
 (define (install-integer)
   (define (tag x)
     (attach-tag 'integer x))
+  (define (reduce-int n d)
+    (let ((g (gcd-int n d)))
+      (list (/ n g) (/ d g))))
+
   (define (gcd-int a b)
     (if (= b 0)
 	a
 	(gcd-int b (remainder a b))))
-     
+
   (put-projection 'rational
 		  (lambda (x) (floor (/ (numer x) (denom x)))))
   (put '=zero? '(integer) (lambda (x) (= x 0)))
@@ -49,6 +54,7 @@
     (= x y))
   (put 'gcd '(integer integer) gcd-int)
   (put 'equ? '(integer integer) scheme-number-equ?)
+  (put 'reduce '(integer integer) reduce-int)
   (put-raise 'integer 'rational (lambda (integer)
 				  (make-rational integer 1)))
   'done)
@@ -61,8 +67,12 @@
   (define (numer x) (car x))
   (define (denom x) (cdr x))
   (define (make-rat n d)
-    (let ((g (gcd n d)))
-      (cons (div n g) (div d g))))
+    (if (get 'reduce (map type-tag (list n d)))
+	(let ((reduced (reduce n d)))
+	  (cons (car reduced)
+		(cadr reduced)))
+	(cons n d)))
+
   ;; (define (make-rat n d)
   ;;   (cons n d))
   (define (=zero-rational? x)
