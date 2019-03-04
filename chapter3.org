@@ -2540,6 +2540,7 @@
        (define (delete-back!)
         (let ((old-rear back-ptr))
          (set! back-ptr (old-rear 'prev))
+         ((back-ptr 'set-next!) '())
          ((old-rear 'set-prev!) '()) 
          front-ptr))
        (define (delete-front!)
@@ -2573,14 +2574,424 @@
        dispatch))
       #+END_SRC
     
+*** 3.3.3. Representing Tables
+    When we studied various ways of representing sets in Chapter 2, we
+    mentioned in Section 2.3.3. the task of maintaining a table of
+    records indexed by identifying keys. In the implementation of
+    data-directed programming in Section 2.4.3, we made extensive use
+    of two-dimensional tables, in which information is stored and
+    retrieved using two keys. Here we see how to build tables as
+    mutable list structures.
 
-      
-
-      
-      
-
-      
-
-
+    We first consider a one-dimensional table, in which each value is
+    stored under a single key. We implement the table as a list of
+    records, each of which is implemented as a pair consisting of a
+    key and the associated value. The records are glued together to
+    form a list by pairs whose cars point to successive records. These
+    gluing pairs are called the _backbone_ of the table. In order to
+    have a place that we can change when we add a new record to the
+    table, we build the table as a _headed list_. A headed list has a
+    special backbone pair at the beginning, which holds a dummy
+    "record" -- in this case the arbitrarily chosen symbol \*table\*.
     
+    To extract information from a table we use the lookup procedure,
+    which takes a key as argument and returns the associated value (or
+    false if there is no value stored under that key). lookup is
+    defined in terms of the assoc operation, which expects a key and a
+    list of records as arguments. Note that assoc never sees the dummy
+    record. assoc returns the record that has the given key as its
+    car. lookup then checks to see that the resulting record returned
+    by assoc is not false, and returns the value (the cdr) of the
+    record.
+
+    #+BEGIN_SRC scheme
+    (define (lookup key table)
+     (let ((record (assoc key (cdr table))))
+      (if record
+          (cdr record)
+          false)))
+    (define (assoc key records)
+     (cond ((null? records) false)
+           ((equal? key (caar records)) (car records))
+           (else (assoc key (cdr records)))))
+    #+END_SRC
+
+    To insert a value in a table under a specified key, we first use
+    assoc to see if there is already a record in the table with this
+    key. If not, we form a new record by consing the key with the
+    value, and insert this at the head of the table's list of records,
+    after the dummy record. If there already is a record with this
+    key, we set the cdr of this record to the designated new
+    value. The header of the table provides us with a fixed location
+    to modify in order to insert the new record.
+
+    #+BEGIN_SRC scheme
+    (define (insert! key value table)
+     (let ((record (assoc key (cdr table))))
+      (if record
+          (set-cdr! record value)
+          (set-cdr! table
+                    (cons (cons key value)
+                          (cdr table))))
+     'ok))
+    #+END_SRC
+
+    To construct the new table, we simply create a list containing the
+    symbol \*table\*:
+
+    #+BEGIN_SRC scheme
+    (define (make-table)
+     (list '*table*))
+    #+END_SRC
+
+**** Two-dimensional tables
+
+     In a two-dimensional table, each value is indexed by two keys. We
+     can construct such a table as a one-dimensional table in which
+     each key identifies as a subtable. Figure 3.23 shows the
+     box-and-pointer diagram for the table
+
+     math: +: 43          letters:  a: 97
+           -: 45                    b: 98
+           *: 42
+
+     which has two subtables (The subtables don't need a special
+     header symbol, since the key that identifies the subtable serves
+     this purpose.)
+
+     When we look up an item, we use the first key to identify the
+     correct subtable. Then we use the second key to identify the
+     record within the subtable.
+
+     #+BEGIN_SRC scheme
+     (define (lookup key-1 key-2 table)
+      (let ((subtable
+             (assoc key-1 (cdr table))))
+       (if subtable
+           (let ((record
+                  (assoc key-2 (cdr subtable))))
+            (if record
+                (cdr record)
+                false))
+          false)))
+     #+END_SRC
+
+     To insert a new item under a pair of keys, we use assoc to see if
+     there is a subtable stored under the first key. If not, we build
+     a new subtable containing a single record (key-2, value) and
+     insert it into the table under the first key. If a subtable
+     already exists for the first key, we insert the new record into
+     this subtable, using the insertion method for one-dimensional
+     tables described above:
+
+     #+BEGIN_SRC scheme
+     (define (insert! key-1 key-2 value table)
+      (let ((subtable (assoc key-1 (cdr table))))
+       (if subtable
+           (let ((record (assoc key-2 (cdr subtable))))
+            (if record
+                (set-cdr! record value)
+                (set-cdr! subtable
+                          (cons (cons key-2 value)
+                                (cdr subtable)))))
+          (set-cdr! table
+                    (cons (list key-1
+                                (cons key-2 value))
+                          (cdr table)))))
+      'ok)
+     #+END_SRC
+
+**** Creating local tables
+
+     The lookup and insert! operations defined above take the table as
+     an argument. This enables us to use programs that access more
+     than one table. Another way to deal with multiple tables is to
+     have separate lookup and insert! procedures for each table. We
+     can do this by representing a table procedurally, as an object
+     that maintains an internal table as part of its local state. When
+     sent an appropriate message, this "table object" supplies the
+     procedure with which to operate on the internal table. Here is a
+     generator for two-dimensional tables represented in this fashion:
+
+     #+BEGIN_SRC scheme
+     (define (make-table)
+      (let ((local-table (list '*table*)))
+       (define (lookup key-1 key-2)
+        (let ((subtable
+               (assoc key-1 (cdr local-table))))
+         (if subtable
+             (let ((record
+                    (assoc key-2 (cdr subtable))))
+              (if record (cdr record) false))
+            false)))
+       (define (insert! key-1 key-2 value)
+        (let ((subtable
+               (assoc key-1 (cdr local-table))))
+         (if subtable
+             (let ((record
+                    (assoc key-2 (cdr subtable))))
+              (if record
+                  (set-cdr! record value)
+                  (set-cdr! subtable
+                            (cons (cons key-2 value)
+                                  (cdr subtable)))))
+            (set-cdr! local-table
+                      (cons (list key-1 (cons key-2 value))
+                            (cdr local-table)))))
+        'ok)
+      (define (dispatch m)
+       (cond ((eq? m 'lookup-proc) lookup)
+             ((eq? m 'insert-proc!) insert!)
+             (else (error "Unknown operation: TABLE" m))))
+      dispatch))
+     #+END_SRC
+
+     Using make-table, we could implement the get and put operations
+     used in Section 2.4.3 for data-directed programming, as follows:
+
+     #+BEGIN_SRC scheme
+     (define operation-table (make-table))
+     (define get (operation-table 'lookup-proc))
+     (define put (operation-table 'insert-proc!))
+     #+END_SRC
+
+     get takes as arguments two keys, and put takes as arguments two
+     keys and a value. Both operations access the same local table,
+     which is encapsulated within the object created by teh call to
+     make-table.
+
+     - Exercise 3.24: In the table implementations above, the keys are
+       tested for equality using equal? (called by assoc). This is not
+       always the appropriate test. For instance, we might have a
+       table with numeric keys in which we don't need an exact match
+       to the number we're lookuping up, but only a number within some
+       tolerance of it. Design a table constructor make-table that
+       takes as an argument a same-key? procedure that will be used to
+       test "equality" of keys. make-table should return a dispatch
+       procedure that can be used to access appropriate lookup and
+       insert! procedures for a local table.
+
+       You also need to rewrite assoc.
+       #+BEGIN_SRC scheme
+       (define (assoc/key a-list key same-key?)
+        (cond
+         ((null? a-list) false)
+         ((same-key? (caar a-list) key) (car a-list))
+         (else (assoc/key (cdr a-list) key same-key?))))
+       (define (make-table same-key?)
+        (let ((local-table (list '*table*)))
+         (define (lookup key)
+          (let ((record (assoc/key (cdr local-table) key same-key?)))
+           (if record
+               (cdr record)
+               false)))
+         (define (insert! key value)
+          (let ((record (assoc/key (cdr local-table) key same-key?)))
+           (if record
+               (set-cdr! record value)
+               (set-cdr! local-table
+                         (cons (cons key value)
+                               (cdr local-table)))))
+          'ok)
+         (define (dispatch m)
+          (cond
+           ((eq? m 'lookup) lookup)
+           ((eq? m 'insert!) insert!)
+           (else (error "Unknown message -- DISPATCH" m))))
+         dispatch))
+       #+END_SRC
+
+     - Exercise 3.25: Generalizing one- and two-dimensional tables,
+       show how to implement a table in which values are stored under
+       an arbitrary number of keys and different values may be stored
+       under different numbers of keys. The lookup and insert!
+       procedures should take as input a list of keys used to access
+       the table. 
+
+       #+BEGIN_SRC scheme
+       (define (make-table)
+        (let ((local-table (list '*table*)))
+
+         (define (lookup . keys)
+          (lookup-list keys local-table))
+         (define (lookup-list keys record)
+          (cond
+           ((null? keys) (cdr record))
+           (else
+            (let ((entry (assoc (car keys) (cdr record))))
+             (if entry
+                 (lookup-list (cdr keys) entry)
+                 false)))))
+
+         (define (insert! . keys-and-value)
+          (insert-list! keys-and-value local-table))
+         (define (insert-list! keys-and-value entry)
+          (cond
+           ((null? (cdr keys-and-value))
+            (set-cdr! entry (car keys-and-value))
+            'ok)
+           (else
+            (let ((record (assoc (car keys-and-value) (cdr entry))))
+             (if record
+                 (insert-list! (cdr keys-and-value) record)
+                 (let ((new-entry (cons (car keys-and-value) (list))))
+                  (set-cdr! entry
+                            (cons new-entry
+                                  (cdr entry)))
+                  (insert-list! (cdr keys-and-value) new-entry)))))))
+
+         (define (dispatch m)
+          (cond ((eq? m 'insert!) insert!)
+                ((eq? m 'lookup) lookup)
+                (else (error "Unknown message -- DISPATCH" m))))
+         dispatch))
+       #+END_SRC
+
+     - Exercise 3.26 To search a table as implemented above, one needs
+       to scan through the list of records. This is basically the
+       unordered list representation of Section 2.3.3. For large
+       tables, it may be more efficient to structure the table in a
+       different manner. Describe a table implementation where the
+       (key, value) records are organized using a binary tree,
+       assuming that keys can be ordered in some way (e.g.,
+       numerically or alphabetically).
+
+       Well, you would write a tree implementation pretty much exactly
+       like the tree set we already did, except you'd extract keys to
+       compare. And you'd probably give equality/lessthan/greaterthan
+       function(s) to the make-table procedure.
+
+       #+BEGIN_SRC scheme
+       (define (make-node key value left right)
+        (list key value left right))
+
+       (define (make-empty-node)
+        (list '() '() '() '()))
  
+       (define (empty-node? node)
+        (and (null? (car node))
+             (null? (cadr node))
+             (null? (caddr node))
+             (null? (cadddr node)))) 
+
+       (define (node-key node)
+        (car node))
+
+       (define (node-value node)
+        (cadr node))
+
+       (define (node-left node)
+        (caddr node))
+
+       (define (node-right node)
+        (cadddr node))
+
+       (define (node-set-key! node key)
+        (set-car! node key))
+       (define (node-set-value! node value)
+        (set-car! (cdr node) value))
+
+       (define (node-set-right! node new-right-node)
+        (set-car! (cdddr node) new-right-node))
+
+       (define (node-set-left! node new-left-node)
+        (set-car! (cddr node) new-left-node))
+
+       (define (make-table compare) ;; compare returns 'equal, 'less, or 'greater
+        (let ((local-table (make-empty-node)))
+         (define (lookup key node)
+          (cond
+           ((empty-node? node) false)
+           ((eq? (compare key (node-key node)) 'equal)
+            (node-value node))
+           ((eq? (compare key (node-key node))
+                 'less)
+            (lookup key (node-left node)))
+           ((eq? (compare key (node-key node))
+                 'greater)
+            (lookup key (node-right node)))
+           (else (error "Nonsensical comparison value -- LOOKUP"))))
+
+         (define (insert! key value node)
+          (cond
+           ((empty-node? node)
+            (node-set-key! node key)
+            (node-set-value! node value)
+            (node-set-right! node (make-empty-node))
+            (node-set-left! node (make-empty-node)))
+           ((eq? (compare key (node-key node)) 'equal)
+            (node-set-value! node value))
+           ((eq? (compare key (node-key node)) 'less)
+                (insert! key value (node-left node)))
+           ((eq? (compare key (node-key node)) 'greater)
+                (insert! key value (node-right node)))
+           (else
+            (error "Node does not compare -- INSERT!" key value node))))
+
+        (define (dispatch m)
+         (cond ((eq? m 'insert!) 
+                (lambda (key value) 
+                 (insert!
+                  key value local-table)))
+               ((eq? m 'lookup)
+                (lambda (key)
+                 (lookup key local-table)))
+               (else
+                (error "Unknown message -- DISPATCH" m))))
+       dispatch))
+       #+END_SRC
+
+     - Exercise 3.27: _Memoization_ (also called _tabulation_) is a
+       technique that enables a procedure to record, in a local table,
+       values that have previously been computed. This technique can
+       make a vast difference in the performance of a program. A
+       memoized procedure maintains a table in which values of
+       previous calls are stored using as keys the arguments that
+       produced the values. When the memoized procedure is asked to
+       compute a value, it first checks the table to see if the value
+       is already there and, if so, just returns that
+       value. Otherwise, it computes the new value in the ordinary way
+       and stores this in the table. As an example of memoization,
+       recall from Section 1.2.2 the exponential process for computing
+       Fibonacci numbers:
+
+       #+BEGIN_SRC scheme
+       (define (fib n)
+        (cond ((= n 0) 0)
+              ((= n 1) 1)
+              (else (+ (fib (- n 1)) (fib (- n 2))))))
+       #+END_SRC
+
+       The memoized version of the same procedure is
+
+       #+BEGIN_SRC scheme
+       (define memo-fib
+               (memoize
+                (lambda (n)
+                 (cond ((= n 0) 0)
+                       ((= n 1) 1)
+                       (else (+ (memo-fib (- n 1))
+                                (memo-fib (- n 2))))))))
+       #+END_SRC
+
+       where the memoizer is defined as
+
+       #+BEGIN_SRC scheme
+       (define (memoize f)
+        (let ((table (make-table)))
+         (lambda (x)
+          (let ((previously-computed-result
+                 (lookup x table)))
+           (or previously-computed-result
+              (let ((result (f x)))
+               (insert! x result table)
+               result))))))
+       #+END_SRC
+
+       Draw an environment diagram to analyze the computation of
+       (memo-fib 3). Explain why memo-fib computes the nth Fibonacci
+       number in a number of steps proportional to n. Would the scheme
+       still work if we had simply defined memo-fib to be (memoize
+       fib)?
+
+       
