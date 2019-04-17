@@ -1,0 +1,615 @@
+**** blah
+     - Exercise 3.51 In order to take a closer look at delayed
+       evaluation, we will use the following procedure, which simply
+       returns its argument after printing it:
+
+       #+BEGIN_SRC scheme
+       (define (show x)
+        (display-line x)
+        x)
+       #+END_SRC
+
+       What does the interpreter print in response to evaluating each
+       expression in the following sequence?
+
+       #+BEGIN_SRC scheme
+       (define (stream-ref s n)
+        (if (= n 0) (stream-car s) (stream-ref (stream-cdr s) (- n 1))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (stream-map fun s)
+        (if (empty-stream? s)
+            the-empty-stream
+            (stream-cons (fun (stream-car s))
+                         (stream-map fun (stream-cdr s)))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define x
+               (stream-map show
+                           (stream-enumerate-interval 0 10)))
+       (stream-ref x 5)
+       (stream-ref x 7)
+       #+END_SRC
+
+       first statement:
+       #+BEGIN_SRC scheme
+       0
+       #+END_SRC
+
+       second statement:
+       #+BEGIN_SRC scheme
+       1
+       2
+       3
+       4
+       5
+       #+END_SRC
+
+       third statement:
+       #+BEGIN_SRC scheme
+       6
+       7
+       #+END_SRC
+
+     - Exercise 3.52: Consider the sequence of expressions
+
+       #+BEGIN_SRC scheme
+       (define sum 0)
+       (define (accum x) (set! sum (+ x sum)) sum)
+       (define seq
+               (stream-map accum
+                           (stream-enumerate-interval 1 20)))
+       (define y (stream-filter even? seq))
+       (define z
+               (stream-filter (lambda (x) (= (remainder x 5) 0))
+                              seq))
+       (stream-ref y 7)
+       (display-stream z)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (stream-filter pred seq)
+        (if (stream-empty? seq) 
+            the-empty-stream
+            (if (pred (stream-car seq))
+                (cons-stream (stream-car seq)
+                             (stream-filter pred (stream-cdr stream)))
+                (stream-filter pred (stream-cdr stream)))))
+       #+END_SRC
+
+       The basic sequence is:
+       1 3 6 10 15 21 28 36 45 55  66  78  91  105 120 136 153 171 190 
+       1 2 3 4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19 
+       What is the value of sum after each of the above expressions is
+       evaluated? What is the printed response to evaluating the
+       stream-ref and display-stream expressions? Would these
+       responses differ if we had implemented (delay <exp>) simply as
+       (lambda () <exp>) without using the optimization provided by
+       memo-proc? Explain.
+
+       After defining seq: 1
+       After defining y: 6
+       After defining z: 10
+       After evaluating (stream-ref y 7): 136
+       After evaluating (display-stream z): 190
+
+       The value would have been different, because we would have had
+       to re-calculate the sequence values every time we re-iterated
+       the sequence, which would have involved calling accum since we
+       use stream-map. Accum would have then added values to sum every
+       time, so each time we evaluated we would get larger values.
+       
+*** 3.5.2 Infinite streams
+
+    We have seen how to support the illusion of manipulating streams
+    as complete entities even though, in actuality, we compute only as
+    much of the streams as we need to access. We can exploit this
+    technique to represent sequences efficiently as streams, even if
+    the sequences are very long. What is more striking, we can use
+    streams to represent sequences that are infinitely long. For
+    instance, consider the following definition of the stream of
+    positive integers:
+
+    #+BEGIN_SRC scheme
+    (define (integers-starting-from n)
+     (cons-stream n (integers-starting-from (+ n 1))))
+    (define integers (integers-starting-from 1))
+    #+END_SRC
+
+    This makes sense because integers will be a pair whose car is 1
+    and whose cdr is a promise to produce the integers beginning
+    with 2. This is an infinitely long tream, but in any given time we
+    can examine only a finite protion of it. Thus, our programs will
+    never know that the entire infinite stream is not there.
+
+    Using integers we can define other infinite streams, such as the
+    stream of integers that are not divisible by 7:
+
+    #+BEGIN_SRC scheme
+    (define (divisble? x y) (= (remainder x y) 0))
+    (define no-sevens
+            (stream-filter (lambda (x) (not (divisible? x 7)))
+                           integers))
+    #+END_SRC
+
+    Then we can find integers not divisible by 7 simply by accessing
+    elements of this stream:
+
+    #+BEGIN_SRC scheme
+    (stream-ref no-sevens 100)
+    #+END_SRC
+
+    In analogy with integers, we can define the infinite stream of
+    Fibonacci numbers:
+
+    #+BEGIN_SRC scheme
+    (define (fibgen a b) (cons-stream a (fibgen b (+ a b))))
+    (define fibs (fibgen 0 1))
+    #+END_SRC
+
+    fibs is a pair whose car is 0 and whose cdr is a promise to
+    evaluate (fibgen 1 2), and so on.
+
+    For a look at a more exciting infinite stream, we can generalize
+    the no-sevens example to construct the infinite stream of prime
+    numbers, using a method known as the _sieve of Eratosthenes_. We
+    start with the integers beginning with 2, which is the first
+    prime. To get the rest of hte primes, we start by filtering out
+    the multiples of 2 from the rest of the integers. This leaves a
+    stream beginning with 5, which is the next prime, and so on. In
+    other words, we construct the primes by a sieving process,
+    described as follows: To sieve a stream S, form a stream whose
+    first element is the first element of S and the rest of which is
+    obtained by filtering out all multiples of the first element of S
+    out of the rest of S and sieving the result. This process is
+    readily described in terms of stream operations:
+    
+    #+BEGIN_SRC scheme
+    (define (sieve stream)
+     (cons-stream
+      (stream-car stream)
+      (sieve (stream-filter
+              (lambda (x)
+               (not (divisible? x (stream-car stream))))
+              (stream-cdr stream)))))
+    (define primes (sieve (integers-starting-from 2)))
+    #+END_SRC
+
+    Now to find a particular prime we need only ask for it:
+
+    #+BEGIN_SRC scheme
+    (stream-ref primes 50)
+    233
+    #+END_SRC
+
+    It is interesting to contemplate the signal-processing system set
+    up by sieve, shown in the "Henderson diagram" in Figure 3.31. The
+    input stream feeds into an "unconser" that separates the first
+    element of the stream from the rest of the stream. The first
+    element is used to construct a divisibility filter, through which
+    the rest is passed, and the output of the filter is fed to another
+    sieve box. Then the original first element is consed onto the
+    output of the itnernal sieve to form the output stream. Thus, not
+    only is the stream infinite, but the signal processor is also
+    infinite, because the sieve contains a sieve within it. 
+
+**** Defining streams implicitly
+     
+     The integers and fibs streams above were defined by specifying
+     "generating" procedures that explicitly compute the stream
+     elements one by one. An alternative way to specify streams is to
+     take advantage of delayed evaluation to define streams
+     implicitly. For example, the following expression defines the
+     stream ones to be an infinite stream of ones:
+
+     #+BEGIN_SRC scheme
+     (define ones (cons-stream 1 ones))
+     #+END_SRC
+
+     This works much like the definition of a recursive procedure:
+     ones is a pair whose car is 1 and whose cdr is a promise to
+     evaluate ones. Evaluating the cdr gives us again a 1 and a
+     promise to evaluate ones, and so on.
+
+     We can do more interesting things by manipulating streams with
+     operations such as add-streams, which produces the elementwise
+     sum of two given streams:
+
+     #+BEGIN_SRC scheme
+     (define (add-streams s1 s2) (stream-map + s1 s2))
+     #+END_SRC
+
+     Now we can define the integers as follows:
+
+     #+BEGIN_SRC scheme
+     (define integers
+             (cons-stream 1 (add-streams ones integers)))
+     #+END_SRC
+
+     This defines integers to be a stream whose first element is 1 and
+     the rest of which is the sum of ones and integers. Thus, the
+     second element of integers is 1 plus the first element of
+     integers, or 3; and so on. This definition works because, at any
+     point, enough of the integers stream has been generated so that
+     we can feed it back into the definition and produce the next
+     integer. 
+
+     We can define the Fibonacci numbers in the same style:
+
+     #+BEGIN_SRC scheme
+     (define fibs
+      (cons-stream
+       0
+       (cons-stream 1 (add-streams (stream-cdr fibs) fibs))))
+     #+END_SRC
+
+     This definition says that fibs is a stream beginning with 0 and
+     1, such that the rest of the stream can be generated by adding
+     fibs to itself shifted by one place:
+
+     #+BEGIN_SRC scheme
+           1  1  2  3  5  8   13  21  ...  = (stream-cdr fibs)
+           0  1  1  2  3  5   8   13  ...  = fibs
+     0  1  1  2  3  5  8  13  21  34  ...  = fibs
+     #+END_SRC
+    
+
+     scale-stream is another useful procedure in formulating such
+     stream definitions. This multiplies each item in a stream by a
+     given constant:
+
+     #+BEGIN_SRC scheme
+     (define (scale-stream stream factor)
+      (stream-map (lambda (x) (* x factor))
+                  stream))
+     #+END_SRC
+
+     For example,
+
+     #+BEGIN_SRC scheme
+     (define double (cons-stream 1 (scale-stream double 2)))
+     #+END_SRC
+
+     produces the stream of powers of 2: 1, 2, 4, 8, 16, 32, ...
+
+     An alternate definition of the stream of primes can be given by
+     starting with the integers and filtering them by testing for
+     primality. We will need the first prime, 2, to get started:
+
+     #+BEGIN_SRC scheme
+     (define primes
+      (cons-stream
+       2
+       (stream-filter prime? (itnegers-starting-from 3))))
+     #+END_SRC
+
+     This definition is not so straightforward as it appears, because
+     we will test whether a number _n_ is prime by checking whetehr
+     _n_ is divisible by a prime (not by just any integer) less than
+     or equal to sqrt(n):
+
+     #+BEGIN_SRC scheme
+     (define (prime? n)
+      (define (iter ps)
+       (cons ((> (square (stream-car ps)) n) true)
+             ((divisible? n (stream-car ps)) false)
+             (else (iter (stream-cdr ps)))))
+      (iter primes))
+     #+END_SRC
+
+     This is a recursive definition, since primes is defined in terms
+     of the prime? predicate, which itself uses the primes stream. The
+     reason this procedure works is that, at any point, enough of the
+     primes stream has been generated to test the primality of the
+     numbers we need to check next. That is, for every _n_ we test for
+     primality, either _n_ is not prime (in which case there is a
+     prime already generated that divides it) or _n_ is prime (in
+     which case there is a prime already generated -- i.e., a prime
+     less than _n_ -- that is greater than sqrt(n)). 
+
+
+     - Exercise 3.53: Without running the program, describe the
+       elements of the stream defined by
+
+       #+BEGIN_SRC scheme
+       (define s (cons-stream 1 (add-streams s s)))
+       #+END_SRC
+
+       1 2 4 8 16 ...
+       
+       The powers of two.
+
+     - Exercise 3.54: Define a procedure mul-streams, analogous to
+       add-streams, that produces the elementwise product of its two
+       input streams. Use this together with the stream of integers to
+       complete the following definition of the stream whose nth
+       element (counting from 0) is n + 1 factorial:
+
+       #+BEGIN_SRC scheme
+       (define factorials
+        (cons-stream 1 (mul-streams <??> <??>)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (mul-streams s1 s2) (stream-map * s1 s2))
+       (define factorials
+        (cons-stream 1 (mul-streams factorials (integers-starting-from 2))))
+       #+END_SRC
+
+     - Exercise 3.55: Define a procedure partial-sums that takes as
+       argument a stream S and returns the stream whose elements are
+       S_0, S_0 + S_1, S_0 + S_1 + S_2, .... For example,
+       (partial-sums integers) should be the stream 1, 3, 6, 10,
+       15,...
+
+       #+BEGIN_SRC scheme
+       (define (partial-sums s)
+        (cons-stream
+         (stream-car s)
+         (partial-sums
+          (cons-stream (+ (stream-car s)
+                          (stream-car (stream-cdr s)))
+                       (stream-cdr (stream-cdr s))))))
+       #+END_SRC
+
+     - Exercise 3.56: A famous problem, first raised by R. Hamming, is
+       to enumerate, in ascending order with no repititions, all
+       positive integers with no prime factors other than 2, 3,
+       or 5. One obvious way to do this is to simply test each integer
+       in turn to see whether it has any factors other than 2, 3,
+       and 5. One obvious way to do this is to simply test each
+       integer in turn to see whether it has any factors other than 2,
+       3, and 5. But this is very inefficient, since, as the integers
+       get larger, fewer and fewer of them fit the requirement. As an
+       alternative, let us call the required stream of numbers S and
+       notice the following facts about it.
+
+       - S begins with 1.
+
+       - The elements of (scale-stream S 2) are also elements of S.
+
+       - The same is true for (scale-stream S 3) and (scale-stream 5
+         S).
+
+       - These are all the elements of S.
+
+       Now all we have to do is combine elements from these
+       sources. For this we define a procedure merge that combines two
+       ordered streams into one ordered result stream, eliminating
+       repetitions:
+
+       #+BEGIN_SRC scheme
+       (define (merge s1 s2)
+       (cond ((stream-null? s1) s2)
+       ((stream-null? s2) s1)
+       (else
+       (let ((s1car (stream-car s1))
+       (s2car (stream-car s2)))
+       (cond ((< s1car s2car)
+       (cons-stream
+       s1car
+       (merge (stream-cdr s1) s2)))
+       ((> s1car s2car)
+       (cons-stream
+       s2car
+       (merge s1 (stream-cdr s2))))
+       (else (cons-stream
+       s1car
+       (merge (stream-cdr s1)
+       (stream-cdr s2)))))))))
+       #+END_SRC
+       
+       Then the required stream may be constructed with merge, as follows:
+
+       #+BEGIN_SRC scheme
+       (define S (cons-stream 1 (merge (scale-stream S 2)
+       (merge (scale-stream S 3)
+       (scale-stream S 5)))))
+       #+END_SRC
+
+     - Exercise 3.57: How many additions are performed when we compute
+       the _nth_ Fibonacci number using the definition of fibs based
+       on the add-streams procedure? Show that the number of
+       additions would be exponentially greater if we had implemented
+       (delay <exp>) simply as (lambda () <exp>), without using the
+       optimization provided by the memo-proc procedure described in
+       Section 3.5.1. 
+
+       #+BEGIN_SRC scheme
+       (define fibo (cons-stream 0 
+                     (cons-stream 1
+                      (add-streams fibo (stream-cdr fibo)))))
+       #+END_SRC
+
+       the nth fibonacci number is defined as basically
+       (stream-map + fibo (stream-cdr fibo)), where fibo is already
+       'defined' up to n. If we didn't save this, when we compute a
+       fibo number, we have to compute the entire stream back up to n
+       -1 and n - 2, taking roughly twice as long as n-1. Since each
+       time we go up in n we multiply runtime by two, we end up with
+       2^n.
+
+       However, if we save the results of our computations, the
+       branching basically doesn't happen. For each element in the
+       stream, we add the previous two, which, if we saved the results
+       and are computing this current element, are already defined,
+       and have O(n) access time. So we end up with O(n^2) runtime.
+
+     - Exercise 3.58: Give an interpretation of the stream computed by
+       the following procedure:
+
+       #+BEGIN_SRC scheme
+       (define (expand num den radix)
+        (cons-stream
+         (quotient (* num radix) den)
+         (expand (remainder (* num radix) den) den radix)))
+       #+END_SRC
+
+       (quotient is a primitive that returns the integer quotient of
+       two integers.) What are the successive elements produced by
+       (expand 1 7 10)? What is produced by (expand 3 8 10)?
+
+       (expand 1 7 10)
+       1 
+       (expand 3 7 10)
+       4
+       (expand 2 7 10)
+       2
+       (expand 6 7 10)
+       8
+       (expand 4 7 10)
+       5
+       (expand 5 7 10)
+       7
+       (expand 1 7 10)
+       1     
+
+       It's a repeating sequence. It always loops around, repeating
+       the same set of values, 1 4 2 8 5 7. We 'tried' as num all
+       numbers between 1 and 7 (exclusive of 7), and if any of them
+       had divided evenly, we would have converged to 0 and been
+       expanding 0 permanently for infinity. But none of these values,
+       multiplied by ten, had a common factor with seven. We got as
+       outputs all the quotients of multiplies of ten when the
+       multiplier is between [1, 7). For example, 3 is not an output
+       because (3x7) = 21 is not a quotient of any multiple of
+       ten. Any time a denominator is relatively prime to the num and
+       radix both, you will get an infinite repeating sequence of
+       values. Otherwise, you will converge to zero and exit.
+
+       (expand 3 8 10)
+       3
+       (expand 6 8 10)
+       7
+       (expand 4 8 10)
+       5
+       (expand 0 8 10)
+       0
+       ....
+
+       This expansion does not repeat the same set of values over and
+       over, it converges to 0, and repeats 0 forever.
+
+       I think that any time den and either num or radix have common
+       factors, you convege to zero. Otherwise, you end up with a
+       repeating set of values.
+
+     - Exercise 3.59: In Section 2.5.3 we saw how to implement a
+       polynomial arithmetic system representing polynomials as lists
+       of terms. In a similar way, we can work with _power series_,
+       such as 
+
+       #+BEGIN_EXAMPLE
+       e^x = 1 + x x^2/2 + x^3/(3 * 2) + x^4/(4 * 3 * 2) + ...,
+       cos x = 1 - x^2/2 + x^4/(4 * 3 * 2) - ...
+       sin x = x - x^3/(3 * 2) + x^5/(5 * 4 * 3 * 2) - ...
+       #+END_EXAMPLE
+
+       represented as infinite streams. We will represent the series
+       a_0 + a_1*x + a_2*x^2 + a_3*x^3 + ... as the stream whose
+       elements are the coefficients a_0, a_1, a_2, a_3, ...
+
+       a. The integral of the series a_0 + a_1*x + a_2*x^2 + a_3*x^3 +
+       ... is the series
+
+       \begin{series}
+       c + a_{0}x + \frac{1}{2}a_{1}x^{2} + \frac{1}{3}a_{2}x^{3} + \frac{1}{4}a_{3}x^{4} + ...
+       \end{series}
+
+       where _c_ is any constant. Define a procedure integrate-series
+       that takes as input a stream a_0, a_1, a_2, ... representing a
+       power series and returns the stream a_0, 1/2a_1, 1/3a_2, ... of
+       coefficients of the non-constant terms of the integral of the
+       series. (Since the result has no constant term, it doesn't
+       represent a power series; when we use integrate-series, we will
+       cons on the appropriate constant.)
+
+       #+BEGIN_SRC scheme
+       (define (integrate-series coefficients)
+        (define (integrate-inner current-denom stream)
+          (cons-stream
+           (* (/ 1.0 current-denom) (stream-car stream))
+           (integrate-inner (+ 1 current-denom) (stream-cdr stream))))
+        (integrate-inner 1 coefficients))
+       #+END_SRC
+
+       b. The function x -> e^x is its own derivative. This implies
+       that e^x and the integral of e^x are the same series, except
+       for the constant term, which is e^0 = 1. Accordingly, we can
+       generate the series for e^x as
+
+       #+BEGIN_SRC scheme
+       (define exp-series
+        (cons-stream 1 (integrate-series exp-series)))
+       #+END_SRC
+
+       Show how to generate the series for sine and cosine, starting
+       from the facts that the derivative of sine is cosine and the
+       derivative of cosine is the negative of sine:
+
+       #+BEGIN_SRC scheme
+       (define (negate stream)
+        (cons-stream (* -1 (stream-car stream))
+                     (negate (stream-cdr stream))))
+       (define cosine-series (cons-stream 1.0 (negate (integrate-series sine-series))))
+       (define sine-series (cons-stream 0.0 (integrate-series cosine-series)))
+       #+END_SRC
+
+     - Exercise 3.60: With power series represented as streams of
+       coefficients as in Exercise 3.59, adding series is implemented
+       by add-streams. Complete the definition of the following
+       procedure for multiplying series:
+
+       #+BEGIN_SRC scheme
+       (define (mul-series s1 s2)
+        (cons-stream <??> (add-streams <??> <??>)))
+       #+END_SRC
+
+       You can test your procedure by verifying that sin^2 x + cos^2 x
+       = 1, using the series from Exercise 3.59. 
+
+       #+BEGIN_SRC scheme
+       (define (mul-series s1 s2)
+        (cons-stream (* (stream-car s1) (stream-car s2))
+                     (add-streams
+                      (add-streams
+                       (scale-stream (stream-car s1) (stream-cdr s2))
+                       (scale-stream (stream-car s2) (stream-cdr s1)))
+                      (cons-stream 0
+                       (mul-series (stream-cdr s1) (stream-cdr s2))))))
+       #+END_SRC
+
+     - Exercise 3.61: Let _S_ be a power series (Exercise 3.59) whose
+       constant term is 1. Suppose we want to find the power series
+       1/S, that is, the series X such that SX = 1. Write S = 1 + S_R
+       where S_R is the part of S after the constant term. Then we can
+       solve for X as follows:
+
+               S * X = 1
+       (1 + S_R) * X = 1
+         X + S_R * X = 1
+                   X = 1 - S_R * X.
+
+       In other words, X is the power series whose constant term is 1
+       and whose higher-order terms are given by the negative of S_R
+       times X. Use this idea to write a procedure invert-unit-series
+       that computes 1/S for a power series S with constant
+       term 1. You will need to use mul-series from Exercise 3.60.
+
+       #+BEGIN_SRC scheme
+       (define (invert-unit-series s)
+        (cons-stream
+         1
+         (negate (mul-series (stream-cdr s)
+                             (invert-unit-series s)))))
+       #+END_SRC
+     
+
+       
+       
+
+       
+         
+     
