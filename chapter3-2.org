@@ -605,11 +605,610 @@
          (negate (mul-series (stream-cdr s)
                              (invert-unit-series s)))))
        #+END_SRC
-     
 
-       
-       
+     - Exercise 3.62: Use the results of Exercise 3.60 and Exercise
+       3.61 to define a procedure div-series that divides two power
+       series. div-series should work for any two series, provided
+       that the denominator series begins with a nonzero constant
+       term. (If the denominator has a zero constant term, then
+       div-series should signal an error.) Show how to use div-series
+       together with the result of Exercise 3.59 to generate the power
+       series for tangent.
 
-       
-         
+       #+BEGIN_SRC scheme
+       (define (div-series s1 s2)
+        (if (not (= 1 (stream-car s2)))
+            (error "Denominator must begin with 1 -- DIV-SERIES" s2)
+            (mul-series s1 (invert-unit-series s2))))
+       (define tan-series (div-series sine-series cosine-series))
+       #+END_SRC
+
+       An important thing to note is that the valid range of this
+       function is between -0.5PI to 0.5PI. After that it makes no
+       sense. Inverted cosine also has a narrow range of valid
+       behavior.
+
+*** 3.5.3. Exploiting the Stream Paradigm
+
+    Streams with delayed evaluation can be a powerful modeling tool,
+    providing many of the benefits of local state and
+    assignment. Moreover, they avoid some of the theoretical tangles
+    that accompany the introduction of assignment into a programming
+    language.
+
+    The stream approach can be illuminating because it allows us to
+    build systems with different module boundaries than systems
+    organized around assignment to state variables. For example, we
+    can think of an entire time series (or signal) as a focus of
+    interest, rather than the values of the state variables at
+    individual moments. This makes it convenient to combine and
+    compare components of state from different moments.
+
+
+**** Formulating iterations as stream processes
+
+     In Section 1.2.1, we introduced iterative processes, which
+     proceed by updating state variables. We know now that we can
+     represent state as a "timeless" stream of values rather than as a
+     set of variables to be updated. Let's adopt this perspective in
+     revisiting the square-root procedure from Section 1.1.7. Recall
+     that the idea is to generate a sequence of better and better
+     guesses for the square root of _x_ by applying over and over
+     again the procedure that improves guesses:
+
+     #+BEGIN_SRC scheme
+     (define (sqrt-improve guess x)
+      (average guess (/ x guess)))
+     #+END_SRC
+
+     In our original sqrt procedure, we made these guesses be the
+     successive values of a state variable. Instead we can generate
+     the infinite stream of guesses, starting with an initial guess of
+     1:
+
+     #+BEGIN_SRC scheme
+     (define (sqrt-stream x)
+      (define guesses
+       (cons-stream
+        1.0
+        (stream-map (lambda (guess) (sqrt-improve guess x))
+                    guesses)))
+      guesses)
+
+     (display-stream (sqrt-stream 2))
+     1.
+     1.5
+     1.416666
+     1.412156
+     1.414213
+     ...
+     #+END_SRC
+
+     We can generate more and more terms of the stream to get better
+     and better guesses. If we like, we can write a procedure that
+     keeps generating terms until the answer is good enough. (See
+     Exercise 3.64)
+
+     Another iteration that we can treat in the same way is to
+     generate an approximation to pi, based upon the alternating
+     series that we saw in Section 1.3.1:
+
+     \begin{eq}
+     \frac{\pi}{4} = 1 - \frac{1}{3} + \frac{1}{5} - \frac{1}{7} +
+     ...
+     \end{eq}
+
+     We first generate the stream of summands of the series (the
+     reciprocals of the odd integers, with alternating signs). Then we
+     take the stream of sums of more and more terms (using the
+     partial-sums procedure of Exercise 3.55) and scale the result by
+     4:
+
+     #+BEGIN_SRC scheme
+     (define (pi-summands n)
+      (cons-stream (/ 1.0 n)
+                   (stream-map - (pi-summands (+ n 2)))))
+     (define pi-stream
+      (scale-stream (partial-sums (pi-summands 1)) 4))
+
+     (display-stream pi-stream)
+     4.
+     2.66666
+     2.46666
+     2.89523
+     3.33968
+     2.97604
+     3.28373
+     3.01707
+     #+END_SRC
+
+     This gives us a stream of better and better approximations of pi,
+     although the approximations converge rather slowly. Eight terms
+     of the sequence bound the value of pi between 3.284 and 3.017. 
+
+     So far, our use of the stream of states approach is not much
+     different from updating state variables. But streams give us an
+     opportunity to do some interesting tricks. For example, we can
+     transform a stream with a _sequence accelerator_ that converts a
+     sequence of approximations to a new sequence that converges to
+     the same value as the original, only faster.
+
+     One such accelerator, due to the eighteenth-century Swiss
+     mathematician Leonhard Euler, works well with sequences that are
+     partial sums of alternating series (series of terms with
+     alternating signs). In Euler's technique, if S_n is the nth term
+     of the original sum sequence, then the accelarated sequence has
+     the terms
+
+     S_{n+1} - \frac{(S_{n+1} - S_{n})^2}{S_{n-1} - 2S_{n} + S_{n+1}}
+
+     Thus, if the original sequence is represented as a stream of
+     values, the transformed sequence is given by
+
+     #+BEGIN_SRC scheme
+     (define (euler-transform s)
+      (let ((s0 (stream-ref s 0))
+            (s1 (stream-ref s 1))
+            (s2 (stream-ref s 2)))
+       (cons-stream (- s2 (/ (square (- s2 s1))
+                             (+ s0 (* -2 s1) s2)))
+                    (euler-transform (stream-cdr s)))))
+     #+END_SRC
+
+     We can demonstrate Euler acceleration with our sequence of
+     approximations of pi:
+
+     #+BEGIN_SRC scheme
+     (display-stream (euler-transform pi-stream))
+     3.16666
+     3.13333
+     3.14523
+     3.13968
+     3.14271
+     3.14088
+     3.14207
+     3.14125
+     #+END_SRC
+
+     Even better, we can accelerate the accelerated sequence, and
+     recursively accelerate that, and so on. Namely, we create a
+     stream of streams (a structure we'll call a _tableau_) in which
+     each stream is the transform of the preceding one:
+
+     #+BEGIN_SRC scheme
+     (define (make-tableau transform s)
+      (cons-stream s (make-tableau transform (transform s))))
+     #+END_SRC
      
+     The tableau has the form
+
+     \begin{sequence}
+     S_{00} S_{01} S_{02} S_{03} S_{04} ...
+            S_{10} S_{11} S_{12} S_{13} ...
+                   S_{20} S_{21} S_{22} ...
+                          ...
+     \end{sequence}
+
+     Finally, we form a sequence by taking the first term in each row
+     of the tableau:
+
+     #+BEGIN_SRC scheme
+     (define (accelerated-sequence transform s)
+      (stream-map stream-car (make-tableau transform s)))
+     #+END_SRC
+
+     We can demonstrate this kind of "super-acceleration" of the pi
+     sequence:
+
+     #+BEGIN_SRC scheme
+     (display-stream
+      (accelerated-sequence euler-transform pi-stream))
+     4. 
+     3.166666
+     3.142105
+     3.141599
+     3.141592
+     #+END_SRC
+
+     The result is impressive. Taking eight terms of the sequence
+     yields the correct value of pi to 14 decimal places. If we had
+     used only the original pi sequence, we would need to compute on
+     the order of 10^13 terms (i.e. expanding the series far enough so
+     that the individual terms are less than 10^-13) to get that much
+     accuracy!
+
+     We could have implemented these acceleration techniques without
+     using streams. But the stream formulation is particularly elegant
+     and convenient because the entire sequence of states is available
+     to us as a data structure that can be manipulated with a uniform
+     set of operations.
+
+     - Exercise 3.63: Louis Reasoner asks why the sqrt-stream
+       procedure was not written in the following more straightforward
+       way, without the local variable guesses:
+
+       #+BEGIN_SRC scheme
+       (define (sqrt-stream x)
+        (cons-stream 1.0 (stream-map
+                          (lambda (guess)
+                           (sqrt-improve guess x))
+                          (sqrt-stream x))))
+       #+END_SRC
+
+       Alyssa P. Hacker replies that this version of the procedure is
+       considerably less efficient because it performs redundant
+       computation. Explain Alyssa's answer. Would the two versions
+       still differ in efficiency if our implementation of delay used
+       only (lambda () <exp>) without using the optimization provided
+       by memo-proc (Section 3.5.1)?
+
+       It is inefficient because it creates a copy of sqrt-stream each
+       time it gets to the recursive case. So originally we have
+
+       1 .. (stream-map (lambda (guess) (sqrt-improve guess x))
+       (sqrt-stream x))
+
+       which in turn computes
+       1 .. ((lambda (guess) (sqrt-improve guess x)) (stream-car
+       (sqrt-stream x)))
+
+       1 
+       .. ((lambda (guess) (sqrt-improve guess x)) (stream-car
+           (sqrt-stream x))) 
+       .. ((lambda (guess) (sqrt-improve guess x)) (stream-car
+           (stream-cdr (sqrt-stream x))))
+
+       and so on. Although the stream (sqrt-stream x) at least saves
+       its own past, so _that_ isn't as inefficient, we end up
+       computing each value twice, because the (sqrt-stream x) stream
+       generated by the inner call to sqrt-stream is a separate
+       stream. So each of the mapping calls re-generates a value we
+       just computed previously.
+
+     - Exercise 3.64: Write a procedure stream-limit that takes as
+       arguments a stream and a number (the tolerance). It should
+       examine the stream until it finds two successive elements that
+       differ in absolute value by less than the tolerance, and return
+       the second of the two elements. Using this, we could compute
+       square roots up to a given tolerance by
+
+       #+BEGIN_SRC scheme
+       (define (sqrt x tolerance)
+        (stream-limit (sqrt-stream x) tolerance))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (stream-limit s tolerance)
+         (define (iter stream last-value)
+           (if (<= (abs (- (stream-car stream) last-value))
+                   tolerance)
+               (stream-car stream)
+               (iter (stream-cdr stream) (stream-car stream))))
+         (iter (stream-cdr s) (stream-car s)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (sqrt-improve guess sqrt-of)
+        (/ (+ guess (/ sqrt-of guess)) 2))
+       #+END_SRC
+
+     - Exercise 3.65: Use the series
+
+       ln 2 = 1 - 1/2 + 1/3 - 1/4 + ...
+
+       to compute three sequences of approximations to the natural
+       logarithm of 2, in the way we did above for pi. How rapidly do
+       these sequences converge?
+     
+       #+BEGIN_SRC scheme
+       (define (sum-stream n s) 
+        (define (iter value i stream) 
+         (if (> i n) 
+             value
+             (iter (+ value 
+                      (stream-car stream))
+     	           (+ i 1)
+                   (stream-cdr stream))))
+         (iter 0 0 s))
+                      
+       (define (ln2-stream) 
+        (define (iter i sign) (cons-stream (* sign (/ 1 i)) 
+                                           (iter (+ i 1) (* sign -1))))
+	      (iter 1 1))
+       (define ln2 (ln2-stream))
+       (define (approx-ln2 i)
+        (sum-stream i ln2))
+       (define approx-stream (stream-map approx-ln2 (stream-enumerate-from 1)))
+       (define accel-approx-stream (euler-transform approx-stream))
+       (define tableu-stream (accelerated-sequence euler-transform approx-stream))
+       #+END_SRC
+
+       I printed out the first 50 elements of the first two, and the
+       first 15 of the second. The second converged in nine elements
+       and stopped changing. The first one didn't converge in fifty,
+       so I changed stream-limit to print the convergence number:
+
+       #+BEGIN_SRC scheme
+       (define (stream-limit s tolerance)
+         (define (iter stream last-value i)
+           (if (<= (abs (- (stream-car stream) last-value))
+                   tolerance)
+               i
+               (iter (stream-cdr stream) (stream-car stream) (+ i 1))))
+         (iter (stream-cdr s) (stream-car s) 0))
+       #+END_SRC       
+
+       for the first stream I got 997 with tolerance = 0.001. For the
+       second stream I got 3, for the third I got 2. I decided 0.001
+       was too generous and changed it to 1e-6. The results were:
+
+       tableau-stream: 3
+       accel-approx-stream: 59
+       approx-stream: (didn't return after five minutes, suffice it to
+       say it was in the thousands)
+
+
+**** Infinite streams of pairs 
+
+     In section 2.2.3, we saw how the sequence paradigm handles
+     traditional nested loops as processes defined on sequences of
+     pairs. If we generalize this technique to infinite streams, then
+     we can write programs that are not easily represented as loops,
+     because the "looping" must range over an infinite set. 
+
+     For example, suppose we want to generalize the prime-sum-pairs
+     procedure of Section 2.2.3 to produce the stream of pairs of
+     _all_ integers (i, j) with i <= j such that i + j is prime. If
+     int-pairs is the sequence of all pairs of integers (i, j) with i
+     <= j, then our required stream is simply
+
+     #+BEGIN_SRC scheme
+     (stream-filter
+      (lambda (pair) (prime? (+ (car pair) (cadr pair))))
+      int-pairs) 
+     #+END_SRC
+
+     Our problem, then, is to produce the stream int-pairs. More
+     generally, suppose we have two streams S = (S_{i}) and T =
+     (T_{j}), and imagine the infinite rectangular array
+
+
+     (S_{0},T_{0}) (S_{0},T_{1}) (S_{0},T_{2}) ...
+     (S_{1},T_{0}) (S_{1},T_{1}) (S_{1},T_{2}) ...
+     (S_{2},T_{0}) (S_{2},T_{1}) (S_{2},T_{2}) ...
+     ...
+
+
+     We wish to generate a stream that contains all the pairs in the
+     array that lie on or above the diagonal, i.e. the pairs
+
+     
+     (S_{0},T_{0}) (S_{0},T_{1}) (S_{0},T_{2}) ...
+                   (S_{1},T_{1}) (S_{1},T_{2}) ...
+                                 (S_{2},T_{2}) ...
+                                               ...
+
+     
+     (If we take both S and T to be the stream of integers, then this
+     will be our desired stream int-pairs.)
+
+     Call the general stream of pairs (pairs S T), and consider it to
+     be composed of three parts: the pair (S_{0}, T_{0}), the rest of
+     the pairs in the first row, and the remaining pairs:
+
+     \begin{tabular}{c | c c c}
+     (S_{0},T_{0}) & (S_{0},T_{1}) & (S_{0},T_{2}) & ... \\
+     \hline
+                   & (S_{1},T_{1}) & (S_{1},T_{2}) & ... \\
+                   &               & (S_{2},T_{2}) & ... \\
+                   &               &               & ... \\
+     \end{tabluar}
+
+     Observe that the third piece in this decomposition (pairs that
+     are not in the first row) is (recursively) the pairs formed from
+     (stream-cdr S) and (stream-cdr T). Also note that the second
+     piece (the rest of the first row) is
+
+     #+BEGIN_SRC scheme
+     (stream-map (lambda (x) (list (stream-car s) x))
+                 (stream-cdr t))
+     #+END_SRC
+
+     Thus we can form our stream of pairs as follows:
+
+     #+BEGIN_SRC scheme
+     (define (pairs s t)
+      (cons-stream
+       (list (stream-car s) (stream-car t))
+       (<combine-in-some-way>
+        (stream-map (lambda (x) (list (stream-car s) x))
+                    (stream-cdr t))
+        (pairs (stream-cdr s) (stream-cdr t)))))
+     #+END_SRC
+
+     In order to complete the procedure, we must choose some way to
+     combine the two inner streams. One idea is to use the stream
+     analog of the append procedure from Section 2.2.1:
+
+     #+BEGIN_SRC scheme
+     (define (stream-append s1 s2)
+      (if (stream-null? s1)
+          s2
+          (cons-stream (stream-car s1)
+                       (stream-append (stream-cdr s1) s2))))
+     #+END_SRC
+
+     This is unsuitable for infinite streams, however, because it
+     takes all the elements from the first stream before incorporating
+     the second stream. In particular, if we try to generate all pairs
+     of positive integers using
+
+     #+BEGIN_SRC scheme
+     (pairs integers integers)
+     #+END_SRC
+
+     our stream of results will first try to run through all pairs
+     with the first integer equal to 1, and hence will never produce
+     pairs with any other value of the first integer. 
+
+     To handle infinite streams, we need to devise an order of
+     combination that ensures that every element will eventually be
+     reached if we let our program run long enough. An elegant way to
+     accomplish this is with the following interleave procedure:
+
+     #+BEGIN_SRC scheme
+     (define (interleave s1 s2)
+      (if (stream-null? s1)
+          s2
+          (cons-stream (stream-car s1)
+                       (interleave s2 (stream-cdr s1)))))
+     #+END_SRC
+
+     Since interleave takes elements alternately from the two streams,
+     every element of the second stream will eventually find its way
+     into the interleaved stream, even if the first stream is
+     infinite. 
+
+     We can thus generate the required stream of pairs as
+
+     #+BEGIN_SRC scheme
+     (define (pairs s t)
+      (cons-stream 
+       (list (stream-car s) (stream-car t))
+       (interleave
+        (stream-map (lambda (x) (list (stream-car s) x))
+                    (stream-cdr t))
+        (pairs (stream-cdr s) (stream-cdr t)))))
+     #+END_SRC
+
+     - Exercise 3.66: Examine the stream (pairs integers
+       integers). Can you make any general comments about the order in
+       which the pairs are placed into the stream? For example,
+       approximately how many pairs precede the pair (1, 100)? the
+       pair (99, 100)? the pair (100, 100)? (If you can make precise
+       mathematical statements here, the better. But feel free to give
+       more qualitative answers if you find yourself getting bogged
+       down.) 
+
+       The first integer in the int stream is 1, so the first pair is
+       (1, 1), supposing both streams are 1..N. The interleave
+       function swaps the streams around but doesn't do any kind of
+       'deep' interleaving. Basically, elements from the first stream
+       are heavily overrepresented. Interleave will use the first
+       stream, defined by
+       
+       #+BEGIN_SRC scheme
+       (interleave (stream-map (lambda (x) (list (stream-car s) x))
+                   (stream-cdr t)))
+       #+END_SRC
+
+       for every other cons-stream, since it swaps around its
+       arguments. If the stream was by itself, there would be 99
+       elements preceding the pair 1, 100, from the beginning of the
+       stream, and it could be refed with 99 (i.e. (stream-ref s 99)
+       is (1, 100) in the stream of just those elements.). Since
+       elements from the stream starting with 1 begin the stream, and
+       each are interleaved with another element, we double the number
+       of preceding elements, to 198. However, this would be if we
+       just called interleave. The full procedure actually takes a car
+       form each stream and calls interleave with the cdrs, with s
+       first. That results in 
+
+       s_1, s_2, ....
+
+       first, elements from the first stream get repeated. So the
+       doubling applies to elements after s_2. There are 98 elements
+       then that should be doubled, plus one: 196 + 1 = 197, so there
+       are 197 elements before (1, 100)
+
+     - Exercise 3.67: Modify the pairs procedure so that (pairs
+       integers integers) will produce the stream of _all_ pairs of
+       integers (i, j) (without the condition i <= j). Hint: You will
+       need to max in an additional stream.
+
+       #+BEGIN_SRC scheme
+       (define (allpairs s t)
+        (cons-stream 
+         (list (stream-car s) (stream-car t))
+         (interleave
+            (stream-map (lambda (x) (list (stream-car s) x))
+                        (stream-cdr t))
+            (interleave 
+              (stream-map (lambda (x) (list x (stream-car t)))
+                        (stream-cdr s))
+              (allpairs (stream-cdr s) (stream-cdr t))))))
+       #+END_SRC
+
+     - Exercise 3.68: Louis Reasoner thinks that building a stream of
+       pairs from three parts is unecessarily complicated. Instead of
+       separating the pair (S_{0}, T_{0}) from the rest of the pairs
+       in the first row, he proposes to work with the whole first row,
+       as follows: 
+
+       #+BEGIN_SRC scheme
+       (define (pairs s t)
+        (interleave
+         (stream-map (lambda (x) (list (stream-car s) x))
+                     t)
+         (pairs (stream-cdr s) (stream-cdr t))))
+       #+END_SRC
+
+       Does this work? Consider what happens if we evaluate (pairs
+       integers integers) using Louis' definition of pairs. 
+
+       Well, it doesn't work practically speaking. Because there is no
+       cons-stream that causes a delay, and we always evaluate
+       arguments first, we recursively attempt to evaluate (pairs
+       (stream-cdr s) (stream-cdr t)). Since s and t are infinite
+       streams, we will never exit the invocation of pairs and never
+       get any result.
+
+     - Exercise 3.69: Write a procedure triples that takes three
+       infinite streams, S, T, and U, and produces the stream of
+       triples (S_{i},T_{j},U_{k}) such that i <= j <= k. Use triples
+       to generate the stream of all Pythagorean triples of positive
+       integers, i.e., the triples (i,j,k) such that i <= j and
+       i^{2} + j^{2} = k^{2}
+
+       #+BEGIN_SRC scheme
+       (define (triples s t u)
+        (cons-stream
+         (list (stream-car s)
+               (stream-car t)
+               (stream-car u))
+         (interleave
+          (stream-map (lambda (x)
+                       (list (stream-car s)
+                             (car x)
+                             (cadr x)))
+                     (stream-cdr (pairs t
+                                        u)))
+          (triples (stream-cdr s)
+                   (stream-cdr t)
+                   (stream-cdr u)))))
+       (define pythagorean-triples
+               (stream-filter
+                (lambda (x) (= (+ (square (car x)) (square (cadr x)))
+                               (square (caddr x))))
+                (triples integers integers integers)))
+       #+END_SRC
+
+      - Exercise 3.70: It would be nice to be able to generate streams
+        in which the pairs appear in some useful order, rather than
+        thee order that results from an _ad hoc_ interleaving
+        process. We can use a technique similar to the merge procedure
+        of Exercise 3.56, if we define a way to say that one pair of
+        integers is "less than" another. One way to do this is to
+        define a "weighting function" W(i,j) and stipulate that (i_1,
+        j_1) is less than (i_2,j_2) if W(i_1,j_1) < W(i_2,j_2). Write
+        a procedure merge-weighted that is like merge, except that
+        merge-weighted takes an additional argument weight, which is a
+        procedure that computes the weight of a pair, and is used to
+        determine the order in which elements should appear in the
+        resulting merged stream. Using this, generalize pairs to a
+        procedure weighted-pairs that takes two streams, together with
+        a procedure that computes a weighting function, and generates
+        the stream of pairs, ordered according to weight. Use your
+        procedure to generate
+
+	a. 
