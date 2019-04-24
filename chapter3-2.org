@@ -1193,22 +1193,246 @@
                 (triples integers integers integers)))
        #+END_SRC
 
-      - Exercise 3.70: It would be nice to be able to generate streams
-        in which the pairs appear in some useful order, rather than
-        thee order that results from an _ad hoc_ interleaving
-        process. We can use a technique similar to the merge procedure
-        of Exercise 3.56, if we define a way to say that one pair of
-        integers is "less than" another. One way to do this is to
-        define a "weighting function" W(i,j) and stipulate that (i_1,
-        j_1) is less than (i_2,j_2) if W(i_1,j_1) < W(i_2,j_2). Write
-        a procedure merge-weighted that is like merge, except that
-        merge-weighted takes an additional argument weight, which is a
-        procedure that computes the weight of a pair, and is used to
-        determine the order in which elements should appear in the
-        resulting merged stream. Using this, generalize pairs to a
-        procedure weighted-pairs that takes two streams, together with
-        a procedure that computes a weighting function, and generates
-        the stream of pairs, ordered according to weight. Use your
-        procedure to generate
+       - Exercise 3.70: It would be nice to be able to generate streams
+         in which the pairs appear in some useful order, rather than
+         the order that results from an _ad hoc_ interleaving
+         process. We can use a technique similar to the merge procedure
+         of Exercise 3.56, if we define a way to say that one pair of
+         integers is "less than" another. One way to do this is to
+         define a "weighting function" W(i,j) and stipulate that (i_1,
+         j_1) is less than (i_2,j_2) if W(i_1,j_1) < W(i_2,j_2). Write
+         a procedure merge-weighted that is like merge, except that
+         merge-weighted takes an additional argument weight, which is a
+         procedure that computes the weight of a pair, and is used to
+         determine the order in which elements should appear in the
+         resulting merged stream. Using this, generalize pairs to a
+         procedure weighted-pairs that takes two streams, together with
+         a procedure that computes a weighting function, and generates
+         the stream of pairs, ordered according to weight. Use your
+         procedure to generate
 
-	a. 
+	 #+BEGIN_SRC scheme
+         (define (merge-weighted weight s1 s2)
+          (let ((a1 (stream-car s1))
+		(a2 (stream-car s2)))
+           (cond
+            ((eq? 'equal (weight a1 a2))
+             (cons-stream a1
+              (cons-stream a2 
+               (merge-weighted weight (stream-cdr s1) (stream-cdr s2)))))
+            ((eq? 'less (weight a1 a2))
+             (cons-stream a1 (merge-weighted weight (stream-cdr s1) s2)))
+            ((eq? 'greater (weight a1 a2))
+             (cons-stream a2 (merge-weighted weight s1 (stream-cdr s2)))))))
+	 #+END_SRC
+
+	 a. the stream of all pairs of positive integers (i, j) with i
+         <= j ordered according to the sum i + j,
+
+	 The pairs procedure already produces pairs of positive
+         integers (i, j) such that i <= j.
+
+	 #+BEGIN_SRC scheme
+         (define (weigher x1 x2)
+          (let ((sum1 (apply + x1))
+		(sum2 (apply + x2)))
+           (cond 
+            ((= sum1 sum2) 'equal)
+            ((< sum1 sum2) 'less)
+            ((> sum1 sum2) 'greater))))
+
+         (define (pairs-weighted weigher s1 s2)
+	       (cond
+		((empty-stream? s1) s2)
+		((empty-stream? s2) s1)
+		(else (cons-stream
+		  (list (stream-car s1) (stream-car s2))
+		  (merge-weighted weigher
+				  (stream-map 
+				   (lambda (x) (list (stream-car s1) x))
+				   (stream-cdr s2))
+				  (pairs-weighted weigher (stream-cdr s1) (stream-cdr s2)))))))
+	 #+END_SRC
+
+	 b. the stream of all pairs of positive integers (i,j) with i
+         <= j, where neither i nor j is divisible by 2, 3, or 5, and
+         the pairs are ordered according to the sum 2i + 3j + 5ij. 
+
+	 #+BEGIN_SRC scheme
+         (define (weigher x1 x2)
+          (define (make-sum double)
+           (+ (* 2 (car double)) (* 3 (cadr double)) 
+              (* 5 (car double) (cadr double))))
+          (let ((sum1 (make-sum x1))
+		(sum2 (make-sum x2)))
+           (cond
+            ((= sum1 sum2) 'equal)
+            ((< sum1 sum2) 'less)
+            ((> sum1 sum2) 'greater))))
+         (define the-pairs (pairs-weighted weigher integers-not-divisible integers-not-divisible))
+         (define integers-not-divisible (filter (lambda (x) 
+                                                 (and (not (= (remainder x 5) 0))
+                                                      (not (= (remainder x 2) 0))
+                                                      (not (= (remainder x 3) 0))))
+                                                      integers))
+	 #+END_SRC
+
+	 #+BEGIN_SRC scheme
+	 (print-stream the-pairs 50)
+
+          ; => (1 1)
+          ; => (1 7)
+          ; => (1 11)
+          ; => (1 13)
+          ; => (1 17)
+          ; => (1 19)
+          ; => (1 23)
+          ; => (1 29)
+          ; => (1 31)
+          ; => (7 7)
+          ; => (1 37)
+          ; => (1 41)
+          ; => (1 43)
+          ; => (1 47)
+          ; => (1 49)
+          ; => (1 53)
+          ; => (7 11)
+          ; => (1 59)
+          ; => (1 61)
+          ; => (7 13)
+          ; => (1 67)
+          ; => (1 71)
+          ; => (1 73)
+          ; => (1 77)
+          ; => (1 79)
+          ; => (7 17)
+          ; => (11 11)
+          ; => (1 83)
+          ; => (1 89)
+          ; => (1 91)
+          ; => (7 19)
+          ; => (11 13)
+          ; => (1 97)
+          ; => (1 101)
+          ; => (1 103)
+          ; => (1 107)
+          ; => (1 109)
+          ; => (7 23)
+          ; => (1 113)
+          ; => (13 13)
+          ; => (1 119)
+          ; => (1 121)
+          ; => (11 17)
+          ; => (1 127)
+          ; => (1 131)
+          ; => (1 133)
+          ; => (1 137)
+          ; => (1 139)
+          ; => (7 29)
+          ; => (11 19)
+	 #+END_SRC
+
+       - Exercise 3.71: Numbers that can be expressed as the sum of
+         two cubes in more than one way are sometimes called
+         _Ramanujan numbers_, in honor of the mathematician Srinivasa
+         Ramanujan. Ordered streams of pairs provide an elegant
+         solution to the problem of computing these numbers. To find a
+         number that can be written as the sum of two cubes in two
+         different ways, we need only generate the stream of pairs of
+         integers (i,j) weighted according to the sum i^3 + j^3 (see
+         Exercise 3.70), then search the stream for two consecutive
+         pairs with the same weight. Write a procedure to generate the
+         Ramanujan numbers. The first such number is 1729. What are
+         the next five?
+
+	 #+BEGIN_SRC
+         (define (cube x) (* x (square x)))
+         (define (sum-of-cubes x)
+          (+ (cube (car x)) (cube (cadr x))))
+         (define (weigher x1 x2)
+          (let ((sum1 (sum-of-cubes x1))
+                (sum2 (sum-of-cubes x2)))
+           (cond
+            ((= sum1 sum2) 'equal)
+            ((< sum1 sum2) 'less)
+            ((> sum1 sum2) 'greater))))
+         (define (sums-equal? a b)
+          (= (sum-of-cubes a)
+             (sum-of-cubes b)))
+         (define (filter-identical-pairs s)
+          (define (inner-filter s)
+           (cond
+            ((or (empty-stream? s)
+                 (empty-stream? (stream-cdr s)))
+             the-empty-stream)
+            ((sums-equal? (stream-car s) (stream-car (stream-cdr s)))
+             (cons-stream (sum-of-cubes (stream-car s))
+                          (inner-filter (stream-cdr (stream-cdr s)))))
+            (else
+             (inner-filter (stream-cdr s)))))
+          (inner-filter s))
+         (filter-identical-pairs
+          (pairs-weighted weigher
+                          integers
+                          integers))
+         (stream-list (filter-identical-pairs
+                       (pairs-weighted weigher integers integers)) 6)
+	 #+END_SRC
+	 output:
+	 #+BEGIN_SRC scheme
+         ; => (1729 4104 13832 20683 32832 39312 40033)
+	 #+END_SRC
+
+       - Exercise 3.72: In a similar way to Exercise 3.71 generate a
+         stream of all numbers that can be written as the sum of two
+         squares in three different ways (showing how they can be so
+         written). 
+
+	 #+BEGIN_SRC scheme
+         (define (sum-squares x)
+          (+ (square (car x)) (square (cadr x))))
+         (define (sum-squares-equal? x y)
+          (= (sum-squares x) (sum-squares y)))
+         (define (sum-squares-equal3? x y z)
+          (= (sum-squares x)
+             (sum-squares y)
+             (sum-squares z)))
+         (define (weigher-sum-squares a b)
+          (let ((s1 (sum-squares a))
+                (s2 (sum-squares b)))
+           (cond
+            ((= s1 s2) 'equal)
+            ((< s1 s2) 'less)
+            ((> s1 s2) 'greater))))
+         (define (filter-identical-triples
+                  is-three-eql? s)
+          (cond
+           ((or (empty-stream? s)
+                (empty-stream? (stream-cdr s))
+                (empty-stream? (stream-cdr (stream-cdr s))))
+             the-empty-stream)
+             
+           ((is-three-eql?
+             (stream-car s)
+             (stream-car (stream-cdr s))
+             (stream-car (stream-cdr (stream-cdr s))))
+            (cons-stream
+             (sum-squares (stream-car s))
+             (filter-identical-triples
+              is-three-eql?
+              (stream-cdr (stream-cdr (stream-cdr s))))))
+           (else
+            (filter-identical-triples
+             is-three-eql?
+             (stream-cdr s)))))
+         (stream->list (filter-identical-triples
+          sum-squares-equal3?
+          (pairs-weighted weigher-sum-squares integers integers))
+          10)
+	 #+END_SRC
+	 
+	 
+
+	
+
+	
