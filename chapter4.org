@@ -1,0 +1,1550 @@
+* Chapter 4
+** Metalinguistic Abstraction
+   In our study of program design, we have seen that expert
+   programmers control the complexity of their designs with the same
+   general techniques used by designers of all complex systems. They
+   combine primitive elements to form compound objects, they abstract
+   compound objects to form higher-level building blocks, and they
+   preserve modularity by adopting appropriate large-scale views of
+   system structure. In illustrating these techniques, we have used
+   Lisp as a language for describing processes and for constructing
+   computational data objects and processes to model complex phenomena
+   in the real world. However, as we confront increasingly complex
+   problems, we will find that Lisp, or indeed any fixed programming
+   language, is not sufficient for our needs. We must constantly turn
+   to new languages in order to expresss our ideas more
+   effectively. Establishing new languages is a powerful strategy for
+   controlling complexity in engineering design; we can often enhance
+   our ability to deal with a complex problem by adopting a new
+   language that enables us to describe (and hence to think about) the
+   problem in a different way, using primitives, means of combination,
+   and means of abstraction that are particularly well suited to the
+   problem at hand.
+
+   Programming is endowed with a multitude of languages. There are
+   physical languages, such as the machine languages for particular
+   computers. These languages are concerned with the representation of
+   data and control in terms of individual bits of storage and
+   primitive machine instructions. The machine-language programmer is
+   concerned with using the given hardware to erect systems and
+   utilities for the efficient implementation of resource-limited
+   computations. High-level languages, erected on a machine-language
+   substrate, hide concerns about the representation of data as
+   collections of bits and the representation of programs as sequences
+   of primitive instructions. These languages have means of
+   combination and abstraction, such as procedure definition, but are
+   appropriate to the larger-scale organization of systems.
+
+   _Metalinguistic abstraction_ -- establishing new languages -- plays
+   an important role in all branches of engineering design. It is
+   particularly important to computer programming, because in
+   programming not only can we formulate new languages but we can also
+   implement these languages by constructing evaluators. An
+   _evaluator_ (or _interpreter_) for a programming language is a
+   procedure that, when applied to an expression of the language,
+   performs the actions required to evaluate that expression.
+
+   It is no exaggeration to regard this as the most fundamental idea
+   in programming:
+
+   The evaluator, which determines the meaning of expressions in a
+   programming language, is just another program.
+
+   To appreciate this point is to change our images of ourselves as
+   programmers. We come to see ourselves as designers of languages,
+   rather than only users of languages designed by others.
+
+   In fact, we can regard almost any program as the evaluator of some
+   language. For instance, the polynomial manipulation system of
+   Section 2.5.3 embodies the rules of polynomial arithmetic and
+   implements them in terms of operations on list-structured data. If
+   we augment this system with procedures to read and print polynomial
+   expressions, we have the core of a special-purpose language for
+   dealing with problems in symbolic mathematics. The digital-logic
+   simulator of Section 3.3.4 and the constraint propagator of Section
+   3.3.5 are legitimate languages in their own right, each with its
+   own primitives, means of combination, and means of
+   abstraction. Seen from this perspective, the technology for coping
+   with large-scale computer systems merges with the technology for
+   building new computer languages, and computer science itself
+   becomes no more (and no less) than the discipline of constructing
+   appropriate descriptive languages.
+
+   We now embark on a tour of the technology by which languages are
+   established in terms of other languages. In this chapter we shall
+   use Lisp as a base, implementing evaluators as Lisp
+   procedures. Lisp is particularly well suited to this task, because
+   of its ability to represent and manipulate symbolic expressions. We
+   will take the first step in understanding how languages are
+   implemented by building an evaluator for Lisp itself. The language
+   implemented by our evaluator will be a subset of the Scheme dialect
+   of Lisp that we use in this book. Although the evaluator described
+   in this chapter is written for a particular dialect of Lisp, it
+   contains the essential structure of an evaluator for any
+   expression-oriented language designed for writing programs for a
+   sequential machine. (In fact, most language processors contain,
+   deep within them, a little "Lisp" evaluator.) The evaluator has
+   been simplified for the purposes of illustration and discussion,
+   and some features have been left out that would be important to
+   include in a production-quality Lisp system. Nevertheless, this
+   simple evaluator is adequate to execute most of the programs in
+   this book.
+
+   An important  advantage of making the evaluator accessible as a
+   Lisp program is that we can implement alternative evaluation rules
+   by describing these as modifications to the evaluator program. One
+   place where we can use this power to good effect is to gain extra
+   control over the ways in which computational models embody the
+   notion of time, which was so central to the discussion in
+   Chapter 3. There, we mitigated some of the complexities of state
+   and assignment by using streams to decouple the representation of
+   time in the world from time in the computer. Our stream programs,
+   however, were sometimes cumbersome, because they were constrained
+   by the applicative-order evaluation of Scheme. In Section 4.2,
+   we'll change the underlying language to provide for a more elegant
+   approach, by modifying the evaluator to provide for _normal-order
+   evaluation_. 
+
+   Section 4.3 implements a more ambitious linguistic change, whereby
+   expressions have many values, rather than just a single value. In
+   this language of _nondeterministic computing_, it is natural to
+   express processes that generate all possible values for expressions
+   and then search for those values that satisfy certain
+   constraints. In terms of models of computation and time, this is
+   like having time branch into a set of "possible futures" and then
+   searching for appropriate time lines. With our nondeterministic
+   evaluator, keeping track of multiple values and performing searches
+   are handled automatically by the underlying mechanism of the
+   language.
+
+   In Section 4.4 we implement a _logic-programming_ language in which
+   knowledge is expressed in terms of relations, rather than in terms
+   of computations with inputs and outputs. Even though this makes the
+   language drastically different from Lisp, or indeed from any
+   conventional language, we will see that the logic-programming
+   evaluator shares the essential structure of a Lisp evaluator.
+
+** 4.1 The Metacircular Evaluator
+
+   Our evaluator for Lisp will be implemented as a Lisp program. It
+   may seem circular to think about evaluating Lisp programs using an
+   evaluator that is itself implemented in Lisp. However, evaluation
+   is a process, so it is appropriate to describe the evaluation
+   process using Lisp, which, after all, is our tool for describing
+   processes. An evaluator that is written in the same language that
+   it evaluates is said to be _metacircular_. 
+
+   The metacircular evaluator is essentially a Scheme formulation of
+   the environment model of evaluation described in Section
+   3.2. Recall that the model has two basic parts:
+
+   1. To evaluate a combination (a compound expression other than a
+      special form), evaluate the subexpressions and then apply the
+      value of the operator subexpression to the values of the operand
+      subexpressions.
+   2. To apply a compound procedure to a set of arguments, evaluate
+      the body of the procedure in a new environment. To construct
+      this environment, extend the environment part of the procedure
+      object by a frame in which the formal parameters of the
+      procedure are bound to the arguments to which the procedure is
+      applied.
+
+      
+   These two rules describe the essence of the evaluation process, a
+   basic cycle in which expressions to be evaluated in environments
+   are reduced to procedures to be applied to arguments, which in turn
+   are reduced to new expressions to be evaluated in new environments,
+   and so on, until we get down to symbols, whose values are looked up
+   in the environment, and to primitive procedures, which are applied
+   directly (see Figure 4.1). This evaluation cycle will be embodied
+   by the interplay between the two critical procedures in the
+   evaluator, eval and apply, which are described in Section 4.1.1
+   (see Figure 4.1).
+   
+   The implementation of the evaluator will depend upon procedures
+   that define the _syntax_ of the expressions to be evaluated. We
+   will use data abstraction to make the evaluator independent of the
+   representation of the language. For example, rather than committing
+   to a choice that an assignment is to be represented by a list
+   beginning with the symbol set! we use an abstract predicate
+   assignment? to test for an assignment, and we use abstract
+   selectors assignment-variable and assignment-value to access the
+   parts of an assignment. Implementation of expressions will be
+   described in detail in Section 4.1.2. There are also operations,
+   described in Section 4.1.3, that specify the representation of
+   procedures and environments. For example, make-procedure constructs
+   compound procedures, lookup-variable-value accesses the values of
+   variables, and apply-primitive-procedure applies a primitive
+   procedure to a given list of arguments. 
+
+*** 4.1.1 The Core of the Evaluator
+
+    The evaluation process can be described as the interplay between
+    two procedures: eval and apply.
+
+**** Eval
+     Eval takes as arguments an expression and an environment. It
+     classifies the expression and directs its evaluation. eval is
+     structured as a case analysis of the syntactic type of the
+     expression to be evaluated. In order to keep the procedure
+     general, we express the determination of the type of an
+     expression abstractly, making no commitment to any particular
+     representation for the various types of expressions. Each type of
+     expression has a predicate that tests for it and an abstract
+     means for selecting its parts. This _abstract syntax_ makes it
+     easy to see how we can change the syntax of the language by using
+     the same evaluator, but with a different collection of syntax
+     procedures.
+
+***** Primitive expressions
+      - For self-evaluating expressions, such as numbers, eval returns
+        the expression itself.
+      - eval must look up variables in the environment to find their
+        values.
+
+***** Special forms
+      - For quoted expressions, eval returns the expression that was
+        quoted.
+      - An assignment to (or a definition of) a variable must
+        recursively call eval to compute the new value to be
+        associated with the variable. The environment must be modified
+        to change (or create) the binding of the variable.
+      - An if expression requires special processing of its parts, so
+        as to evaluate the consequent if the predicate is true, and
+        otherwise to evaluate the alternative.
+      - A lambda expression must be transformed into an applicable
+        procedure by packaging together the parameters and body
+        specified by the lambda expression with the environment of
+        evaluation.
+      - A begin expression requires evaluating its sequence of
+        expressions in the order in which they appear.
+      - A case analysis (cond) is transformed into a nest of if
+        expressions and then evaluated.
+
+***** Combinations
+      - For a procedure application, eval must recursively evaluate
+        the operator part and the operands of the combination. The
+        resulting procedure and arguments are passed to apply, which
+        handles the actual procedure application.
+
+	
+
+     Here is the definition of eval:
+
+     #+BEGIN_SRC scheme
+       (define (eval exp env)
+         (cond ((self-evaluating? exp) exp)
+               ((variable? exp) (lookup-variable-value exp env))
+               ((quoted? exp) (text-of-quotation exp))
+               ((assignment? exp) (eval-assignment exp env))
+               ((definition? exp) (eval-definition exp env))
+               ((if? exp) (eval-if exp env))
+               ((lambda? exp) (make-procedure (lambda-parameters exp)
+                                              (lambda-body exp)
+                                              env))
+               ((begin? exp)
+                (eval-sequence (begin-actions exp) env))
+               ((cond? exp) (eval (cond->if exp) env))
+               ((application? exp)
+                (apply (eval (operator exp) env)
+                       (list-of-values (operands exp) env)))
+               (else 
+                (error "Unknown expression type: EVAL " exp))))
+     #+END_SRC
+
+     For clarity, eval has been implemented as a case analysis using
+     cond. The disadvantage of this is that our procedure handles only
+     a few distinguishable types of expressions, and no new ones can
+     be defined without editing the definition of eval. In most Lisp
+     implementations, dispatching on the type of an expression is done
+     in a data-directed style. This allows a user to add new types of
+     expressions that eval can distinguish, without modifying the
+     definition of eval itself.
+
+**** Apply     
+
+     apply takes two arguments, a procedure and a list of arguments to
+     which the procedure should be applied. apply classifies
+     procedures into two kinds: It calls apply-primitive-procedure to
+     apply primitives; it applies compound procedures by sequentially
+     evaluating the expressions that make up the body of the
+     procedure. The environment for the evaluation of the body of a
+     compound procedure is constructed by extending the base
+     environment carried by the procedure to include a frame that
+     binds the parameters of the procedure to the arguments to which
+     the procedure is to be applied. Here is the definition of apply:
+
+     #+BEGIN_SRC scheme
+       (define (apply procedure arguments)
+         (cond ((primitive-procedure? procedure)
+                (apply-primitive-procedure procedure arguments))
+               ((compound-procedure? procedure)
+                (eval-sequence
+                 (procedure-body procedure)
+                 (extend-environment
+                  (procedure-parameters procedure)
+                  arguments
+                  (procedure-environment procedure))))
+               (else
+                (error "Unknown procedure type: APPLY" procedure))))
+     #+END_SRC
+
+***** Procedure arguments
+      When eval processes a procedure application, it uses
+      list-of-values to produce a list of arguments to which the
+      procedure is to be applied. list-of-values takes as an argument
+      the operands of the combination. It evaluates each operand and
+      returns a list of the corresponding values:
+
+      #+BEGIN_SRC scheme
+      (define (list-of-values exps env)
+       (if (no-operands? exps)
+           '()
+           (cons (eval (first-operand exps) env)
+                 (list-of-values (rest-operands exps) env))))
+      #+END_SRC
+***** Conditionals
+
+      eval-if evaluates the predicate part of an if expression in the
+      given environment. If the result is true, eval-if evaluates the
+      consequent, otherwise it evaluates the alternative:
+
+      #+BEGIN_SRC scheme
+      (define (eval-if exp env)
+       (if (true? (eval (if-predicate exp) env))
+           (eval (if-consequent exp) env)
+           (eval (if-alternative exp) env)))
+      #+END_SRC
+
+      The use of true? in eval-if highlights the issue of the
+      connection between an implemented language and an implementation
+      language. The if-predicate is evaluated in the language being
+      implemented and thus yields a value in that language. The
+      interpreter predicate true? translates that value into a value
+      that can be tested by the if in the implementation language: The
+      metacircular representation of truth might not be the same as
+      that of the underlying Scheme.
+
+***** Sequences
+
+      eval-sequence is used by apply to evaluate the sequence of
+      expressions in a procedure body and by eval to evaluate the
+      sequence of expressions in a begin expression. It takes as
+      arguments a sequence of expressions and an environment, and
+      evaluates the expressions in the order in which they occur. The
+      value returned is the value of the final expression.
+
+      #+BEGIN_SRC scheme
+        (define (eval-sequence exps env)
+          (cond ((last-exp? exps)
+                 (eval (first-exp exps) env))
+                (else
+                 (eval (first-exp exps) env)
+                 (eval-sequence (rest-exps) env))))
+      #+END_SRC
+
+***** Assignments and definitions
+      The following procedure handles assignments to variables. It
+      calls eval to find the value to be assigned and transmits the
+      variable and the resulting value to set-variable-value! to bee
+      installed in the designated environment. 
+      
+      #+BEGIN_SRC scheme
+      (define (eval-assignment exp env)
+       (set-variable-value! (assignment-variable exp)
+                            (eval (assignment-value exp) env)
+                            env)
+       'ok)
+      #+END_SRC
+
+      Definitions of variables are handled in a similar manner.
+
+      #+BEGIN_SRC scheme
+      (define (eval-definition exp env)
+       (define-variable! (definition-variable exp)
+                         (eval (definition-value exp) env)
+                         env)
+       'ok)
+      #+END_SRC
+
+      We have chosen here to return the symbol ok as the value of an
+      assignment or definition.
+
+      - Exercise 4.1: Notice that we cannot tell whether the
+        metacircular evaluator evaluates operands from left to right
+        or from right to left. Its evaluation order is inherited from
+        the underlying Lisp: If the arguments to cons in
+        list-of-values are evaluated from left to right, then
+        list-of-values will evaluate operands from right to left.
+
+	Write a version of list-of-values that evaluates operands from
+        left to right regardless of the order of evaluation in the
+        underlying Lisp. Also write a version of list-of-values that
+        evaluates operands from right to left.
+
+	#+BEGIN_SRC scheme
+          ;; left to right
+          (define (list-of-values exps env)
+            (if (no-operands? exps)
+                '()
+                (let ((arg-value (eval (first-operand exps) env)))
+                  (let ((rest-value (list-of-values (rest-operands exps) env)))
+                    (cons arg-value rest-value)))))
+          ;; right to left
+          (define (list-of-values exps env)
+            (if (no-operands? exps)
+                '()
+                (let ((rest-value (list-of-values (rest-operands exps) env)))
+                  (let ((arg-value (eval (first-operand exps) env)))
+                    (cons arg-value
+                          rest-value)))))
+	#+END_SRC
+
+*** 4.1.2 Representing Expressions
+    The evaluator is reminiscent of the symbolic differentiation
+    program discussed in Section 2.3.2. Both programs operate on
+    symbolic expressions. In both programs, the result of operating on
+    a compound expression is determined by operating recursively on
+    the pieces of the expression and combining the results in a way
+    that depends on the type of the expression. In both programs we
+    used data abstraction to decouple the general rules of operation
+    from the details of how expressions are represented. In the
+    differentiation program this meant that the same differentiation
+    procedure could deal with algebraic expressions in prefix form, in
+    infix form, or in some other form. For the evaluator, this means
+    that the syntax of the language being evaluated is determined
+    solely by the procedures that classify and extract pieces of
+    expressions. Here is the specification of the syntax of our
+    language:
+
+    - The only self-evaluating items are numbers and strings:
+
+      #+BEGIN_SRC scheme
+      (define (self-evaluating? exp)
+       (cond ((number? exp) true)
+             ((string? exp) true)
+             (else false)))
+      #+END_SRC
+
+    - Variables are represented by symbols:
+
+      #+BEGIN_SRC scheme
+      (define (variable? exp) (symbol? exp))
+      #+END_SRC
+
+    - Quotations have the form (quote <text-of-quotation>):
+      
+      #+BEGIN_SRC scheme
+      (define (quoted? exp) (tagged-list? exp 'quote))
+      (define (text-of-quotation exp) (cadr exp))
+      #+END_SRC
+
+      quoted? is defined in terms of the procedure tagged-list?, which
+      identifies lists beginning with a designated symbol:
+
+      #+BEGIN_SRC scheme
+      (define (tagged-list? exp tag)
+       (if (pair? exp)
+           (eq? (car exp) tag)
+           false))
+      #+END_SRC
+
+    - Assignments have the form (set! <var> <value>):
+      
+      #+BEGIN_SRC scheme
+        (define (assignment? exp) (tagged-list? exp 'set!))
+        (define (assignment-variable exp) (cadr exp))
+        (define (assignment-value exp) (caddr exp))
+      #+END_SRC
+
+    - Definitions have the form
+
+      #+BEGIN_SRC scheme
+      (define <var> <value>)
+      #+END_SRC
+
+      or the form
+
+      #+BEGIN_SRC scheme
+      (define (<var> <parameter1> ... <parametern>)
+       <body>)
+      #+END_SRC
+
+      The latter form (standard procedure definition) is syntactic
+      sugar for
+
+      #+BEGIN_SRC scheme
+      (define <var>
+       (lambda (<parameter1> ... <parametern>)
+        <body>))
+      #+END_SRC
+
+      The corresponding syntax procedures are the following:
+
+      #+BEGIN_SRC scheme
+      (define (definition? exp) (tagged-list? exp 'define))
+      (define (definition-variable exp)
+       (if (symbol? (cadr exp))
+           (cadr exp)
+           (caadr exp)))
+      (define (definition-value exp)
+       (if (symbol? (cadr exp))
+           (caddr exp)
+           (make-lambda (cdadr exp)
+                        (cddr exp))))
+      #+END_SRC
+
+    - lambda expressions are lists that begin with the symbol lambda:
+      
+      #+BEGIN_SRC scheme
+      (define (lambda? exp) (tagged-list? exp 'lambda))
+      (define (lambda-parameters exp) (cadr exp))
+      (define (lambda-body exp) (cddr exp))
+      #+END_SRC
+
+      We also provide a constructor for lambda expressions, which is
+      used by definition-value, above:
+
+      #+BEGIN_SRC scheme
+      (define (make-lambda parameters body)
+       (cons 'lambda (cons parameters body)))
+      #+END_SRC
+
+    - Conditionals begin with if and have a predicate, a consequent,
+      and an (optional) alternative. If the expression has no
+      alternative part, we provide false as an alternative.
+
+      #+BEGIN_SRC scheme
+      (define (if? exp) (tagged-list? exp 'if))
+      (define (if-predicate exp) (cadr exp))
+      (define (if-consequent exp) (caddr exp))
+      (define (if-alternative exp)
+       (if (not (null? (cdddr expr)))
+           (cadddr exp)
+           'false))
+      #+END_SRC
+
+      We also provide a constructor for if expressions, to be used by
+      cond->if to transform cond expressions into if expressions:
+
+      #+BEGIN_SRC scheme
+      (define (make-if predicate consequent alternative)
+       (list 'if predicate consequent alternative))
+      #+END_SRC
+
+    - begin packages a sequence of expressions into a single
+      expression. We include syntax operations on begin expressions to
+      extract the actual sequence from the begin expression, as well
+      as selectors that return the first expression and rest of the
+      expressions in the sequence.
+
+      #+BEGIN_SRC scheme
+      (define (begin? exp) (tagged-list? exp 'begin))
+      (define (begin-actions exp) (cdr exp))
+      (define (last-exp? seq) (null? (cdr seq)))
+      (define (first-exp seq) (car seq))
+      (define (rest-exps seq) (cdr seq))
+      #+END_SRC
+
+      We also include a constructor sequence->exp (for use by
+      cond->if) that transforms a sequence into a single expression,
+      using begin if necessary:
+
+      #+BEGIN_SRC scheme
+      (define (sequence->exp seq)
+       (cond ((null? seq) seq)
+             ((last-exp? seq) (first-exp seq))
+             (else (make-begin seq))))
+      (define (make-begin seq) (cons 'begin seq))
+      #+END_SRC
+
+    - A procedure application is any compound expression that is not
+      one of the above expression types. The car of the expression is
+      the operator, and the cdr is a list of operands:
+
+      #+BEGIN_SRC scheme
+      (define (application? exp) (pair? exp))
+      (define (operator exp) (car exp))
+      (define (operands exp) (cdr exp))
+      (define (no-operands? ops) (null? ops))
+      (define (first-operand ops) (car ops))
+      (define (rest-operands ops) (cdr ops))
+      #+END_SRC
+**** Derived expressions
+     Some special forms in our language can be defined in terms of
+     expressions involving other special forms, rather than being
+     implemented directly. One example is cond, which can be
+     implemented as a nest of if expressions. For example, we can
+     reduce the problem of evaluating the expression
+
+     #+BEGIN_SRC scheme
+     (cond ((> x 0) x)
+           ((= x 0) (display 'zero) 0)
+           (else (- x)))
+     #+END_SRC
+
+     to the problem of evaluating the following expression involving
+     if and begin expressions:
+
+     #+BEGIN_SRC scheme
+     (if (> x 0)
+         x
+         (if (= x 0)
+             (begin (display 'zero) 0)
+             (0 x)))
+     #+END_SRC
+
+     Implementing the evaluation of cond in this way simplifies the
+     evaluator because it reduces the number of special forms for
+     which the evaluation process must be explicitly specified.
+
+     We include syntax procedures that extract the parts of a cond
+     expression, and a procedure cond->if that transforms cond
+     expressions into if expressions. A case analysis begins with cond
+     and has a list of predicate-action clauses. A clause is an else
+     clause if its predicate is the symbol else.
+
+     #+BEGIN_SRC scheme
+     (define (cond? exp) (tagged-list? exp 'cond))
+     (define (cond-clauses exp) (cdr exp))
+     (define (cond-else-clause? clause)
+      (eq? (cond-predicate clause) 'else))
+     (define (cond-predicate clause) (car clause))
+     (define (cond-actions clause) (cdr clause))
+     (define (cond->if exp) (expand-clauses (cond-clauses exp)))
+     (define (expand-clauses clauses)
+      (if (null? clauses)
+          'false
+          (let ((first (car clauses))
+                (rest (cdr clauses)))
+           (if (cond-else-clause? first)
+            (if (null? rest)
+                (sequence->exp (cond-actions first))
+                (else "ELSE clause isn't last: COND->IF"
+                      clauses))
+            (make-if (cond-predicate first)
+                     (sequence->exp (cond-actions first))
+                     (expand-clauses rest))))))
+     #+END_SRC
+
+     Expressions (such as cond) that we choose to implement as
+     syntactic transformations are called _derived expressions_. let
+     expressions are also derived expressions (see Exercise 4.6).
+
+     - Exercise 4.2: Louis Reasoner plans to reorder the cond clauses
+       in eval so that the clause for procedure applications appears
+       before the clause for assignments. He argues that this will
+       make the interpreter more efficient: Since programs usually
+       contain more applications than assignments, definitions, and so
+       on, his modified eval will usually check fewer clauses than the
+       original eval before identifying the type of expression.
+
+       a. What is wrong with Louis' plan? (Hint: What will Louis'
+       evaluator do with the expression (define x 3)?)
+
+       The problem is his evaluator will assume expressions that
+       should have special meanings, like cond clauses, if clauses,
+       definitions, lambdas, &c, are all applications of procedures,
+       and you won't be able to use the interpreter at all.
+
+       b. Louis is upset that his plan didn't work. He is willing to
+       go to any lengths to make his evaluator recognize procedure
+       applications before it checks for most other kinds of
+       expressions. Help him by changing the syntax of the evaluated
+       language so that the procedure applications start with
+       call. For example, instead of (factorial 3) we will now have to
+       write (call factorial 3) and instead of (+ 1 2) we will have to
+       write (call + 1 2). 
+
+       #+BEGIN_SRC scheme
+       (define (application? expr) (tagged-list? expr 'call))
+       (define (operator exp) (cadr exp))
+       (define (operands exp) (cddr exp))
+       (define (no-operands? ops) (null? ops))
+       (define (first-operand ops) (car ops))
+       (define (rest-operands ops) (cdr ops))
+       #+END_SRC
+
+     - Exercise 4.3: Rewrite eval so that the dispatch is done in a
+       data-directed style. Compare this with the data-directed
+       differentiation procedure of Exercise 2.73 (You may use the car
+       of a compound expression as the type of the expression, as is
+       appropriate for the syntax implemented in this section.)
+
+       #+BEGIN_SRC scheme
+       (put 'eval 'cond eval-cond)
+       (put 'eval 'definition eval-definition)
+       (put 'eval 'set! eval-assignment)
+       (put 'eval 'begin eval-sequence)
+       (put 'eval 'if eval-if)
+       (put 'eval 'lambda (lambda (exp env)
+                            (make-procedure (lambda-parameters exp)
+                                            (lambda-body exp)
+                                            env)))
+       (put 'eval 'quote (lambda (exp env) (text-of-quotation exp)))
+       (define (expr-type expr) (car expr))
+       (define (eval expr env)
+         (cond
+          ((self-evaluating? expr) expr)
+          ((variable? exp) (lookup-variable-value exp env))
+          (else
+           (let ((proc (get 'eval (expr-type expr)))))
+            (cond
+             (proc (proc (expr-contents expr) env))
+             ((application? expr)
+              (apply (eval (operator exp) env)
+                     (list-of-values (operands exp) env)))
+             (else
+              (error "Unknown expression type -- EVAL" expr)))))))
+       #+END_SRC
+
+     - Exercise 4.4: Recall the definitions of the special forms and
+       and or from Chapter 1:
+
+       - and: The expressions are evaluated from left to right. If any
+         expression evaluates to false, false is returned; any
+         remaining expressions are not evaluated. If all the
+         expressions evaluate to true values, the value of the last
+         expression is returned. If there are no expressions then true
+         is returned.
+
+       - or: The expressions are evaluated from left to right. If any
+         expression evaluates to a true value, that value is returned;
+         any remaining expressions are not evaluated. If all
+         expressions evaluate to true or false, or if there are no
+         expressions, then false is returned. 
+
+       Install and and or as new special forms for the evaluator by
+       defining appropriate syntax procedures and evaluation
+       procedures eval-and and eval-or. Alternatively, show how to
+       implement and and or as derived expressions. 
+
+       #+BEGIN_SRC scheme
+       (define (eval-and expr ops)
+       (let ((first-op-value (eval (first-operand ops) env)))
+       (if (false? first-op-value)
+       first-op-value
+       (eval-and-expr expr (rest-operands ops)))))
+       (put 'and eval-and)
+
+       (define (eval-or expr ops)
+       (let ((first-op-value (eval (first-operand ops) env)))
+       (if (true? first-op-value)
+       first-op-value
+       (eval-and-expr expr (rest-operands ops)))))
+       (put 'or eval-or)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (and->if ops)
+       (if (no-operands? ops)
+       'true
+       (make-if
+       (first-operand ops)
+       (and->if (rest-operands ops))
+       'false)))
+       (define (or->if ops)
+       (if (no-operands? ops)
+       'false
+       (make-if
+       (first-operand ops)
+       'true
+       (or->if (rest-operands ops)))))
+       #+END_SRC
+
+     - Exercise 4.5: Scheme allows an additional syntax for cond
+       clauses, (<test> => <recipient>). If <test> evaluates to a true
+       value, then <recipient> is evaluated. Its value must be a
+       procedure of one argument; this procedure is then invoked on
+       the value of the <test>, and the result is returned as the
+       value of the cond expression. For example
+
+       #+BEGIN_SRC scheme
+       (cond ((assoc 'b '((a 1) (b 2))) => cadr)
+             (else false))
+       #+END_SRC
+
+       returns 2. Modify the handling of cond so that it supports this
+       extended syntax.
+
+       You only have to change the cond-actions bit:
+
+       #+BEGIN_SRC scheme
+       (define (cond-actions expr)
+        (if (eq? '=> (cadr expr))
+            (list (caddr expr) (car expr))
+            (cadr expr)))
+       #+END_SRC
+
+       However, this doesn't save the variable. In case of a
+       side-effect, or just to save computation time, we should
+       rewrite so that we can save the variable. 
+
+       #+BEGIN_SRC scheme
+       (lambda (expr) (if expr (action-value expr) 
+                               (expand-clauses rest)))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (expand-action cond-clause rest-clauses)
+        (if (cond=>clause? cond-clause)
+            (make-application
+             (make-lambda '(expr-result)
+              (make-expr-sequence
+              (make-if
+               'expr-result
+               (make-application
+                (car (cond-actions cond-clause))
+                '(expr-result))
+               (expand-clauses rest-clauses))))
+              (list (cond-predicate cond-clause)))
+             (make-if
+              (cond-predicate cond-clause)
+              (sequence->exp (cond-actions cond-clause))
+              (expand-clauses rest-clauses))))
+
+       (define (expand-clauses clauses)
+        (if (null? clauses)
+            'false
+            (let ((first (car clauses))
+                  (rest (cdr clauses)))
+             (if (cond-else-clause? first)
+              (if (null? rest)
+                  (sequence->exp (cond-actions first))
+                  (error "ELSE clause isn't last: COND->IF"
+                         clauses))
+              (expand-action
+               first
+               rest)))))
+       #+END_SRC
+
+     - Exercise 4.6: let expressions are derived expressions, because
+
+       #+BEGIN_SRC scheme
+       (let ((<var1> <exp1>) ... (<varn> <expn>))
+        <body>)
+       #+END_SRC
+
+       is equivalent to
+
+       #+BEGIN_SRC scheme
+       ((lambda (<var1> ... <varn>)
+         <body>)
+        <exp1>
+        ...
+        <expn>)
+       #+END_SRC
+
+       Implement a syntactic transformation let->combination that
+       reduces evaluating let expressions to evaluating combinations
+       of the type shown above, and add the appropriate clause to eval
+       to handle let expressions.
+
+       #+BEGIN_SRC scheme
+       (define (let? expr) (eq? (car expr) 'let))
+       (define (let-bindings expr) (cadr expr))
+       (define (let-seq expr) (cddr expr))
+       (define (let->combination expr)
+        (make-application
+         (make-lambda
+          (map car (let-bindings expr))
+          (let-seq expr))
+         (map cadr (let-bindings expr))))
+       (define (eval-let expr env)
+        (eval (let->combination expr) env))
+       (put 'eval 'let eval-let)
+       #+END_SRC
+
+     - Exercise 4.7: let* is similar to let, except that the bindings
+       of the let* variables are performed sequentially from left to
+       right, and each binding is made in an environment in which all
+       of the preceding bindings are visible. For example
+
+       #+BEGIN_SRC scheme
+       (let* ((x 3) (y (+ x 2)) (z (+ x y 5)))
+        (* x z))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+         (define (empty-bindings? bindings) (null? bindings))
+         (define (let*-bindings let*) (cadr let*))
+         (define (let*-body let*) (caddr let*))
+         (define first-binding car)
+         (define rest-bindings cdr)
+
+         (define (make-let bindings body)
+          (list 'let bindings body))
+
+         (define (cons-binding binding rest)
+          (cons binding rest))
+         (define (empty-bindings) '())
+
+         (define (let*-bindings->nested-lets let-body bindings)
+          (if (empty-bindings? bindings)
+              let-body
+              (make-let
+               (cons-binding (first-binding bindings) (empty-bindings))
+               (let*-bindings->nested-lets let-body (rest-bindings bindings)))))
+
+         (define (let*->nested-lets expr)
+          (let ((bindings (let*-bindings expr))
+                (body (let*-body expr)))
+           (let*-bindings->nested-lets body bindings)))
+
+         (define (eval-let* expr env)
+          (eval (let*->nested-lets expr) env))
+
+         (put 'eval 'let* eval-let*)
+       #+END_SRC
+
+     - Exercise 4.8: "Named let" is a variant of let that has the form
+
+       #+BEGIN_SRC scheme
+       (let <var> <bindings> <body>)
+       #+END_SRC
+
+       The <bindings> and <body> are just as in ordinary let, except
+       that <var> is bound within <body> to a procedure whose body is
+       <body> and whose parameters are the variables in the
+       <bindings>. Thus, one can repeatedly execute the <body> by
+       invoking the procedure named <var>. For example, the iterative
+       Fibonacci procedure (Section 1.2.2) can be rewritten using
+       named let as follows:
+
+       #+BEGIN_SRC scheme
+       (define (fib n)
+        (let fib-iter ((a 1)
+                       (b 0)
+                       (count n))
+         (if (= count 0)
+             b
+             (fib-iter (+ a b) a (- count 1)))))
+       #+END_SRC
+
+       Modify let->combination of Exercise 4.6 to also support named
+       let.
+
+       #+BEGIN_SRC scheme
+       (define (let? expr) (eq? (car expr) 'let))
+
+       (define (named-let? expr) (symbol? (cadr expr)))
+
+       (define (let-bindings expr) 
+        (if (named-let? expr)
+            (caddr expr)
+            (cadr expr)))
+
+       (define (let-seq expr) 
+        (if (named-let? expr)
+            (cdddr expr)
+            (cddr expr)))
+
+       (define (let-name expr) (cadr expr))
+
+       (define (make-sequence values)
+        (cons 'begin values))
+
+       (define (make-definition name value)
+        (list 'define name value))
+
+       (define (make-function-definition name params value)
+        (list 'define (cons name params) value))
+
+       (define (named-let->combination expr)
+        (make-sequence
+         (list
+          (make-function-definition
+           (let-name expr)
+           (map car (let-bindings expr))
+           (let-seq expr))
+          (make-application
+           (let-name expr)
+           (map cadr (let-bindings expr))))))
+
+       (define (let->combination expr)
+        (if (named-let? expr)
+            (named-let->combination expr)
+            (make-application
+             (make-lambda
+              (map car (let-bindings expr))
+              (let-seq expr))
+             (map cadr (let-bindings expr)))))
+
+       (define (eval-let expr env)
+        (eval (let->combination expr) env))
+
+       (put 'eval 'let eval-let)
+       #+END_SRC
+
+     - Exercise 4.9: Many language support a variety of iteration
+       constructs, such as do, for, while, and until. In Scheme,
+       iterative processes can be expressed in terms of ordinary
+       procedure calls, so special iteration constructs provide no
+       essential gain in computational power. On the other hand, such
+       constructs are often convenient. Design some iteration
+       constructs, give examples of their use, and show how to
+       implement them as derived expressions.
+
+       #+BEGIN_SRC scheme
+       (define (do-init-bindings expr) (cadr expr))
+       (define (do-final-expr expr) (caddr expr))
+       (define (do-predicate expr) (cadddr expr))
+       (define (do-body expr) (cadr (cdddr expr)))
+       (define (do->combination expr)
+        (make-sequence
+         (list
+          (make-function-definition
+           'dobody
+           (map car (do-init-bindings expr))
+           (make-if
+            (do-predicate expr)
+            (make-sequence (list (do-final-expr expr)))
+            (make-application 
+             'dobody
+             (map caddr (do-init-bindings expr)))))
+          (make-application 'dobody (map cadr (do-init-bindings expr))))))
+       #+END_SRC
+
+     - Exercise 4.10: By using data abstraction, we were able to write
+       an eval procedure that is independent of the particular syntax
+       of the language to be evaluated. To illustrate this, design and
+       implement a new syntax for Scheme by modifying the procedures
+       in this section, without changing eval or apply.
+
+       You just change the predicates and accessors since we used data
+       abstraction.
+
+       #+BEGIN_SRC scheme
+       (defprocedure add (x y) (+ x y))
+       (defvar x 1)
+       (if (>=  (add 1 2) 3) then true else false)
+       (setvars (x <- 1 y <- 2 z <- 3)
+         (+ x y z))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (assignment? exp) (eq? (cadr exp) '<-))
+       (define (assignment-variable exp) (car exp))
+       (define (assignment-value exp) (caddr exp))
+       (define (eval-assignment exp env)
+        (set-variable-value! (assignment-variable exp)
+                             (eval (assignment-value exp) env)
+                             env)
+        'ok)
+
+       (define (if? exp) 
+        (and
+         (eq? (car exp) 'if)
+         (eq? (caddr exp) 'then)
+         (eq? (cadr (cdddr exp)) 'else)))
+       (define (if-predicate exp) (cadr exp))
+       (define (if-consequent exp) (cadddr exp))
+       (define (if-alternative exp)
+        (caddr (cdddr exp)))
+
+       (define (definition? expr)
+        (or (eq? (car expr) 'defprocedure)
+            (eq? (car expr) 'defvar)))
+       (define (definition-variable exp)
+        (cadr exp))
+
+       (define (definition-value exp)
+        (if (eq? 'defprocedure (car expr))
+             (make-lambda (caddr expr)
+                          (cadddr expr))
+             (caddr expr)))
+
+       (define (let? exp) (eq? (car expr) 'setvars))
+       (define (let-bindings expr)
+         (if (named-let? expr)
+             (caddr expr)
+             (cadr expr)))
+       (define (let-seq expr)
+        (if (named-let? expr)
+            (cadddr expr)
+            (caddr expr)))
+       (define (named-let->combination expr)
+        (make-sequence
+         (list 
+          (make-function-definition
+           (let-name expr)
+           (map car (let-bindings expr))
+           (let-seq expr))
+          (make-application
+           (let-name expr)
+           (map caddr (let-bindings expr))))))
+       (define (let->combination expr)
+        (if (named-let? expr)
+            (named-let->combination expr)
+            (make-application
+             (make-lambda
+              (map car (let-bindings expr))
+              (let-seq expr))
+             (map caddr (let-bindings expr)))))
+       #+END_SRC
+
+*** 4.1.3 Evaluator Data Structures
+    In addition to defining the external syntax of expressions, the
+    evaluator implementation must also define the data structures that
+    the evaluator manipulates internally, as part of the execution of
+    a program, such as the representation of procedures and
+    environments and the representation of true and false.
+
+**** Testing of predicates
+     For conditionals, we accept anything to be true that is not the
+     explicit false object.
+
+     #+BEGIN_SRC scheme
+     (define (true? x) (not (eq? x false)))
+     (define (false? x) (eq? x false))
+     #+END_SRC
+
+**** Representing procedures
+
+     To handle primitives, we assume that we have available the
+     following procedures:
+
+     - (apply-primitive-procedure <proc> <args>)
+       applies the given primitive procedure to the argument values in
+       the list <args> and returns the result of the application.
+     - (primitive-procedure? <proc>)
+       tests whether <proc> is a primitive procedure.
+
+       
+     These mechanisms for handling primitives are further described in
+     section 4.1.4. 
+
+     Compound procedures are constructed from parameters, procedure
+     bodies, and environments using the constructor make-procedure:
+
+     #+BEGIN_SRC scheme
+     (define (make-procedure parameters body env)
+      (list 'procedure parameters body env))
+     (define (compound-procedure? p)
+      (tagged-list? p 'procedure))
+     (define (procedure-parameters p) (cadr p))
+     (define (procedure-body p) (caddr p))
+     (define (procedure-environment p) (cadddr p))
+     #+END_SRC
+
+**** Operations on Environments
+     The evaluator needs operations for manipulating environments. As
+     explained in Section 3.2, an environment is a sequence of frames,
+     where each frame is a table of bindings that associate variables
+     with their corresponding values. We use the following operations
+     for manipulating environments:
+
+     - (lookup-variable-value <var> <env>)
+       returns the value that is bound to the symbol <var> in the
+       environment <env>, or signals an error if the variable is
+       unbound.
+     - (extend-environment <variables> <values> <base-env>)
+       returns a new environment, consisting of a new frame in which
+       the symbols in the list <variables> are bound to the
+       corresponding elements in the list <values>, where the
+       enclosing environment is the environment <base-env>.
+     - (define-variable! <var> <value> <env>)
+       adds to the first frame in the environment <env> a new binding
+       that associates the variable <var> with the value <value>.
+     - (set-variable-value! <var> <value> <env>)
+       changes the binding of the variable <var> in the environment
+       <env> so that the variable is now bound to the value <value>,
+       or signals an error if the variable is unbound.
+
+       
+     To implement these operations we represent an environment as a
+     list of frames. The enclosing environment of an environment is
+     the cdr of the list. The empty environment is simply the empty
+     list.
+
+     #+BEGIN_SRC scheme
+     (define (enclosing-environment env) (cdr env))
+     (define (first-frame env) (car env))
+     (define the-empty-environment '())
+     #+END_SRC
+
+     Each frame of an environment is represented as a pair of lists: a
+     list of the variables bound in that frame and a list of the
+     associated values:
+     
+     #+BEGIN_SRC scheme
+     (define (make-frame variables values)
+      (cons variables values))
+     (define (frame-variables frame) (car frame))
+     (define (frame values frame) (cdr frame))
+     (define (add-binding-to-frame! var val frame)
+      (set-car! frame (cons var (car frame)))
+      (set-cdr! frame (cons val (cdr frame))))
+     #+END_SRC
+
+     To extend an environment by a new frame that associates variables
+     with values, we make a frame consisting of the list of variables
+     and the list of values, and we adjoin this to the environment. We
+     signal an error if the number of variables does not match the
+     number of values.
+
+     #+BEGIN_SRC scheme
+     (define (extend-environment vars vals base-env)
+      (if (= (length vars) (length vals))
+          (cons (make-frame vars vals) base-env)
+          (if (< (length vars) (length vals))
+              (error "Too many arguments supplied" vars vals)
+              (error "Too few arguments supplied" vars vals))))
+     #+END_SRC
+
+     To look up a variable in an environment, we scan the list of
+     variables in the first frame. If we find the desired variable, we
+     return the corresponding element in the list of values. If we do
+     not find the variable in the current frame, we search the
+     enclosing environment, and so on. If we reach an empty
+     environment, we signal an "unbound variable" error.
+
+     #+BEGIN_SRC scheme
+     (define (lookup-variable-value var env)
+      (define (env-loop env)
+       (define (scan vars vals)
+        (cond ((null? vars)
+               (env-loop (enclosing-environment env)))
+              ((eq? var (car vars)) (car vals))
+              (else (scan (cdr vars) (cdr vals)))))
+       (if (eq? env the-empty-environment)
+           (error "Unbound variable" var)
+           (let ((frame (first-frame env)))
+            (scan (frame-variables frame)
+                  (frame-values frame)))))
+       (env-loop env))
+     #+END_SRC
+
+     To set a variable to a new value in a specified environment, we
+     scan for the variable, just as in lookup-variable-value, and
+     change the corresponding value when we find it. 
+
+     #+BEGIN_SRC scheme
+     (define (set-variable-value! var val env)
+      (define (env-loop env)
+       (define (scan vars vals)
+        (cond ((null? vars)
+               (env-loop (enclosing-environment env)))
+              ((eq? var (car vars))
+               (set-car! vals val))
+              (else (scan (cdr vars) (cdr vals)))))
+       (if (eq? env the-empty-environment)
+           (error "Unbound variable: SET!" var)
+           (let ((frame (first-frame env)))
+            (scan (frame-variables frame)
+                  (frame-values frame)))))
+       (env-loop env))
+     #+END_SRC
+
+     To define a variable, we search the first frame for a binding for
+     the variable, and change the binding if it exists (just as in
+     set-variable-value!). If no such binding exists, we adjoin one to
+     the first frame.
+
+     #+BEGIN_SRC scheme
+     (define (define-variable! var val env)
+      (let ((frame (first-frame env)))
+       (define (scan vars vals)
+        (cond ((null? vars)
+               (add-binding-to-frame! var val frame))
+              ((eq? var (car vars)) (set-car! vals val))
+              (else (scan (cdr vars) (cdr vals)))))
+       (scan (frame-variables frame) (frame-values frame))))
+     #+END_SRC
+
+     The method described here is only one of many plausible ways to
+     represent environments. Since we used data abstraction to isolate
+     the rest of the evaluator from the detailed choice of
+     representation, we could change the environment representation if
+     we wanted to. (See Exercise 4.11.) In a production-quality Lisp
+     system, the speed of the evaluator's environment operations -
+     especially that of variable lookup - has a major impact on the
+     performance of the system. The representation described here,
+     although conceptually simple, is not efficient and would not
+     ordinarily be used in a production system.
+
+     - Exercise 4.11: Instead of representing a frame as a pair of
+       lists, we can represent a frame as a list of bindings, where
+       each binding is a name-value pair. Rewrite the environment
+       operations to use this alternative representation.
+
+       #+BEGIN_SRC scheme
+       (define (make-frame variables values)
+        (map cons variables values))
+       (define (frame-variables frame) (map car frame))
+       (define (frame-values frame) (map cdr frame))
+       (define (add-binding-to-frame! var val frame)
+        (let ((last-cell (last-pair frame)))
+         (set-cdr! last-cell (list (cons var val)))))
+       ;; extend-environment is the same.
+       (define (extend-envrionment vars vals base-env)
+        (if (= (length vars) (length vals))
+            (cons (make-frame vars vals) base-env)
+            (if (< (length vars) (length vals))
+                (error "Too many arguments supplied" vars vals)
+                (error "Too few arguments supplied" vars vals))))
+
+       (define the-empty-environment '()) 
+       (define (first-frame env) (car env))
+       (define (enclosing-environment env) (cdr env))
+
+       (define (lookup-cell var frame)
+        (filter (lambda (x) (eq? (car x) var)) frame))
+
+       (define (lookup-variable-value var env)
+        (if (eq? env the-empty-environment)
+            (error "Undefined variable -- LOOKUP-VARIABLE-VALUE" var)
+            (let ((lookup (lookup-cell var (first-frame env))))
+             (if (null? lookup)
+                 (lookup-variable-value var (enclosing-environment env))
+                 (cdar lookup)))))
+
+       (define (set-variable-value! var val env)
+        (if (eq? env the-empty-environment)
+            (error "Undefined variable -- SET-VARIABLE-VALUE!" var)
+            (let ((lookup (lookup-cell var (first-frame env))))
+             (if (null? lookup)
+                 (lookup-variable-value var (enclosing-environment env))
+                 (set-cdr! (car lookup) val)))))
+
+       (define (define-variable! var val env)
+        (let ((frame (first-frame env)))
+         (let ((lookup (lookup-cell var frame)))
+          (if (null? lookup)
+              (add-binding-to-frame! var val frame) 
+              (set-cdr! (car lookup) val)))))
+       #+END_SRC
+
+     - Exercise 4.12: The procedures set-variable-value!,
+       define-variable! and lookup-variable-value can be expressed in
+       terms of more abstract procedures for traversing the
+       environment structure. Define abstractions that capture the
+       common patterns and redefine the three procedures in terms of
+       these abstractions.
+
+       #+BEGIN_SRC scheme
+       (define (make-frame variables values)
+        (map cons variables values))
+       (define (frame-variables frame) (map car frame))
+       (define (frame-values frame) (map cdr frame))
+       (define (add-binding-to-frame! var val frame)
+        (let ((last-cell (last-pair frame)))
+         (set-cdr! last-cell (list (cons var val)))))
+       ;; extend-environment is the same.
+       (define (extend-envrionment vars vals base-env)
+        (if (= (length vars) (length vals))
+            (cons (make-frame vars vals) base-env)
+            (if (< (length vars) (length vals))
+                (error "Too many arguments supplied" vars vals)
+                (error "Too few arguments supplied" vars vals))))
+
+       (define the-empty-environment '()) 
+       (define (first-frame env) (car env))
+       (define (enclosing-environment env) (cdr env))
+
+       (define (find-cell-in-frame var frame)
+        (filter (lambda (x) (eq? (car x) var)) frame))
+
+       (define (set-cell-val! val cell)
+        (set-cdr! (car cell) val))
+
+       (define (cell-val cell)
+        (cdar cell))
+
+       (define (null-cell? cell) (null? cell))
+
+       (define (operate-on-cell proc var env)
+        (if (eq? env the-empty-environment)
+            (error "Undefined variable -- OPERATE-ON-CELL" var)
+            (let ((lookup (lookup-cell var (first-frame env))))
+             (if (null-cell? lookup)
+                 (operate-on-cell var (enclosing-environment env))
+                 (proc lookup)))))
+
+       (define (lookup-variable-value var env)
+        (operate-on-cell
+         (lambda (cell)
+          (cell-val cell))
+         var env))
+
+       (define (set-variable-value! var val env)
+        (operate-on-cell
+         (lambda (cell)
+          (set-cell-val! val cell))
+         var env))
+
+       (define (define-variable! var val env)
+        (let ((frame (first-frame env)))
+         (let ((lookup (lookup-cell var frame)))
+          (if (null? lookup)
+              (add-binding-to-frame! var val frame) 
+              (set-cdr! (car lookup) val)))))
+       #+END_SRC
+
+     - Exercise 4.13: Scheme allows us to create new bindings for
+       variables by means of define, but provides no way to get rid of
+       bindings. Implement for the evaluator a special form
+       make-unbound! that removes the binding of a given symbol from
+       the environment in which the make-unbound! expression is
+       evaluated. This problem is not completely specified. For
+       example, should we remove only the binding in the first frame
+       of the environment? Complete the specification and justify any
+       choices you make.
+
+       I'm only going to remove it from the first frame that has
+       it. It doesn't make sense to me to unbind all instances, you
+       could then have a utility function inside a function that
+       unbinds all variables, even ones in use in enclosing
+       functions. Then if you really want to unbind them all you can
+       repeatedly unbind.
+
+       #+BEGIN_SRC scheme
+       (define (remove-bindings-from-frame var frame)
+        (filter (lambda (binding) (not (eq? (car binding) var)))
+                frame))
+       (define (make-unbound! var env)
+        (let ((frame (first-frame env)))
+         (let ((lookup (lookup-cell var frame)))
+          (if (null? lookup)
+              (make-unbound! var (enclosing-environment env))
+              (set-car! env (remove-bindings-from-frame var frame))))))
+       #+END_SRC
+
+*** 4.1.4 Running the Evaluator as a Program
+
+    Given the evaluator, we have in our hands a description (expressed
+    in Lisp) of the process by which Lisp expressions are
+    evaluated. One advantage of expressing the evaluator as a program
+    is that we can run the program. This gives us, running within
+    Lisp, a working model of how Lisp itself evaluates
+    expressions. This can serve as a framework for experimenting with
+    evaluation rules, as we shall do later in this chapter. 
+
+    Our evaluator program reduces expressions ultimately to the
+    application of primitive procedures. Therefore, all that we need
+    to run the evaluator is to create a mechanism that calls on the
+    underlying Lisp system to model the application of primitive
+    procedures.
+
+    There must be a binding for each primitive procedure name, so that
+    when eval evaluates the operator of an application of a primitive,
+    it will find an object to pass to apply. We thus set up a global
+    environment that associates unique objects with the names of the
+    primitive procedures that can appear in the expressions we will be
+    evaluating. The global environment also includes bindings for the
+    symbols true and false, so that they can be used as variables in
+    expressions to be evaluated.
+
+    #+BEGIN_SRC scheme
+    (define (setup-environment)
+     (let ((initial-env
+            (extend-environment (primitive-procedure-names)
+                                (primitive-procedure-objects)
+                                the-empty-environment)))
+      (define-variable! 'true true initial-env)
+      (define-variable! 'false false initial-env)
+      initial-env))
+    (define the-global-environment (setup-environment))
+    #+END_SRC
+
+    It does not matter how we represent the primitive procedure
+    objects, so long as apply can identify and apply them by using the
+    procedures primitive-procedure? and apply-primitive-procedure. We
+    have chosen to represent a primitive procedure as a list beginning
+    with the symbol primitive and containing a procedure in the
+    underlying Lisp that implements that primitive.
+
+    #+BEGIN_SRC scheme
+    (define (primitive-procedure? proc)
+     (tagged-list? proc 'primitive))
+    (define (primitive-implementation proc) (cadr proc))
+    #+END_SRC
+
+    setup-environment will get the primitive names and implementation
+    procedures from a list:
+
+    #+BEGIN_SRC scheme
+    (define primitive-procedures
+     (list (list 'car car)
+           (list 'cdr cdr)
+           (list 'cons cons)
+           (list 'null? null?)
+           <more primitives>))
+    (define (primitive-procedure-names)
+     (map car primitive-procedures))
+    (define (primitive-procedure-objects)
+     (map (lambda (proc) (list 'primitive (cadr proc)))
+          primitive-procedures))
+    #+END_SRC
+
+    To apply a primitive procedure, we simply apply the implementation
+    procedure to the arguments, using the underlying Lisp system:
+
+    #+BEGIN_SRC scheme
+    (define (apply-primitive-procedure proc args)
+     (apply-in-underlying-scheme
+      (primitive-implementation proc) args))
+    #+END_SRC
+
+    For convenience in running the metacircular evaluator, we provide
+    a _driver loop_ that models the read-eval-print loop of the
+    underlying Lisp system. It prints a _primpt_, reads an input
+    expression, evaluates this expression in the global environment,
+    and prints the result. We precede each printed result by an
+    _output prompt_ so as to distinguish the value of the expression
+    from other output that may be printed.
+
+    #+BEGIN_SRC scheme
+    (define input-prompt ";;; M-Eval input:")
+    (define output-prompt ";;; M-Eval value:")
+    (define (driver-loop)
+     (prompt-for-input input-prompt)
+     (let ((input (read)))
+      (let ((output (eval input the-global-environment)))
+       (announce-output out-prompt)
+       (user-print output)))
+     (driver-loop))
+    (define (prompt-for-input string)
+     (newline) (newline) (display string) (newline))
+    (define (announce-output string)
+     (newline) (display string) (newline))       
+    #+END_SRC
+
+    We use a special printing procedure, user-print, to avoid printing
+    the environment part of a compound procedure, which may be a very
+    long list (or may even contain cycles). 
+
+    #+BEGIN_SRC scheme
+    (define (user-print object)
+     (if (compound-procedure? object)
+         (display (list 'compound-procedure
+                        (procedure-parameters object)
+                        (procedure-body object)
+                        '<procedure-env>))
+         (display object)))
+    #+END_SRC
+
+    Now all we need to do to run the evaluator is to initialize the
+    global environment and start the driver loop.
+
+
+
+
+
+       
+
+
+       
+       
+       
+
+
+
+
+
+
+
+
+
+
+

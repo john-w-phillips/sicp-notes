@@ -644,7 +644,6 @@
     individual moments. This makes it convenient to combine and
     compare components of state from different moments.
 
-
 **** Formulating iterations as stream processes
 
      In Section 1.2.1, we introduced iterative processes, which
@@ -946,7 +945,6 @@
        accel-approx-stream: 59
        approx-stream: (didn't return after five minutes, suffice it to
        say it was in the thousands)
-
 
 **** Infinite streams of pairs 
 
@@ -1417,7 +1415,10 @@
              (stream-car (stream-cdr s))
              (stream-car (stream-cdr (stream-cdr s))))
             (cons-stream
-             (sum-squares (stream-car s))
+             (list (sum-squares (stream-car s))
+                   (stream-car s)
+                   (stream-car (stream-cdr s))
+                   (stream-car (stream-cdr (stream-cdr s))))
              (filter-identical-triples
               is-three-eql?
               (stream-cdr (stream-cdr (stream-cdr s))))))
@@ -1430,9 +1431,781 @@
           (pairs-weighted weigher-sum-squares integers integers))
           10)
 	 #+END_SRC
-	 
-	 
 
-	
+	 #+BEGIN_SRC scheme
+         ((325 (1 18) (6 17) (10 15)) 
+          (425 (5 20) (8 19) (13 16)) 
+          (650 (5 25) (11 23) (17 19)) 
+          (725 (7 26) (10 25) (14 23)) 
+          (845 (2 29) (13 26) (19 22)) 
+          (850 (3 29) (11 27) (15 25)) 
+          (925 (5 30) (14 27) (21 22)) 
+          (1025 (1 32) (8 31) (20 25)) 
+          (1105 (4 33) (9 32) (12 31)) 
+          (1250 (5 35) (17 31) (25 25)) 
+          (1300 (2 36) (12 34) (20 30)))
+	 #+END_SRC
+	 
+**** Streams as signals
+     We began our discussion of streams by describing them as
+     computational analogs of the "signals" in signal-processing
+     systems. In fact, we can use streams to model signal-processing
+     systems in a very direct way, representing the values of a signal
+     at successive time intervals as consecutive elements of a
+     stream. For instance, we can implement an _integrator_ or
+     _summer_ that, for an input stream x = (x_i), an initial value
+     _C_, and a small increment _dt_, accumulates the sum
 
-	
+     S_{i} = C + \sum_{j=1}^{i} x_{j}dt
+
+     and returns the stream of values S = (S_{i}). The following
+     integral procedure is reminiscent of the "implicit style"
+     definition of the stream of integers (Section 3.5.2):
+
+     #+BEGIN_SRC scheme
+     (define (integral integrand initial-value dt)
+      (define int
+       (cons-stream initial-value
+                    (add-streams (scale-stream integrand dt)
+                                 int)))
+      int)
+     #+END_SRC
+     
+     Fiture 3.32 is a picture of a signal-processing system that
+     corresponds to the integral procedure. The input stream is scaled
+     by _dt_ and passed through an adder, whose output is passed back
+     through the same adder. The self-reference in the definition of
+     int is reflected in the figure by the feedback loop that connects
+     the output of the adder to one of the inputs.
+
+     - Exercise 3.73: We can model electrical circuits using streams
+       to represent the values of currents or voltage at a sequence of
+       times. For instance, suppose we have an _RC circuit_ consisting
+       of a resistor of resistance R and a capacitor of capacitance C
+       in series. The voltage response _v_ of the circuit to an
+       injected current _i_ is determined by the formula in Figure
+       3.33, whose structure is shown by the accompanying signal-flow
+       diagram.
+
+       Write a procedure RC that models this circuit. RC should take
+       as inputs the values of R, C, and dt and should return a
+       procedure that takes as inputs a stream representing the
+       current _i_ and an initial value for the capacitor voltage
+       v_{0} and produces as output the stream of voltages v. For
+       example, you should be able to use RC to model an RC circuit
+       with R = 5 ohms, C = 1 farad, and a 0.5-second time step by
+       evaluating (define RC1 (RC 5 1 0.5)). THis defines RC1 as a
+       procedure that takes a stream representing the time sequence of
+       currents and an initial capacitor voltage and produces the
+       output stream of voltages.
+
+       #+BEGIN_SRC scheme
+       (define (RC r c ts)
+        (define (circuit i v0)
+         (add-streams
+          (scale-stream i r)
+          (integral
+           (scale-stream
+            (/ 1.0 c)
+            i)
+           v0
+           ts)))
+        circuit)
+       #+END_SRC
+
+     - Exercise 3.74: Alyssa P. Hacker is designing a system to
+       process signals coming from physical sensors. One important
+       feature she wishes to produce is a signal that describes the
+       _zero crossings_ of the input signal. That is, the resulting
+       signal should be +1 whenever the input signal changes from
+       negative to positive, -1 whenever the input signal changes from
+       positive to negative, and 0 otherwise. (Assume that the sign of
+       a 0 input is positive.) For example, a typical input signal
+       with its associated zero-crossing signal would be
+
+       ... 1 2 1.5 1 0.5 -0.1 -2 -3 -2 -0.5 0.2 3 4 ...
+       ... 0 0  0  0  0   -1   0  0  0   0   1  0 0 ...
+
+       In Alyssa's system, the signal from the sensor is represented
+       as a stream sense-data and the stream zero-crossings is the
+       corresponding stream of zero crossings. Alyssa first writes a
+       procedure sign-change-detector that takes two values as
+       arguments and compares the signs fo the values to produce an
+       appropriate 0, 1, or -1. She then constructs her zero-crossing
+       stream as follows:
+
+       #+BEGIN_SRC scheme
+       (define (make-zero-crossings input-stream last-value)
+        (cons-stream
+         (sign-change-detector
+          (stream-car input-stream)
+          last-value)
+         (make-zero-crossings 
+          (stream-cdr input-stream)
+          (stream-car input-stream))))
+       (define zero-crossings
+        (make-zero-crossings sense-data 0))
+       #+END_SRC
+
+       Alyssa's boss, Eva Lu Ator, walks by and suggests that this
+       program is approximately equivalent to the following one, which
+       uses the generalized version of stream-map from Exercise 3.50:
+
+       #+BEGIN_SRC scheme
+       (define zero-crossings
+        (stream-map sign-change-detector
+                    sense-data
+                    (cons-stream 0 sense-data)))
+       #+END_SRC
+     
+       Complete the program by supplying the indicated <expression>.
+
+     - Exercise 3.75: Unfortunately, Alyssa's zero-crossing detector
+       in Exercise 3.74 proves to be insufficient, because the noisy
+       signal from the sensor leads to spurious zero crossings. Lem
+       E. Tweakit, a hardware specialist, suggests that Alyssa smooth
+       the signal to filter out the noise before extracting the zero
+       crossings. Alyssa takes his advice and decides to extract the
+       zero crossings from the signal constructed by averaging each
+       value of the sense data with the previous value. She explains
+       the problem to her assistant, Louis Reasoner, who attempts to
+       implement the idea, altering Alyssa's program as follows:
+
+       #+BEGIN_SRC scheme
+       (define (make-zero-crossings input-stream last-value)
+        (let ((avpt (/ (+ (stream-car input-stream)
+                           last-value)
+                        2)))
+        (cons-stream
+         (sign-change-detector avpt last-value)
+         (make-zero-crossings
+          (stream-cdr input-stream)
+          avpt))))
+       #+END_SRC
+
+       This does not correctly implement Alyssa's plan. Find the bug
+       that Louis has installed and fix it without changing the
+       structure of the program (Hint: You will need to increase the
+       number of arguments to make-zero-crossings.)
+
+       The problem is that he's passing an average, and using that to
+       make another average. You still need the old average to compare
+       to the new average, but an average should not be used to create
+       another average. 
+       
+       #+BEGIN_SRC scheme
+       (define (make-zero-crossings input-stream last-value last-avg)
+        (let ((avpt (/ (+ (stream-car input-stream)
+                           last-value)
+                        2)))
+        (cons-stream
+         (sign-change-detector avpt last-avg)
+         (make-zero-crossings
+          (stream-cdr input-stream)
+          (stream-car input-stream) avpt))))
+       #+END_SRC
+
+     - Exercise 3.76: Eva Lu Ator has a criticism of Louis's approach
+       in Exercise 3.75. The program he wrote is not modular, because
+       it intermixes the operation of smoothing with the zero-crossing
+       extraction. For example, the extractor should not have changed
+       if Alyssa finds a better way to condition her input
+       signal. Help Louis by writing a procedure smooth that takes a
+       stream as input and produces a stream in which each element is
+       the average of two successive input stream elements. Then use
+       smooth as a component to implement the zero-crossing detector
+       in a more modular style. 
+
+       #+BEGIN_SRC scheme
+       (define (smooth s)
+         (cons-stream (/ (+ (stream-ref s 0)
+                            (stream-ref s 1)) 2)
+                      (stream-smooth (stream-cdr s))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define zero-crossings
+        (let ((smoothed (smooth sense-data)))
+         (stream-map sign-change-detector
+                     smoothed
+                    (cons-stream 0 smoothed))))
+       #+END_SRC
+     
+*** 3.5.4 Streams and Delayed Evaluation
+    The integral procedure at the end of the preceding section shows
+    how we can use streams to model signal-processing systems that
+    contain feedback loops. The feedback loop for the adder shown in
+    Figure 3.32 is modeled by the fact that integral's internal stream
+    int is defined in terms of itself:
+
+    #+BEGIN_SRC scheme
+    (define int
+     (cons-stream
+      initial-value
+      (add-streams (scale-stream integrand dt)
+                   int)))
+    #+END_SRC
+
+    The interpreter's ability to deal with such an implicit definition
+    depends on the delay that is incorporated into
+    cons-stream. Without this delay, the interpreter could not
+    construct int before evaluating both arguments to cons-stream,
+    which would require that int already be defined. In general, delay
+    is crucial for using streams to model signal-processing systems
+    that contain loops. Without delay, our models would have to be
+    formulated so that the inputs to any signal-processing component
+    would be fully evaluated before the output could be produced. This
+    would outlaw loops.
+
+    Unfortunately, stream models of systems with loops may require
+    uses of delay beyond the "hidden" delay supplied by
+    cons-stream. For instance, Figure 3.34 shows a signal-processing
+    system for solving the differential equation dy/dt = f(y) where f
+    is a given function. The figure shows a mapping component, which
+    applies f to its input signal, linked in a feedback loop to an
+    integrator in a manner very similar to that of the analog computer
+    circuits that are actually used to solve such equations.
+
+    Assuming we are given an initial value y_{0} for y, we could try
+    to model this system using the procedure
+
+    #+BEGIN_SRC scheme
+    (define (solve f y0 dt)
+     (define y (integral dy y0 dt))
+     (define dy (stream-map f y))
+     y)
+    #+END_SRC
+
+    This procedure does not work, because in the first line of solve
+    the call to integral requires that the input dy be defined, which
+    does not happen until the second line of solve.
+
+    On the other hand, the intent of our definition does make sense,
+    because we can, in principle, begin to generate the y stream
+    without knowing dy. Indeed, integral and many other stream
+    operations have properties similar to those of cons-stream, in
+    that we can generate part of the answer given only partial
+    information about the arguments. For integral, the first element
+    of the output stream is the specified initial-value. Thus, we can
+    generate the first element of the output stream without evaluating
+    the integrand dy. Once we know the first element of y, the
+    stream-map on the second line of solve can begin working to
+    generate the first element of dy, which will produce the next
+    element of y, and so on.
+
+    To take advantage of this idea, we will redefine integral to
+    expect the integrand stream to be a _delayed argument_. integral
+    will force the integrand to be evaluated only when it is required
+    to generate more than the first element of the output stream:
+
+    #+BEGIN_SRC scheme
+    (define (integral delayed-integrand initial-value dt)
+     (define int
+      (cons-stream 
+       initial-value
+       (let ((integrand (force delayed-integrand)))
+        (add-streams (scale-stream integrand dt) int))))
+     int)
+    #+END_SRC
+
+    Now we can implement our solve procedure by delaying the
+    evaluation of dy in the definition of y:
+
+    #+BEGIN_SRC scheme
+    (define (solve f y0 dt)
+     (define y (integral (delay dy) y0 dt))
+     (define dy (stream-map f y))
+     y)
+    #+END_SRC
+
+    In general, every caller of integral must now delay the integrand
+    argument. We can demonstrate that the solve procedure works by
+    approximating e ~ 2.718 by computing the value at y = 1 of the
+    solution to the differential equation dy/dt = y with initial
+    condition y(0) = 1:
+
+    #+BEGIN_SRC scheme
+    (stream-ref (solve (lambda (y) y) 1 0.001) 1000)
+    ; => 2.716924
+    #+END_SRC
+
+    - Exercise 3.77: The integral procedure used above was analogous
+      to the "implicit" definition of the infinite stream of integers
+      in Section 3.5.2. Alternatively, we can give a definition to
+      integral that is more like integers-starting-from (also in
+      Section 3.5.2):
+
+      #+BEGIN_SRC scheme
+      (define (integral integrand initial-value dt)
+       (cons-stream
+        initial-value
+        (if (stream-null? integrand)
+            the-empty-stream
+            (integral (stream-cdr integrand)
+                      (+ (* dt (stream-car integrand))
+                         initial-value)
+                      dt))))
+      #+END_SRC
+
+      When used in systems with loops, this procedure has the same
+      problem as does our original version of integral. Modify the
+      procedure so that it expects the integrand as a delayed argument
+      and hence can be used in the solve procedure shown above.
+
+      #+BEGIN_SRC scheme
+      (define (integral delayed-integrand initial-value dt)
+       (cons-stream
+        initial-value
+        (let ((integrand (force delayed-integrand)))
+        (if (stream-null? integrand)
+            the-empty-stream
+            (integral (delay (stream-cdr integrand))
+                      (+ (* dt (stream-car integrand))
+                         initial-value)
+                      dt))))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (integral delayed-integrand initial-value dt)
+       (define (integral-iter integrand last-value)
+        (if (stream-null? integrand)
+            the-empty-stream
+            (let ((this-value (+ (* dt (stream-car integrand)) last-value)))
+            (cons-stream
+             this-value
+             (integral-iter (stream-cdr integrand) this-value)))))
+       (cons-stream initial-value
+                    (integral-iter (force delayed-integrand)  initial-value)))
+      #+END_SRC
+
+    - Exercise 3.78: Consider the problem of designing a
+      signal-processing system to study the homogeneous second-order
+      linear differential equation
+
+      \frac{d^{2}y}{dt^{2}} - a\frac{dy}{dt} - by = 0
+
+      The output stream, modeling _y_, is generated by a network that
+      contains a loop. This is because the value of d^2y/dt^2 depends
+      upon the values of y and dy/dt and both of these are determined
+      by integrating d^2y/dt^2. The diagram we would like to encode is
+      shown in Figure 3.35. Write a procedure solve-2nd that takes as
+      arguments the constants _a_, _b_, and _dt_ and the initial
+      values y_{0} and dy_{0} for y and dy/dt and generates the stream
+      of successive values of y.
+      #+BEGIN_SRC scheme
+      (define (solve f y0 dt)
+        (define solution (integral (delay diff) y0 dt))
+        (define diff (stream-map f solution))
+        solution)
+      #+END_SRC
+      #+BEGIN_SRC scheme
+      (define (solve-2nd a b dt y0 dy0)
+       (define y-stream (integral
+                         (delay d-stream)
+                         y0
+                         dt))
+       (define d-stream (integral
+                         (delay double-deriv-stream)
+                         dy0
+                         dt))
+       (define double-deriv-stream
+               (add-streams
+                (scale-stream y-stream a)
+                (scale-stream d-stream b)))
+        y-stream)
+      #+END_SRC
+
+    - Exercise 3.79: Generalize the solve-2nd procedure of Exercise
+      3.78 so that it can be used to solve general second-order
+      differential equations d^2y/dt^2 = f(dy/dt, y).
+
+      #+BEGIN_SRC scheme
+      (define (solve-2nd f dt y0 dy0)
+       (define y (integral
+                  (delay dy)
+                  y0
+                  dt))
+       (define dy (integral
+                   (delay ddy)
+                   dy0
+                   dt))
+      (define ddy (stream-map f y dy))
+      y)
+      #+END_SRC
+
+    - Exercise 3.80: A _series RLC circuit_ consists of a resistor, a
+      capacitor, and an inductor connected in series, as shown in
+      Figure 3.36. If R, L, and C are the resistance, inductance, and
+      capacitance, then the relations between voltage (v) and current
+      (i) for the three components are described by the equations
+
+      v_{R} = i_{R}R, v_{L} = L\frac{di_{L}}{dt}, i_{C} =
+      C\frac{d_{v_{C}}}{dt},
+
+      and the circuit connections dictate the relations
+
+      i_{R} = i_{L} = -i_{C}, v_{C} = v_{L} + v_{R}
+
+      Combining these equations shows that the state of the circuit
+      (summarized by v_{C}, the voltage across the capcitor, and
+      i_{L}, the current in the inductor) is described by the pair of
+      differential equations
+
+      dv_{C}/dt = -i_{L}/C, di_{L}/dt = \frac{1}{L}v_{C} - \frac{R}{L}i_{L}.
+
+      The signal-flow diagram representing this system of differential
+      equations is shown in Figure 3.37.
+
+      Write a procedure RLC that takes as arguments the parameters R,
+      L, and C of the circuit and the time increment dt. In a manner
+      similar to that of the RC procedure of Exercise 3.73, RLC should
+      produce a procedure that takes the initial values of the state
+      variables, v_{C_{0}} and i_{L_{0}}, and produces a pair (using
+      cons) of the streams of states v_{C} and i_{L}. Using RLC,
+      generate the pair of streams that models the behavior of a
+      series RLC circuit with R = 1 ohm, C = 0.2 farad, L = 1 henry,
+      dt = 0.1 second, and initial values i_{L_{0}} = 0 amps and
+      v_{C_{0}} = 10 volts.
+
+      #+BEGIN_SRC scheme
+      (define (RLC R L C dt)
+       (lambda (vc0 il0)
+        (define il (integral
+                    (delay dil)
+                    il0
+                    dt))
+        (define dvc (scale-stream il (/ -1 C)))
+        (define vc (integral
+                    (delay dvc)
+                    vc0
+                    dt))
+        (define dil (add-streams
+                     (scale-stream 
+                            il
+                            (/ (* -1 R) L))
+                     (scale-stream 
+                            vc
+                            (/ 1 L))))
+       (cons il vc)))
+      #+END_SRC
+
+**** Normal-order evaluation
+     The examples in this section illustrate how the explicit use of
+     delay and force provides great programming flexibility, but the
+     same examples also show hwo this can make our programs more
+     complex. Our new integral procedure, for instance, gives us the
+     power to model systems with loops, but we msut now remember that
+     integral should be called with a delayed integrand, and every
+     procedure that uses integral must be aware of this. In effect, we
+     have created two classes of procedures: ordinary procedures and
+     procedures that take delayed arguments. In general, creating
+     separate classes of procedures forces us to create separate
+     classes of higher-order procedures as well.
+
+     One way to avoid the need for two different classes of procedures
+     is to make all procedures take delayed arguments. We could adopt
+     a model of evaluation in which all arguments to procedures are
+     automatically delayed and arguments are forced only when they are
+     actually needed (for example, when they are required by a
+     primitive operation). This would transform our language to use
+     normal-order evaluation, which we first described when we
+     introduced the substitution model for evaluation in Section
+     1.1.5. Converting to normal-order evaluation provides a uniform
+     and elegant way to simplify the use of delayed evaluation, and
+     this would be a natural strategy to adopt of we were concerned
+     only with stream processing. In Section 4.2, after we have
+     studied the evaluator, we will see how to transform our language
+     in just this way. Unfortunately, including delays in procedure
+     calls wreaks havoc with our ability to design programs that
+     depend on the order of events, such as programs that use
+     assignment, mutable data, or perform input or output. Even the
+     single delay in cons-stream can cause great confution, as
+     illustrated by Exercise 3.51 and Exercise 3.52. As far as anyone
+     knows, mutability and delayed evaluation do not mix well in
+     programming languages, and devising ways to deal with both of
+     these at once is an active area of research. 
+
+*** 3.5.5 Modularity of Functional Programs and Modularity of Objects
+
+    As we saw in Section 3.1.2, one of the major benefits of
+    introducing assignment is that we can increase the modularity of
+    our systems by encapsulating, or "hiding", parts of the state of a
+    large system within local variables. Stream models can provide an
+    equivalent modularity without the use of assignment. As an
+    illustration, we can reimplement the Monte Carlo estimation of pi,
+    which we examined in Section 3.1.2, from a stream-processing point
+    of view.
+
+    The key modularity issue was that we wished to hide the internal
+    state of a random-number generator from programs that used random
+    numbers. We began with a procedure rand-update, whose successive
+    values furnished our supply of random numbers, and used this to
+    produce a random-number generator:
+
+    #+BEGIN_SRC scheme
+    (define rand
+     (let ((x random-init))
+      (lambda ()
+       (set! x (rand-update x))
+       x)))
+    #+END_SRC
+
+    In the stream formulation there is no random-number generator _per
+    se_, just a stream of random numbers produced by successive calls
+    to rand-update:
+    
+    #+BEGIN_SRC scheme
+    (define random-numbers
+     (cons-stream random-init
+                  (stream-map rand-update random-numbers)))
+    #+END_SRC
+
+    We use this to construct the stream of outcomes of the Cesaro
+    experiment performed on consecutive pairs in the random-numbers
+    stream:
+
+    #+BEGIN_SRC scheme
+    (define cesaro-stream
+     (map-successive-pairs
+      (lambda (r1 r2) (= (gcd r1 r2) 1))
+      random-numbers))
+    (define (map-successive-pairs f s)
+     (cons-stream
+      (f (stream-car s) (stream-car (stream-cdr s)))
+      (map-successive-pairs f (stream-cdr (stream-cdr s)))))
+    #+END_SRC
+
+    The cesaro-stream is now fed to a monte-carlo procedure, which
+    produces a stream of estimates and probabilities. The results  are
+    then converted into a stream of estimates of pi. This version of
+    the program doesn't need a parameter telling how many trials to
+    perform. Better estimates of pi (from performing more experiments)
+    are obtained by looking further into the pi stream:
+
+    #+BEGIN_SRC scheme
+    (define (monte-carlo experiment-stream passed failed)
+     (define (next passed failed)
+      (cons-stream
+       (/ passed (+ passed failed))
+       (monte-carlo
+        (stream-cdr experiment-stream) passed failed)))
+     (if (stream-car experiment-stream)
+         (next (+ passed 1) failed)
+         (next passed (+ failed 1))))
+    (define pi
+     (stream-map
+      (lambda (p) (sqrt (/ 6 p)))
+      (monte-carlo cesaro-stream 0 0)))
+    #+END_SRC
+
+    There is considerable modularity in this approach, because we
+    still can formulate a general monte-carlo procedure that can deal
+    with arbitrary experiments. Yet there is no assignment or local
+    state.
+
+    - Exercise 3.81: Exercise 3.6 discussed generalizing the
+      random-number generator to allow one to reset the random-number
+      sequence so as to produce repeatable sequences of "random"
+      numbers. Produce a stream formulation of this same generator
+      that operates on an input stream of requests to generate a new
+      random number or to reset the sequence to a specified value and
+      that produces the desired stream of random numbers. Don't use
+      assignment in your solution.
+
+      #+BEGIN_SRC scheme
+      ; see the wikipedia page on Linear Congruential Generator
+      (define (rand-update x)
+	      (define mod (expt 2 64))
+	      (define mul 49)
+	      (define c 1)
+	      (remainder (+ (* mul x) c) mod))
+      (define (random-numbers input-requests)
+       (define (rand-stream last-num stream)
+         (let ((new-num (if (eq? (stream-car stream) 'generate)
+                            (rand-update last-num)
+                            (rand-update (stream-car stream)))))
+          (cons-stream
+           new-num
+           (rand-stream new-num (stream-cdr stream)))))
+       (rand-stream (stream-car input-requests) (stream-cdr input-requests)))
+      #+END_SRC
+
+    - Exercise 3.82: Redo Exercise 3.5 on Monte Carlo integration in
+      terms of streams. The stream version of estimate-integral will
+      not have an argument telling how many trials to
+      perform. Instead, it will produce a stream of estimates based on
+      successively more trials. 
+
+      #+BEGIN_SRC scheme
+      (define (estimate-integral predicate x1 y1 x2 y2)
+       (define gen-stream (cons-stream 'generate gen-stream))
+       (define rand-stream (random-numbers (cons-stream 9 gen-stream)))
+       (define (stream-map-doubles double-func stream)
+        (cons-stream
+         (double-func (stream-ref stream 0)
+                    (stream-ref stream 1))
+         (stream-map-doubles double-func (stream-cdr stream))))
+       (define points (stream-map-doubles
+                       (lambda (xi yi)
+                         (list (+ x1 (/ (remainder xi (* 100 (- x2 x1))) 100.0))
+                               (+ y1 (/ (remainder yi (* 100 (- y2 y1))) 100.0))))
+                       rand-stream))
+       (stream-map (lambda (est)
+                    (* est (* (- y2 y1) (- x2 x1))))
+                   (monte-carlo 
+                    (stream-map
+                     (lambda (x) (apply predicate x))
+                      points) 0 0)))
+      #+END_SRC
+
+**** A functional-programming view of time      
+     Let us now return to the issues of objects and state that were
+     raised at the beginning of this chapter and examine them in a new
+     light. We introduced assignment and mutable objects to provide a
+     mechanism for modular construction of programs that model systems
+     with state. We constructed computational objects with local state
+     variables and used assignment to modify these variables. We
+     modeled the temporal behavior of the objects in the world by the
+     temporal behavior of the corresponding computational objects.
+
+     Now we have seen that streams provide an alternative way to model
+     objects with local state. We can model a changing quantity, such
+     as the local state of some object, using a stream that represents
+     the time history of successive states. In essence, we represent
+     time explicitly, using streams, so that we decouple time in our
+     simulated world from the sequence of events that take place
+     during evaluation. Indeed, because of the presence of delay there
+     may be little relation between simulated time in the model and
+     the order of events during the evaluation. 
+
+     In order to contrast these two approaches to modeling, let us
+     reconsider the implementation of a "withdrawal processor" that
+     monitors the balance in a bank account. In Section 3.1.3 we
+     implemented a simplified version of such a processor:
+
+     #+BEGIN_SRC scheme
+     (define (make-simplified-withdraw balance)
+      (lambda (amount)
+       (set! balance (- balance amount))
+       balance))
+     #+END_SRC
+
+     Calls to make-simplified-withdraw produce computational objects,
+     each with a local state variable balance that is decremented by
+     successive calls to the object. The object takes an amount as an
+     argument and returns the new balance. We can imagine the user of
+     a bank account typing a sequence of inputs to such an object and
+     observing the sequence of returned values shown on a display
+     screen.
+
+     Alternatively, we can model a withdrawal processor as a procedure
+     that takes as input a balance and a stream of amounts to withdraw
+     and produces the stream of successive balances in the account:
+
+     #+BEGIN_SRC scheme
+     (define (stream-withdraw balance amount-stream)
+      (cons-stream
+       balance
+       (stream-withdraw (- balance (stream-car amount-stream))
+                        (stream-cdr amount-stream))))
+     #+END_SRC
+
+     stream-withdraw implements a well-defined mathematical function
+     whose output is fully determined by its input. Suppose, however,
+     that the input amount-stream is the stream of successive values
+     typed by the user and the resulting stream of balances is
+     displayed. Then, from the perspective of the user who is typing
+     values and watching results, the stream process has the same
+     behavior as the object created by
+     make-simplified-withdraw. However, with the stream version, there
+     is no assignment, no local state variable, and consequently none
+     of the theoretical difficulties that we encountered in Section
+     3.1.3. Yet the system has state!
+
+     This is really remarkable. Even though stream-withdraw implements
+     a well-defined mathematical function whose behavior does not
+     change, the user's perception here is one of interacting with a
+     system that has a changing state. One way to resolve this paradox
+     is to realize that it is the user's temporal existence that
+     imposes state on the system. If the user could step back from the
+     interaction and think in terms of streams of balances rather than
+     individual transactions, the system would appear stateless.
+
+     From the point of view of one part of a complex process, the
+     other parts appear to change with time. They have hidden
+     time-varying local state. If we wish to write programs that model
+     this kind of natural decomposition in our world (as we see it
+     from our viewpoint as a part of that world) with structures in
+     our computer, we make computational objects that are not
+     functional -- they must change with time. We model state with
+     local state variables, and we model the changes of state with
+     assignments to those variables. By doing this we make the time of
+     execution of a computation model time in the world we are part
+     of, and thus we get "objects" in our computer.
+
+     Modeling with objects is powerful and intuitive, largely because
+     this matches the perception of interacting with a world of which
+     we are part. However, as we've seen repeatedly throughout this
+     chapter, these models raise thorny problems of constraining the
+     order of events and of synchronizing multiple processes. The
+     possibility of avoiding these problems has stimulated the
+     development of _functional programming languages_, which do not
+     include any provision for assignment or mutable data. In such a
+     language, all procedures implement well-defined mathematical
+     functions of their arguments, whose behavior does not change. The
+     functional approach is extremely attractive for dealing with
+     concurrent systems.
+
+     On the other hand, if we look closely, we can see time-related
+     problems creeping into functional models as well. One
+     particularly troublesome area arises when we wish to design
+     interactive systems, especially ones that model interactions
+     between independent entities. For instance, consider once more
+     the implementation a banking system that permits joint bank
+     accounts. In a conventional system using assignment and objects,
+     we would model the fact that Peter and Paul share an account by
+     having both Peter and Paul send their transaction requests to the
+     same bank-account object, as we saw in Section 3.1.3. From the
+     stream point of view, where there are no "objects" per se, we
+     have already indicated that a bank account can be modeled as a
+     process that operates on a stream of transaction requests to
+     produce a stream of responses. Accordingly, we could model the
+     fact that Peter and Paul have a joint bank account by merging
+     Peter's stream of transaction requests with Paul's stream of
+     requests and feeding the result to the bank-account stream
+     process, as shown in Figure 3.38.
+
+     The trouble with this formulation is the notion of _merge_. It
+     will not do to merge the two streams by simply taking alternately
+     one request from Peter and one request from Paul. Suppose Paul
+     accesses the account only very rarely. We could hardly force
+     Peter to wait for Paul to access the account before he could
+     issue a second transaction. However such a merge is implemented,
+     it must interleave the two transaction streams in some way that
+     is constrained by "real time" as perceived by Peter and Paul, in
+     the sense that, if Peter and Paul meet, they can agree that
+     certain transactions were processed before the meeting, and other
+     transactions were processed after the meeting. This is precisely
+     the same constraint that we had to deal with in Section 3.4.1,
+     where we found the need to introduce explicit synchronization to
+     ensure a "correct" order of events in concurrent processing of
+     objects with state. Thus, in an attempt to support the functional
+     style, the need to merge inputs from different agents
+     reintroduces the same problems that the functional style was
+     meant to eliminate.
+
+     We began this chapter with the goal of building computational
+     models whose structure matches our perception of the real world
+     we are trying to model. We can model the world as a collection of
+     separate, time-bound, interacting objects with state, or we can
+     model the world as a single, timeless, stateless unity. Each view
+     has powerful advantages, but neither view alone is completely
+     satisfactory. A grand unification has yet to emerge.
+
+     
+      
+      
+
+      
+
+      
