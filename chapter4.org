@@ -1525,26 +1525,380 @@
     #+END_SRC
 
     Now all we need to do to run the evaluator is to initialize the
-    global environment and start the driver loop.
+    global environment and start the driver loop. Here is a sample
+    interaction:
 
+    #+BEGIN_SRC scheme
+    (define the-global-environment (setup-environment))
+    (driver-loop)
 
+    ;;; M-Eval input:
+    (define (append x y)
+     (if (null? x)
+         y
+         (cons (car x) (append (cdr x) y))))
 
+    ;;; M-Eval value:
+    ok
 
+    ;;; M-Eval input:
+    (append '(a b c) '(d e f))
+      
+    ;;; M-Eval value:
+    (a b c d e f)
+    #+END_SRC
 
-       
+    - Exercise 4.1.4: Eva Lu Ator and Louis Reasoner are each
+      experimenting with the metacircular evaluator. Eva types in the
+      definition of map, and runs some test programs that use it. They
+      work fine. Louis, in contrast, has installed the system version
+      of map as a primitive for the metacircular evaluator. When he
+      tries it, things go terribly wrong. Explain why Louis' map fails
+      even though Eva's works.
 
+      Louis's version, the underlying scheme version, needs a
+      procedure object of the kind defined by the underlying lisp, not
+      a procedure from our lisp. However, what it will get is a
+      procedure definition from our own lisp, even if it's a
+      primitive, it will not get an actual procedure object, so it
+      will not be able to map that way. 
 
-       
-       
-       
+*** 4.1.4 Data as Programs
+    In thinking about a Lisp program that evaluates Lisp expressions,
+    an analogy might be helpful. One operational view of the meaning
+    of a program is that the program is a description of an abstract
+    (perhaps infinitely large) machine. For exmaple, consider the
+    familiar program to compute factorials:
 
+    #+BEGIN_SRC scheme
+    (define (factorial n)
+     (if (= n 1) 1 (* (factorial (- n 1) n))))
+    #+END_SRC
 
+    We may regard this program as the description of a machine
+    containing parts that decrement, multiply, and test for equality,
+    together with a two-position switch and another factorial
+    machine. (The factorial machine is infinite because it contains
+    another factorial machine within it.) Figure 4.2 is a flow diagram
+    for the factorial  machine, showing how the parts are wired
+    together.
 
+    In a similar way, we can regard the evaluator as a very special
+    machine that takes as input a description of a machine. Given this
+    input, the evaluator configures itself to emulate the machine
+    described. For example, if we feed our evaluator the definition of
+    factorial, as shown in Figure 4.3, the evaluator will be able to
+    compute factorials.
 
+    From this perspective, our evaluator is seen to be a _universal
+    machine_. It mimics other machines when these are described as
+    Lisp programs. This is striking. Try to imagine an analogous
+    evaluator for electrical circuits. This would be a circuit that
+    takes as input a signal encoding the plans for some other circuit,
+    such as a filter. Given this input, the circuit evaluator would
+    then behave like a filter with the same description. Such a
+    universal electrical circuit is almost unimaginably complex. It is
+    remarkable that the program evaluator is a rather simple program.
 
+    Another striking aspect of the evaluator is that it acts as a
+    bridge between the data objects that are manipulated by our
+    programming language and the programming language itself. Imagine
+    that the evaluator program (implemented in Lisp) is running, and
+    that a user is typing expressions to the evaluator and observing
+    the results. From the perspective of the user, an input expression
+    such as (* x x) is an expression in the programming language,
+    which the evaluator should execute. From the perspective of the
+    evaluator, however, the expression is simply a list (in this case,
+    a list of three symbols: *, x, and x) that is to be manipulated
+    according to a well-defined set of rules. 
+    
+    That the user's programs are the evaluator's data need not be a
+    source of confusion. In fact, it is sometimes convenient to ignore
+    this distinction, and to give the user the ability to explicitly
+    evaluate a data object as a Lisp expression, by making eval
+    available for use in programs. Many Lisp dialects provide a
+    primitive eval procedure that takes as arguments an expression and
+    an environment and evaluates the expression relative to the
+    environment. Thus,
 
+    #+BEGIN_SRC scheme
+    (eval '(* 5 5) user-initial-environment)
+    #+END_SRC
+    
+    and
 
+    #+BEGIN_SRC scheme
+    (eval (cons '* (list 5 5)) user-initial-environment)
+    #+END_SRC
 
+    will both return 25.
 
+    - Exercise 4.15: Given a one-argument procedure p and an object a,
+      p is said to "halt" on a if evaluating the expression (p a)
+      returns a value (as opposed to terminating with an error message
+      or running forever). Show that it is impossible to write a
+      procedure halts? that correctly determines whether p halts on a
+      for any procedure p and object a. Use the following reasoning:
+      If you had such a procedure halts?, you could implement the
+      following program:
 
+      #+BEGIN_SRC scheme
+      (define (run-forever) (run-forever))
+      (define (try p)
+       (if (halts? p p) (run-forever) 'halted))
+      #+END_SRC
 
+      Now consider evaluating the expression (try try) and show that
+      any possible outcome (either halting or running forever)
+      violates the intended behavior of halts?.
+
+      Try is supposed to run forever if the procedure given to it
+      halts when given itself, and halt if it would run forever. If
+      the halts? procedure decides that (try try) halts it will
+      actually run forever, making that procedure inconsistent and
+      breaking the law of functions. If it decides it runs forever the
+      procedure will halt, again breaking the rules of functions by
+      having a different result for the same input.
+
+*** 4.1.6 Internal Definitions
+
+    Our environment model of evaluation and our metacircular evaluator
+    execute definitions in sequence, extending the environment frame
+    one definition at a time. This is particularly convenient for
+    interactive program development, in which the programmer needs to
+    freely mix the application of procedures with the definition of
+    new procedures. However, if we think carefully about the internal
+    definitions used to implement block structure (introduced in
+    Section 1.1.8), we find that name-by-name extension of the
+    environment may not be the best way to define local
+    variables. Consider a procedure with internal definitions, such as
+
+    #+BEGIN_SRC scheme
+    (define (f x)
+     (define (even? n) (if (= n 0) true (odd? (- n 1))))
+     (define (odd? n) (if (= n 0) false (even? (- n 1))))
+     <rest of body of f>)
+    #+END_SRC
+
+    Our intention here is that the name odd? in the body of the
+    procedure even? should refer to the procedure odd? that is defined
+    after even?. The scope of the name odd? is the entire body of f,
+    not just the portion of the body of f starting at the point where
+    the define for odd? occurs. Indeed, when we consider that odd? is
+    itself defined in terms of even? -- so that even? and odd? are
+    mutually recursive procedures -- we see that the only satisfactory
+    interpretation of the two defines is to regard them as if the
+    names even? and odd? were being added to the environment
+    simultaneously. More generally, in block structure, the scope of a
+    local name is the entire procedure body in which the define is
+    evaluated.
+
+    As it happens, our interpreter will evaluate calls to f correctly,
+    but for an "accidental" reason: Since the definitions of the
+    internal procedures come first, no calls to these procedures will
+    be evaluated until all of them have been defined. Hence, odd? will
+    have been defined by the time even? is executed. In fact, our
+    sequential evaluation mechanism will give the same result as a
+    mechanism that directly implements simultaneous definition for any
+    procedure in which the internal definitions come first in a body
+    and evaluation of the value expressions for the defined variables
+    doesn't actually use any of the defined variables. (For an example
+    of a procedure that doesn't obey these restrictions, so that
+    sequential definition isn't equivalent to simultaneous definition,
+    see Exercise 4.19). 
+
+    There is, however, a simple way to treat definitions so that
+    internally defined names have truly simultaneous scope -- just
+    create all local variables that will be in the current environment
+    before evaluating any of the value expressions. One way to do this
+    is by a syntax transformation on lambda expressions. Before
+    evaluating the body of a lambda expression, we "scan out" and
+    eliminate all the internal definitions in the body. For example,
+    the procedure
+
+    #+BEGIN_SRC scheme
+    (lambda <vars>
+     (define u <e1>)
+     (define v <e2>)
+     <e3>)
+    #+END_SRC
+
+    would be transformed into
+
+    #+BEGIN_SRC scheme
+    (lambda <vars>
+     (let ((u '*unassigned*)
+           (v '*unassigned*))
+      (set! u <e1>)
+      (set! v <e2>)
+      <e3>))
+    #+END_SRC
+
+    where \*unassigned\* is a special symbol that causes looking up a
+    variable to signal an error if an attempt is made to use the value
+    of the not-yet-assigned variable.
+
+    An alternative strategy for scanning out internal definitions is
+    shown in Exercise 4.18. Unlike the transformation shown above,
+    this enforces the restriction that defined variables' values can
+    be evaluated without using any of the variables' values. 
+
+    - Exercise 4.16: In this exercise we implement the method just
+      described for interpreting internal definitions. We assume that
+      the evaluator supports let (see Exercise 4.6).
+
+      a. Change lookup-variable-value (Section 4.13) to signal an
+      error if the value it finds is the symbol \*unassigned\*.
+
+      b. Write a procedure scan-out-defines that takes a procedure
+      body and returns an equivalent one that has no internal
+      definitions, by making the transformation described above. 
+      
+      c. Install scan-out-defines in the interpreter, either in
+      make-procedure or in procedure-body (see Section 4.1.3). Which
+      place is better? Why? 
+
+      It makes more sense to put it in make-procedure, if the
+      procedure-body is accessed multiple times, we only transform it
+      once in make-procedure.
+
+    - Exercise 4.17: Draw diagrams of the environment in effect when
+      evaluating the expression <e3> in the procedure in the text,
+      comparing how this will be structured when definitions are
+      interpreted sequentially with how it will be structured if
+      definitions are scanned out as described. Why is there an extra
+      frame in the transformed program? Explain why this difference in
+      environment structure can never make a difference in the
+      behavior of a correct program. Design a way to make the
+      interpreter implement the "simultaneous" scope rule for internal
+      definitions without constructing the extra frame.
+
+      There is an extra frame because we introduced an extra let
+      expression, which is just syntactical sugar for lambda, which is
+      a procedure, which creates an extra frame. It makes no
+      difference in program behavior because we set variables
+      immediately inside the let, so there is no opportunity for the
+      program to try to find the value of a variable and not get
+      it. We can implement simultaneous scope by using defines instead
+      of lets, the program expansion from the text would be:
+
+      #+BEGIN_SRC scheme
+      (lambda <vars>
+       (define u '*unassigned*)
+       (define v '*unassigned*)
+       (set! u <e1>)
+       (set! v <e2>)
+       <e3>)
+      #+END_SRC
+
+    - Exercise 4.18: Consider an alternative strategy for scanning out
+      definitions that translates the example in the text to
+
+      #+BEGIN_SRC scheme
+      (lambda <vars>
+       (let ((u '*unassigned*) (v '*unassigned*))
+        (let ((a <e1>) (b <e2>))
+         (set! u a)
+         (set! v b))
+        <e3>))
+      #+END_SRC
+
+      Here a and b are meant to represent new variable names, created
+      by the interpreter, that do not appear in the user's
+      program. Consider the solve procedure from Section 3.5.4:
+
+      #+BEGIN_SRC scheme
+      (define (solve f y0 dt)
+       (define y (integral (delay dy) y0 dt))
+       (define dy (stream-map f y))
+       y)
+      #+END_SRC
+
+      Will this procedure work if internal definitions are scanned out
+      as shown in this exercise? What if they are scanned out as shown
+      in the text? Explain.
+
+      It should, since dy is delayed for evaluation (although our
+      interpreter doesn't have a delay keyword). The definition of dy
+      itself however may not work. y will be set to \*unassigned\*
+      when it tries to stream-map on y, which is not a valid
+      stream. stream-map will try to evaluate one application of f on
+      the y stream. The expansion would look like this:
+
+      #+BEGIN_SRC scheme
+      (lambda (f y0 dt)
+       (let ((y '*unassigned*) (dy '*unassigned))
+        (let ((a (integral (delay dy) y0 dt))
+              (b (stream-map f y)))
+         (set! y a)
+         (set! dy b))
+        y))
+      #+END_SRC
+
+      What will happen is stream-map will try to evaluate 
+      (cons-stream (f (stream-car y)) (stream-map f (stream-cdr y)))
+      The first expression (f (stream-car y)) will be evaluated
+      immediately, and looking up the value of y will throw an
+      error. The original transformation would work, since it does
+      actually evaluate set! expressions in the same order that the
+      defines occured, so y would be defined as a stream.
+
+    - Exercise 4.19: Ben Bitdiddle, Alyssa P. Hacker, and Eva Lu Ator
+      are arguing about the desired result of evaluating the
+      expression
+
+      #+BEGIN_SRC scheme
+      (let ((a 1))
+       (define (f x)
+        (define b (+ a x))
+        (define a 5)
+        (+ a b))
+      (f 10))
+      #+END_SRC
+
+      Ben asserts that the result should be obtained using the
+      sequential rule for define: b is defined to be 11, then a is
+      defined to be 5, so the result is 16. Alyssa objects that mutual
+      recursion requires the simultaneous scope rule for internal
+      procedure definitions, and that it is unreasonable to treat
+      procedure names differently from other names. Thus, she argues
+      for the mechanism implemented in Exercise 4.16. This would lead
+      to a being unassigned at the time that the value for b is to be
+      computed. Hence, in Alyssa's view the procedure should produce
+      an error. Eva has a third opinion. She says that if the
+      definitions of a and b are truly meant to be simultaneous, then
+      the value 5 for a should be used in evaluating b. Hence, in
+      Eva's view a should be 5, b should be 15, and the answer should
+      be 20. Which (if any) of these viewpoints do you support? Can
+      you devise a way to implement internal definitions so that they
+      behave as Eva prefers?
+
+      If we say that internal definitions are supposed to be in
+      principle simultaneous, I would say that Alyssa is right. It
+      doesn't make sense that a would be defined during a parallel
+      assignment. If it is, then assignment is not parallel but
+      ordered in some way. This should produce an error.
+
+      The only way to do it the way Eva wants is to analyze the
+      expressions and order the sets so that they occur in the right
+      order. So you would have to scan each definition for references
+      to the others. This doesn't work in a circular definition
+      case. This is why I don't think Eva's definition actually makes
+      sense, if assignment is simultaneous, saying that a is defined
+      to be 5 implicitly defines an ordering.
+
+    - Exercise 4.20: Because internal definitions look sequential but
+      are actually simultaneous, some people prefer to avoid them
+      entirely, and use the special form letrec instead. letrec looks
+      like let, so it is not surprising that the variables it binds
+      are bound simultaneously and have the same scope as each
+      other. The sample procedure f above can be written without
+      internal definitions, but with exactly the same meaning, as
+
+      #+BEGIN_SRC scheme
+      (define (f x)
+       (letrec
+        ((even? 
+      #+END_SRC
+
+      
