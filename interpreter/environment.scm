@@ -41,7 +41,7 @@
 
 (define (operate-on-cell proc var env)
   (if (eq? env the-empty-environment)
-      (error "Undefined variable -- OPERATE-ON-CELL" var)
+      (error "Variable has no definition or entry -- OPERATE-ON-CELL" var)
       (let ((lookup (find-cell-in-frame var (first-frame env))))
 	(if (null-cell? lookup)
 	    (operate-on-cell proc var (enclosing-environment env))
@@ -55,7 +55,9 @@
     (if (eq? found-value UNDEFINED-VARIABLE)
 	(error "Variable value is undefined -- LOOKUP-VARIABLE-VALUE"
 	       var)
-	found-value)))
+	(if (promise? found-value)
+	    (force found-value)
+	    found-value))))
 
 (define (set-variable-value! var val env)
   (operate-on-cell
@@ -80,6 +82,7 @@
     'car 
     'cons 
     'cdr
+    'get-universal-time
     'null?)
    (list
     (make-primitive-procedure +)
@@ -89,6 +92,7 @@
     (make-primitive-procedure car)
     (make-primitive-procedure cons)
     (make-primitive-procedure cdr)
+    (make-primitive-procedure get-universal-time)
     (make-primitive-procedure null?))
    the-empty-environment))
 

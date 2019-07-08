@@ -1887,6 +1887,27 @@
       sense, if assignment is simultaneous, saying that a is defined
       to be 5 implicitly defines an ordering.
 
+      However another, simpler way that accomplishes these semantics
+      but changes other semantics is to use delay in eval-ing the
+      value of the set! expressions. You can do this simply by adding
+      a wrapping (delay) in the eval-assignment function, and testing
+      if a variable lookup-value is a promise with promise? when doing
+      a lookup. This causes the code above to function in the way Eva
+      wants. However, it breaks/changes the semantics of other
+      expressions, specifically any side-effect expression.
+
+      #+BEGIN_SRC scheme
+      (define g 20)
+      (define (s x) (set! g (- g x)) g)
+      (define (d x) (set! g (/ g x)) g)
+
+      (define (f x)
+       (define m (h 2))
+       (define x (d 3))
+       (+ x m))
+
+      #+END_SRC
+
     - Exercise 4.20: Because internal definitions look sequential but
       are actually simultaneous, some people prefer to avoid them
       entirely, and use the special form letrec instead. letrec looks
@@ -1898,7 +1919,651 @@
       #+BEGIN_SRC scheme
       (define (f x)
        (letrec
-        ((even? 
+        ((even? (lambda (n)
+                 (if (= n 0) true (odd? (- n 1)))))
+         (odd?  (lambda (n)
+                 (if (= n 0) false (even? (- n 1))))))
+         <rest of body of f>))
       #+END_SRC
 
+      letrec expressions, which have the form
+
+      #+BEGIN_SRC scheme
+      (letrec ((<var1> <exp1>) ... (<varn> <expn>))
+       <body>)
+      #+END_SRC
+
+      are a variation on let in which the expressions <expk> that
+      provide the initial values for the variables <vark> are
+      evaluated in an environment that includes all the letrec
+      bindings. This permits recursion in the bindings, such as the
+      mutual recursion of even? and odd? in the example above, or the
+      evaluation of 10 factorial with
+
+      #+BEGIN_SRC scheme
+      (letrec
+       ((fact (lambda (n)
+               (if (= n 1) 1 (* n (fact (- n 1)))))))
+       (fact 10))
+      #+END_SRC
+
+      a. Implement letrec as a derived expression, by transforming a
+      letrec expression into a let expression as shown in the text
+      above or in exercise 4.18. That is, the letrec variables should
+      be created with a let and then be assigned their values with a
+      set!.
+      
+      #+BEGIN_SRC scheme
+      (define (letrec? expr)
+       (eq? (car expr) 'letrec))
+      (define (letrec-bindings expr)
+       (cadr expr))
+      (define (letrec-body expr)
+       (cddr expr))
+      (define (letrec->let expr)
+       (let ((binding-vars (map binding-var (letrec-bindings expr))))
+        (let ((undefined-bindings
+               (map (lambda (name) (make-binding name UNDEFINED-VARIABLE))
+                    binding-vars))
+              (assignments
+               (map (lambda (binding)
+                     (make-assignment
+                      (binding-var binding)
+                      (binding-val binding)))
+                    (letrec-bindings expr)))) 
+         (make-let
+          undefined-bindings
+          (concat-exps
+           assignments
+           (letrec-body expr))))))
+      #+END_SRC
+
+      b. Louis Reasoner is confused by all this fuss about internal
+      definitions. The way he sees it, if you don't like to use define
+      inside a procedure, you can just use let. Illustrate what is
+      loose about his reasoning by drawing an environment diagram that
+      shows the environment in which the <rest of body of f> is
+      evaluated during evaluation of the expression (f 5), with f
+      defined as in this exercise. Draw an environment diagram for the
+      same evaluation, but with let in place of letrec in the
+      definition of f. 
+
+      The issue is that let creates a new internal environment, but
+      evaluates the binding value expressions in the environment of
+      the outer environment. As a result, evaluating a (lambda) in a
+      plain let results in a procedure who's parent environment is not
+      the new environment being created but the one above that. So it
+      cannot 'see' names in the same environment being created by the
+      let. So when a variable lookup happens inside the body of the
+      lambda, it looks in the environment above the current let, and
+      can't find anything in the current let. letrec creates the
+      bindings first and evaluates the lambda inside the new
+      environment, so mutual reference is possible.
+
+    - Exercise 4.21: Amazingly, Louis's intuiition in Exercise 4.20 is
+      correct. It is indeed possible to specify recursive procedures
+      without using letrec (or even define), although the method for
+      accomplishing this is much more subtle than Louis imagined. The
+      following expression computes 10 factorial by applying a
+      recursive factorial procedure:
+
+      #+BEGIN_SRC scheme
+      ((lambda (n)
+        ((lambda (fact) (fact fact n))
+         (lambda (ft k) (if (= k 1) 1 (* k (ft ft (- k 1)))))))
+        10)
+      #+END_SRC
+
+      a. Check (by evaluating the expression) that this really does
+      compute factorials. Devise an analogous expression for computing
+      Fibonacci numbers.
+
+      #+BEGIN_SRC scheme
+      ((lambda (n)
+        ((lambda (fibo) (fibo fibo n))
+         (lambda (fib n)
+          (cond ((or (= n 2) (= n 1)) 1)
+                ((= n 0) 0)
+                (else (+ (fib fib (- n 1)) (fib fib (- n 2))))))))
+       10)
+      #+END_SRC
+
+      b. Consider the following procedure, which includes mutually
+      recursive internal definitions:
+
+      #+BEGIN_SRC scheme
+      (define (f x)
+       (define (even? n)
+        (if (= n 0) true (odd? (- n 1))))
+       (define (odd? n)
+        (if (= n 0) false (even? (- n 1))))
+       (even? x))
+      #+END_SRC
+
+      Fill in the missing expressions to complete an alternative
+      definition of f, which uses neither internal definitions nor
+      letrec:
+
+      #+BEGIN_SRC scheme
+      (define (f x)
+       ((lambda (even? odd?) (even? even? odd? x))
+        (lambda (ev? od? n)
+         (if (= n 0) true (od? ev? od? (- n 1))))
+        (lambda (ev? od? n)
+         (if (= n 0) false (ev? ev? od? (- n 1))))))
+      #+END_SRC
+*** 4.1.7 Separating Syntactic Analysis from Execution
+    The evaluator implemented above is simple, but it is very
+    inefficient, because the syntactic analysis of expressions is
+    interleaved with their execution. Thus if a program is executed
+    many times, its syntax is analyzed many times. Consider, for
+    example, evaluating (factorial 4) using the following definition
+    of factorial:
+
+    #+BEGIN_SRC scheme
+    (define (factorial n)
+     (if (= n 1) 1 (* (factorial (- n 1)) n)))
+    #+END_SRC
+
+    Each time factorial is called, the evaluator must determine that
+    the body is an if expression and extract the predicate. Only then
+    can it evaluate the predicate and dispatch on its value. Each time
+    it evaluates the expression (* (factorial (- n 1)) n), or the
+    subexpressions (factorial (- n 1)) and (- n 1), the evaluator must
+    perform the case analysis in eval to determine that the expression
+    is an application, and must extract its operator and
+    operands. This analysis is expensive. Performing it repeatedly is
+    wasteful.
+
+    We can transform the evaluator to be significantly more efficient
+    by arranging things so that syntactic analysis is performed only
+    once. We split eval, which takes an expression and an environment,
+    into two parts. The procedure analyze takes only the
+    expression. It performs the syntactic analysis and returns a new
+    procedure, the _execution procedure_, that encapsulates the work
+    to be done in executing the analyzed expression. The execution
+    procedure takes an environment as its argument and completes the
+    evaluation. This saves work because analyze will be called only
+    once on an expression, while the execution procedure may be called
+    many times. 
+
+    With the separation into analysis and execution, eval now becomes
+
+    #+BEGIN_SRC scheme
+    (define (eval exp env) ((analyze exp) env))
+    #+END_SRC
+
+    The result of calling analyze is the execution procedure to be
+    applied to the environment. The analyze procedure is the same case
+    analysis as performed by the original eval of Section 4.1.1,
+    except that the procedures to which we dispatch perform only
+    analysis, not full evaluation:
+
+    #+BEGIN_SRC scheme
+    (define (analyze exp)
+     (cond ((self-evaluating? exp) (analyze-self-evaluating exp))
+           ((quoted? exp) (analyize-quoted exp))
+           ((variable? exp) (analyze-variable exp))
+           ((assignment? exp) (analyze-assignment exp))
+           ((definition? exp) (analyze-definition exp))
+           ((if? exp) (analyze-if exp))
+           ((lambda? exp) (analyze-lambda exp))
+           ((begin? exp) (analyze-sequence (begin-actions exp)))
+           ((cond? exp) (analyze (cond->if exp)))
+           ((application? exp) (analyze-application exp))
+           (else (error "Unknown expression type: ANALYZE" exp))))
+    #+END_SRC
+
+    Here is the simplest syntactic analysis procedure, which handles
+    self-evaluating expressions. It returns an execution procedure
+    that ignores its environment argument and just returns the
+    expression:
+
+    #+BEGIN_SRC scheme
+    (define (analyze-self-evaluating exp)
+     (lambda (env) exp))
+    #+END_SRC
+
+    For a quoted expression, we can gain a little efficiency by
+    extracting the text of the quotation only once, in the analysis
+    phase, rather than in the execution phase.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-quoted exp)
+     (let ((qval (text-of-quotation exp)))
+      (lambda (env) qval)))
+    #+END_SRC
+
+    Looking up a variable value must still be done in the execution
+    phase, since this depends upon knowing the environment. 
+
+    #+BEGIN_SRC scheme
+    (define (analyze-variable exp)
+     (lambda (env) (lookup-variable-value exp env)))
+    #+END_SRC
+
+    analyze-assignment also must defer actually setting the variable
+    until the execution, when the environment has been
+    supplied. However, the fact that the assignment-value expression
+    can be analyzed (recursively) during analysis is a major gain in
+    efficiency, because the assignment-value expression will now be
+    analyzed only once. The same holds true for definitions.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-assignment exp)
+     (let ((var (assignment-variable exp))
+           (vproc (analyze (assignment-value exp))))
+      (lambda (env)
+       (set-variable-value! var (vproc env) env)
+       'ok)))
+    (define (analyze-definition exp)
+     (let ((var (definition-variable exp))
+           (vproc (analyze (definition-value exp))))
+      (lambda (env)
+       (define-variable! var (vproc env) env)
+       'ok)))
+    #+END_SRC
+
+    For if expressions, we extract and analyze the predicate,
+    consequent, and alternative at analysis time.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-if exp)
+     (let ((pproc (analyze (if-predicate exp)))
+           (cproc (analyze (if-consequent exp)))
+           (aproc (analyze (if-alternative exp))))
+      (lambda (env)
+       (if (true? (pproc env))
+           (cproc env)
+           (aproc env)))))
+    #+END_SRC
+
+    Analyzing a lambda expression also achieves a major gain in
+    efficiency: We analyze the lambda body only once, even though
+    procedures resulting from evaluation of the lambda may be applied
+    many times.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-lambda exp)
+     (let ((vars (lambda-parameters exp))
+           (bproc (analyze-sequence (lambda-body exp))))
+      (lambda (env) (make-procedure vars bproc env))))
+    #+END_SRC
+
+    Analysis of a sequence of expressions (as in a begin or the body
+    of a lambda expression) is more involved. Each expression in the
+    sequence is analyzed, yielding an execution procedure. These
+    execution procedures are combined to produce an execution
+    procedure that takes an environment as argument and sequentially
+    calls each individual execution procedure with the environment as
+    argument.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-sequence exps)
+     (define (sequentially proc1 proc2)
+      (lambda (env) (proc1 env) (proc2 env)))
+     (define (loop first-proc rest-procs)
+      (if (null? rest-procs)
+          first-proc
+          (loop (sequentially first-proc (car rest-procs))
+                (cdr rest-procs))))
+     (let ((procs (map analyze exps)))
+      (if (null? procs) 
+          (error "Empty sequence: ANALYZE")
+          (loop (car procs) (cdr procs)))))              
+    #+END_SRC
+
+    To analyze an application, we analyze the operator and operands
+    and construct an execution procedure that calls the operator
+    execution procedure that calls the operator execution procedure
+    (to obtain the actual procedure to be applied) and the operand
+    execution procedures (to obtain the actual arguments). We then
+    pass these to execute-application, which is the analog of apply in
+    Section 4.1.1. execute-application differs from apply in that the
+    procedure body for a compound procedure has already been analyzed,
+    so there is no need to do further analysis. Instead, we just call
+    the execution procedure for the body on the extended environment.
+
+    #+BEGIN_SRC scheme
+    (define (analyze-application exp)
+     (let ((fproc (analyze (operator exp)))
+           (aprocs (map analyze (operands exp))))
+      (lambda (env)
+       (execute-application
+        (fproc env)
+        (map (lambda (aproc) (aproc env))
+             aprocs)))))
+    (define (execute-application proc args)
+     (cond ((primitive-procedure? proc)
+            (apply-primitive-procedure proc args))
+           ((compound-procedure? proc)
+            ((procedure-body proc)
+             (extend-environment
+              (procedure-parameters proc)
+              args
+              (procedure-environment proc))))
+           (else
+            (error "Unknwon procedure type: EXECUTE-APPLICATION"
+                   proc)))) 
+    #+END_SRC
+
+    Our new evaluator uses the same data structures, syntax
+    procedures, and run-time support procedures as in sections Section
+    4.1.2, Section 4.1.3, and Section 4.1.4. 
+
+    - Exercise 4.22: Extend the evaluator in this section to support
+      the special form let.
+      
+      let is only a syntactical construct so all we have to do is add
+      
+      #+BEGIN_SRC scheme
+      ((let? exp) (analyze (let->combination exp)))
+      #+END_SRC
+
+      to the case statement in analyze.
+
+    - Exercise 4.23: Alyssa P. Hacker doesn't understand why
+      analyze-sequence needs to be so complicated. All the other
+      analysis procedures are straightforward transformations of the
+      corresponding evaluation procedures (or eval clauses) in Section
+      4.1.1. She expected analyze-sequence to look like this:
+
+      #+BEGIN_SRC scheme
+      (define (analyze-sequence exps)
+       (define (execute-sequence procs env)
+        (cond ((null? (cdr procs))
+               ((car procs) env))
+              (else
+               ((car procs) env)
+               (execute-sequence (cdr procs) env))))
+       (let ((procs (map analyze exps)))
+        (if (null? procs)
+            (error "Empty sequence: ANALYZE"))
+        (lambda (env)
+         (execute-sequence procs))))
+      #+END_SRC
+
+      Eva Lu Ator explains to Alyssa that the version in the text does
+      more of the work of evaluating a sequence at analysis
+      time. Alyssa's sequence-execution procedure, rather than having
+      the calls to the individual execution procedures built in, loops
+      through the procedures in order to call them: In effect,
+      although the individual expressions in the sequence have been
+      analyzed, the sequence itself has not been.
+
+      Compare the two versions of analyze-sequence. For example,
+      consider the common case (typical of procedure bodies) where the
+      sequence has just one expression. What work will the execution
+      procedure proeduced by Alyssa's program do? What about the
+      execution procedure produced by the program in the text above?
+      How do the two version compare for a sequence with two
+      expressions?
+
+      The original actual execution procedure will only execute the
+      actual analyzed body, resulting in a single procedure call.
+
+      Alyssa's procedure, on the other hand, will run execute-sequence
+      on a single-item list. It will test if the next item is null,
+      find that it is, and then do an execution. This results in three
+      procedure calls -- execute-sequence?, null?, and the actual
+      call, three calls.
+
+      For two expressions, the original definition:
+
+      (lambda (env) (proc1 env) (lambda (env) (proc2 env) (proc3 env)))
+      Calling this procedure calls the original 3, plus two
+      lambdas. This is 5 procedure calls. The number of procedure
+      calls is multiplied by 2 (minus 1) -- 2 * n - 1.
+
+      Alyssa's definition calls the original execute-sequence
+      recursively, and tests for null each time. This is a list of
+      procedure calls made:
+
+      execute-sequence, null?, proc1, execute-sequence, null? proc2,
+      execute-sequence, null?, proc3
+
+      A total of 9 procedure calls.
+
+      In general, Alyssa's definition multiplies the number of calls
+      by 3, each time the body is evaluated -- 3 * n.
+
+    - Exercise 4.24: Design and carry out some experiments to compare
+      the speed of the original metacircular evaluator with the
+      version in this section. Use your results to estimate the
+      fraction of time that is spent in analysis versus execution for
+      various procedures.
+
+      The most obvious thing to do is write a procedure, like fibo,
+      and execute it with a sizeable input and compare the results.
+
+      The first thing I did was manually time the execution of
+      (fibo 25) in each interpreter, with fibo defined as:
+
+      #+BEGIN_SRC scheme
+      (define (fibo x)
+       (cond
+        ((= x 0) 0)
+        ((= x 1) 1)
+        (else (+ (fibo (- x 1)) (fibo (- x 2))))))
+      #+END_SRC
+
+      The analyze-execute version took 14 seconds, and the first naive
+      evaluator that we implemented with no separate analysis step
+      took 34 seconds. 
+
+      The next step was to provide the interpreter itself with a way
+      of telling time. I provided it with the primitive procedure
+      get-universal-time, from the underlying scheme, and typed in
+      this:
+
+      #+BEGIN_SRC scheme
+      (define (fibo x)
+       (cond
+        ((= x 0) 0)
+        ((= x 1) 1)
+        (else (+ (fibo (- x 1)) (fibo (- x 2))))))
+
+      (begin
+       (let ((t1 (get-universal-time)))
+        (fibo 25)
+        (let ((t2 (get-universal-time)))
+         (- t2 t1))))
+      #+END_SRC
+
+      The results were 33 for the original interpreter and 14 again
+      for the analyzing interpreter. I repeated the experiment several
+      time for both interpreters and got [34,33,34,34] and
+      [14,14,13,13]. The averages are then 33.75 and 13.5, the
+      original interpreter takes 2.5 times as long to do fibo. Since
+      no 'analysis' is done in the analyzing interpreter and it is
+      done every time in the first interpreter. So we can conclude
+      that the fraction of time spent in analysis is (33.75 -
+      13.5)/33.75, or .6 -- 60% of the interpreter's time is spent
+      analyzing syntax if we don't extract that step. 
+
+      We can also try a different kind of procedure. Instead of a
+      multiple recursion procedure, we can try linear recursion.
+
+      #+BEGIN_SRC scheme
+      (define (sum n)
+       (define (loop n result)
+       (if (= n 0) 
+           result
+           (loop (- n 1) (+ result n))))
+       (loop n 0))
+
+      (begin
+       (let ((t1 (get-universal-time)))
+        (sum 100000)
+        (let ((t2 (get-universal-time)))
+         (- t2 t1))))
+      #+END_SRC
+
+      With the classic interpreter, I get 13, 13, 12, 13. With
+      the analyzing interpreter, I get 6, 6, 7, 6. Despite the fact
+      that the computational nature of the procedure is very
+      different, the ratios are similar:
+
+      (13 - 6)/13 = .54 (previous was .6)
+      13/6 = 2.1 (previous was 2.5)
+
+** 4.2 Variations on a Scheme -- Lazy Evaluation
+   Now that we have an evaluator expressed as a Lisp program, we can
+   experiment with alternative choices in language design simply by
+   modifying the evaluator. Indeed, new languages are often invented
+   by first writing an evaluator that embeds the new language within
+   an existing high-level language. For example, if we wish to discuss
+   some aspect of a proposed modification to Lisp with another member
+   of the Lisp community, we can supply an evaluator that embodies the
+   change. The recipient can then experiment with the new evaluator
+   and send back comments as further modifications. Not only does the
+   high-level implementation base make it easier to test and debug the
+   evaluator; in addition, the embedding enables the designer to snarf
+   features from the underlying language, just as our embedded Lisp
+   evaluator uses primitives and control structures from the
+   underlying Lisp. Only later (if ever) need the designer go to the
+   trouble of building a complete implementation in a low-level
+   language or in hardware. In this section and the next we will
+   explore some variations on Scheme that provie significant
+   additional expressive power.
+
+*** 4.2.1 Normal Order and Applicative Order
+    In Section 1.1, where we began our discussion of models of
+    evaluation, we noted that Scheme is an _applicative-order_
+    language, namely, that all the arguments to Scheme procedures are
+    evaluated when the procedure is applied. In contrast,
+    _normal-order_ languages delay evaluation of procedure arguments
+    until the actual argument values are needed. Delaying evaluation
+    of procedure arguments until the last possible moment (e.g., until
+    they are required by a primitive operation) is called _lazy
+    evaluation_. Consider the procedure
+    
+    #+BEGIN_SRC scheme
+    (define (try a b) (if (= a 0) 1 b))
+    #+END_SRC
+    
+    Evaluating (try 0 (/ 1 0)) generates an error in Scheme. With lazy
+    evaluation, there would be no error. Evaluating the expression
+    would return 1, because the argument (/ 1 0) would never be
+    evaluated. An example that exploits lazy evaluation is the
+    definition of a procedure unless
+    
+    #+BEGIN_SRC scheme
+    (define (unless condition usual-value exceptional-value)
+     (if condition exceptional-value usual-value))
+    #+END_SRC
+
+    that can be used in expressions such as
+
+    #+BEGIN_SRC scheme
+    (unless (= b 0)
+            (/ a b)
+            (begin (display "Exception: Returning 0") 0)) 
+    #+END_SRC
+
+    This won't work in an applicative-order language because both the
+    usual value and the exceptional value will be evaluated before
+    unless is called (compare Exercise 1.6). An advantage of lazy
+    evaluation is that some procedures, such as unless, can do useful
+    computation even if evaluation of some of their arguments would
+    produce errors or would not terminate. 
+
+    If the body of a procedure is entered before an argument has been
+    evaluated we say that the procedure is _non-strict_ in that
+    argument. If the argument is evaluated before the body of the
+    procedure is entered we say that the procedure is _strict_ in that
+    argument. In a purely applicative-order language, all procedures
+    are strict in each argument. In a purely normal-order language,
+    all procedures are strict in each argument. In a purely
+    normal-order language, all compound procedures are non-strict in
+    each argument, and primitive proceduers may be either strict or
+    non-strict. There are also languages (see Exercise 4.31) that give
+    programmers detailed control over the strictness of the procedures
+    they define. 
+
+    A striking example of a procedure that can usefully be made
+    non-strict is cons (or, in general, almost any constructor for
+    data structures). One can do useful computation, cimbining
+    elements to form data structures and operating on the resulting
+    data structures, even if the values of the elements are not
+    known. It makes perfect sense, for instance, to compute the length
+    of a list without knowing the values of the individual elements in
+    the list. We will exploit this idea in Section 4.2.3 to implement
+    the stream of Chapter 3 as lists formed of non-strict cons pairs.
+
+    - Exercise 4.25: Suppose that (in ordinary applicative-order
+      Scheme) we define unless as shown above and then define
+      factorial in terms of unless as
+
+      #+BEGIN_SRC scheme
+      (define (factorial n)
+       (unless (= n 1)
+               (* n (factorial (- n 1)))
+               1))
+      #+END_SRC
+
+      What happens if we attempt to evaluate (factorial 5)? Will our
+      definitions work in a normal-order language?
+
+      Because unless in a applicative-order language would simply be a
+      normal procedure whose arguments are evaluated first before the
+      procedure itself is called, the procedure will never terminate,
+      no matter what arguments we give it. It will call (* n
+      (factorial (- n 1))) forever.
+
+      This definition would work in a normal-order language, assuming
+      that once you actually try to call a primitive function or do a
+      variable lookup, the value is actually evaluated.
+
+    - Exercise 4.26: Ben Bitdiddle and Alyssa P. Hacker disagree over
+      the importance of lazy evaluation for implementing things such
+      as unless. Ben points out that it's possible to implement unless
+      in applicative order as a special form. Alyssa counters that, if
+      one did that, unless would be merely syntax, not a procedure
+      that could be used in conjunction with higher-order
+      procedures. Fill in the details on both sides of the
+      argument. Show how to implement unless as a derived expression
+      (like cond or let), and give an example of a situation where it
+      might be useful to have unless available as a procedure, rather
+      than as a special form.
+
+      Ben is correct, in that you can implement a version of
+      unless that will work for the factorial function we defined. You
+      would just write a procedure, unless->if, that, like cond,
+      converts its unless input syntax to if to be actuall
+      evaluated. You would add the following case to the eval procedure:
+
+      ((unless? expr) (eval (unless->if expr)))
+
+      The procedure:
+
+      #+BEGIN_SRC scheme
+      (define (unless->if expr)
+       (make-if
+        (unless-condition expr)
+        (unless-failure expr)
+        (unless- expr)))
+      #+END_SRC
+
+      However, Alyssa is also correct, you can't pass unless as a
+      procedural argument to higher-order procedures, so something
+      like this:
+
+      #+BEGIN_SRC scheme
+      (higher-order-procedure unless (list 'a 'b 'c))
+      #+END_SRC
+
+      will simply produce a variable-not-found error.
+
+      
+
+      
+
+
+    
+      
+
+
+
+    
       

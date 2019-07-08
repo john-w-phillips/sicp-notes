@@ -51,9 +51,14 @@
 (define rest-bindings cdr)
 (define (make-binding var val)
   (list var val))
+(define (binding-var binding)
+  (car binding))
+(define (binding-val binding)
+  (cadr binding))
+
 
 (define (make-let bindings body)
-  (list 'let bindings body))
+  (cons 'let (cons bindings body)))
 
 (define (cons-binding binding rest)
   (cons binding rest))
@@ -130,6 +135,8 @@
 (define (rest-exps seq) (cdr seq))
 (define (empty-exps? seq) (null? seq))
 (define (concat-exps seq1 seq2) (append seq1 seq2))
+(define (sequence? exps)
+  (and (pair? exps) (pair? (car exps))))
 
 (define (sequence->exp seq)
   (cond ((null? seq) seq)
@@ -209,7 +216,12 @@
   (tagged-list? p 'procedure))
 
 (define (make-procedure parameters body env)
-  (list 'procedure parameters (scan-out-defines body) env))
+  (list 'procedure parameters (process-body body) env))
+
+(define (process-body procedure-body)
+  (if (sequence? procedure-body)
+      (scan-out-defines procedure-body)
+      procedure-body))
 
 (define (scan-out-defines procedure-body)
   (define (iterate-body body defines nondefines)
@@ -236,16 +248,43 @@
 		       binding-vals)))
 	(list (make-let
 	       bindings
-	       (make-begin
 		(concat-exps
 		 sets
-		 nondefines)))))))
+		 nondefines))))))
   (let ((body-iteration (iterate-body procedure-body '() '())))
     (let ((defines (car body-iteration))
 	  (nondefines (cadr body-iteration)))
       (if (null? defines)
 	  procedure-body
 	  (create-let defines nondefines)))))
+
+(define (letrec? expr)
+  (eq? (car expr) 'letrec))
+
+(define (letrec-bindings expr)
+  (cadr expr))
+
+(define (letrec-body expr)
+  (cddr expr))
+
+(define (letrec->let expr)
+  (let ((binding-vars (map binding-var (letrec-bindings expr))))
+    (let ((undefined-bindings
+	   (map (lambda (name) (make-binding
+				name
+				(make-quoted UNDEFINED-VARIABLE)))
+		binding-vars))
+	  (assignments
+	   (map (lambda (binding)
+		  (make-assignment
+		   (binding-var binding)
+		   (binding-val binding)))
+		(letrec-bindings expr)))) 
+      (make-let
+       undefined-bindings
+       (concat-exps
+	assignments
+	(letrec-body expr))))))
 
 (define (operator exp)
   (car exp))

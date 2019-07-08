@@ -1,5 +1,6 @@
 (load "syntax.scm")
 (load "environment.scm")
+(load "primitive-apply.scm")
 
 (define (eval-let expr env)
   (eval (let->combination expr) env))
@@ -80,6 +81,7 @@
 	((lambda? exp) (make-procedure (lambda-parameters exp)
 				       (lambda-body exp)
 				       env))
+	((letrec? exp) (eval (letrec->let exp) env))
 	((let? exp) (eval (let->combination exp) env))
 	((begin? exp)
 	 (eval-sequence (begin-actions exp) env))
@@ -89,7 +91,3 @@
 		(list-of-values (operands exp) env)))
 	(else 
 	 (error "Unknown expression type: EVAL " exp))))
-
-
-(define (apply-primitive-procedure procedure arguments)
-  (language-apply (cadr procedure) arguments))

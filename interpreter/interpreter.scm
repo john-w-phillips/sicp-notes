@@ -1,5 +1,6 @@
 (define language-apply apply)
-(load "eval-apply.scm")
+;; (load "eval-apply.scm")
+(load "analyze.scm")
 
 (define input-prompt ";;; M-Eval input:")
 (define output-prompt ";;; M-Eval value:")
