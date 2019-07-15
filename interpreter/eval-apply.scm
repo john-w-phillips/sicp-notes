@@ -54,7 +54,7 @@
       '()
       (let ((rest-value (list-of-values (rest-operands exps) env)))
 	(let ((arg-value (eval (first-operand exps) env)))
-	  (cons arg-value
+ 	  (cons arg-value
 		rest-value)))))
 
 (define (apply procedure arguments)
@@ -69,7 +69,6 @@
 	   (procedure-environment procedure))))
 	(else
 	 (error "Unknown procedure type: APPLY" procedure))))
-
 
 (define (eval exp env)
   (cond ((self-evaluating? exp) exp)

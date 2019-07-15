@@ -2553,7 +2553,205 @@
       (higher-order-procedure unless (list 'a 'b 'c))
       #+END_SRC
 
-      will simply produce a variable-not-found error.
+      will simply produce a variable-not-found error. It may be useful
+      to have unless if you have some kind of higher-order procedure
+      where it's behavior is modified by what operator you give it.
+
+      #+BEGIN_SRC scheme
+      (define (proc f vals)
+       (map 
+        (lambda (val) 
+         (f (car val) (cadr val) (caddr val)))
+        vals))
+      #+END_SRC
+
+      This procedure takes lists of triples, and applies f to each
+      triple in a map. 
+
+      #+BEGIN_SRC scheme
+      (proc unless '((1 2 3) (false 1 2)))
+      (list 3 1)
+      #+END_SRC
+
+      You can't do that with unless as syntax. You can do it however
+      with unless as a normal applicative-order function in our
+      current interpreter. However, we can also, assuming that list is
+      also normal-order, write:
+
+      (list (list (= a 1) (factorial 10) 33) (list (= a 22)
+      (factorial 11) 33))
+
+      And in general write something like a batch-processed system of
+      conditionals that you can apply to data structures.
+
+      
+*** 4.2.2 An Interpreter with Lazy Evaluation
+    In this section we will implement a normal-order language that is
+    the same as Scheme except that compound procedures are non-strict
+    in each language. Primitive procedures will still be strict. It is
+    not difficult to modify the evaluator of Section 4.1.1 so that the
+    language it interprets behaves this way. Almost all the required
+    changes center around procedure application.
+
+    The basic idea is that, when applying a procedure, the interpreter
+    must determine which arguments are to be evaluated and which are
+    to be delayed. The delayed arguments are not evaluated; instead,
+    they are transformed into objects called _thunks_. The thunk must
+    contain the information required to produce the value of the
+    argument when it is needed, as if it had been evaluated at the
+    time of the application. Thus, the thunk must contain the argument
+    expression and the environment in which the procedure application
+    is being evaluated.
+
+    The process of evaluating the expression in a thunk is called
+    _forcing_. In general, a thunk will be forced only when its value
+    is needed: when it is passed to a primitive procedure that will
+    use the value of the thunk; when it is the value of a predicate of
+    a conditional; and when it is the value of an operator that is
+    about to be applied as a procedure. One design choice we have
+    available is whether or not to _memoize_ thunks, as we did with
+    delayed objects in Section 3.5.1. With memoization, the first time
+    a thunk is forced, it stores the value that is
+    computed. Subsequent forcings simply return the stored value
+    without repeating the computation. We'll make our interpreter
+    memoize, because this is more efficient for many
+    applications. There are tricky considerations here, however.
+
+**** Modifying the evaluator.
+     
+     The main difference between the lazy evaluator and the one in
+     Section 4.1 is in the handling of the procedure applications in
+     eval and apply. The application? clause of eval becomes
+
+     #+BEGIN_SRC scheme
+     ((application? exp)
+      (apply (actual-value (operator exp) env)
+             (operands exp)
+             env))
+     #+END_SRC
+
+     This is almost the same as the application? clause of eval in
+     Section 4.1.1. For lazy evaluation, however, we call apply with
+     the operand expressions, rather than the arguments produced by
+     evaluating them. Since we will need the environment to construct
+     thunks if the arguments are to be delayed, we must pass this as
+     well. We still evaluate the operator, because apply needs the
+     actual procedure to be applied in order to dispatch on its type
+     (primitive versus compound) and apply it. 
+
+     Whenever we need the actual value of an expression, we use
+     
+     #+BEGIN_SRC scheme
+     (define (actual-value exp env)
+      (force-it (eval exp env)))
+     #+END_SRC
+
+     instead of just eval, so that if the expression's value is a
+     thunk, it will be forced.
+
+     Our new version of apply is also almost the same as the version
+     in Section 4.1.1. The difference is that eval has passed in
+     unevaluated operand expressions: For primitive procedures (which
+     are strict), we evaluate all the arguments before applying the
+     primitive; for compound procedures (which are non-strict) we
+     delay all the arguments before appling the procedure. 
+
+     #+BEGIN_SRC scheme
+     (define (apply procedure arguments env)
+      (cond ((primitive-procedure? procedure)
+             (apply-primitive-procedure
+              procedure
+              (list-of-arg-values arguments env)))
+            ((compound-procedure? procedure)
+             (eval-sequence
+              (procedure-body procedure)
+              (extend-environment
+               (procedure-parameters procedure)
+               (list-of-delayed-args arguments env)
+               (procedure-environment procedure))))
+            (else (error "Unknown procedure type: APPLY"
+                         procedure))))
+     #+END_SRC
+
+     The procedures that process the arguments are just like
+     list-of-values from Section 4.1.1, except that
+     list-of-delayed-args delays the arguments instead of evaluating
+     them, and list-of-arg-values uses actual-value instead of eval:
+
+     #+BEGIN_SRC scheme
+     (define (list-of-arg-values exps env)
+      (if (no-operands? exps)
+          '()
+          (cons (actual-value (first-operand exps)
+                              env)
+                (list-of-arg-values (rest-operands exps)
+                                    env))))
+     (define (list-of-delayed-args exps env)
+      (if (no-operands? exps)
+          '()
+          (cons (delay-it (first-operand exps)
+                          env)
+                (list-of-delayed-args (rest-operands exps)
+                                      env))))
+     #+END_SRC
+
+     The other place we must change the evaluator is in the handling
+     of if, where we must use actual-value instead of eval to get the
+     value of the predicate expression before testing whether it is
+     true or false:
+
+     #+BEGIN_SRC scheme
+     (define (eval-if exp env)
+      (if (true? (actual-value (if-predicate exp) env))
+          (eval (if-consequent exp) env)
+          (eval (if-alternative exp) env)))
+     #+END_SRC
+
+     Finally, we must change the driver-loop procedure (Section 4.1.4)
+     to use actual-value instead of eval, so that if a delayed value
+     is propagated back to the read-eval-print loop, it will be forced
+     before being printed. We also change the prompts to indicate that
+     this is the lazy evaluator:
+
+     #+BEGIN_SRC scheme
+     (define input-prompt  ";;; L-Eval input:")
+     (define output-prompt ";;; L-Eval value:")
+     (define (driver-loop)
+      (prompt-for-input input-prompt)
+      (let ((input (read)))
+       (let ((output
+              (actual-value
+               input the-global-environment)))
+        (announce-output output-prompt)
+        (user-print output)
+      (driver-loop))
+     #+END_SRC
+
+     With these changes made, we can start the evaluator and test
+     it. The successful evaluation of the try expression discussed in
+     Section 4.2.1 indicates that the interpreter is performing lazy
+     evaluation:
+
+     #+BEGIN_SRC scheme
+     (define the-global-environment (setup-environment))
+     (driver-loop)
+     ;;; L-Eval input:
+     (define (try a b) (if (= a 0) 1 b))
+     ;;; L-Eval value:
+     ok
+     ;;; L-Eval input:
+     (try 0 (/ 1 0))
+     ;;; L-Eval value:
+     1
+     #+END_SRC
+
+     
+
+     
+
+     
+
+      
 
       
 
