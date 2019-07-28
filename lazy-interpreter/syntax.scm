@@ -205,9 +205,15 @@
 
 (define (make-primitive-procedure proc)
   (list 'primitive-procedure proc))
+(define (make-lazy-primitive-procedure proc)
+  (list 'primitive-lazy-procedure proc))
 
 (define (primitive-procedure? p)
   (eq? (car p) 'primitive-procedure))
+
+(define (lazy-primitive-procedure? p)
+  (tagged-list? p 'primitive-lazy-procedure))
+
 (define (procedure-parameters p) (cadr p))
 (define (procedure-body p) (caddr p))
 (define (procedure-environment p) (cadddr p))

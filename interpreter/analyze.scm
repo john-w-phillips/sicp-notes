@@ -4,7 +4,8 @@
 
 (define (analyze exp)
   (cond ((self-evaluating? exp) (analyze-self-evaluating exp))
-	((quoted? exp) (analyize-quoted exp))
+	((and? exp) (analyze-and exp))
+	((quoted? exp) (analyze-quoted exp))
 	((variable? exp) (analyze-variable exp))
 	((assignment? exp) (analyze-assignment exp))
 	((definition? exp) (analyze-definition exp))
@@ -19,6 +20,20 @@
 
 (define (analyze-self-evaluating exp)
   (lambda (env) exp))
+
+(define (analyze-and exp)
+  (let ((exprs (map analyze (operands exp))))
+    (lambda (env)
+      (define (and-iter exprs)
+	(cond
+	 ((null? exprs) #t)
+	 (else
+	  (let ((first ((car exprs) env)))
+	    (if (false? first)
+		first
+		(and-iter (cdr exprs)))))))
+      (and-iter exprs))))
+
 
 (define (analyze-if exp)
   (let ((pproc (analyze (if-predicate exp)))

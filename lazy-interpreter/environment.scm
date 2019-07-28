@@ -1,5 +1,5 @@
+(load "cons.scm")
 (define UNDEFINED-VARIABLE '*undefined*)
-
 (define (remove-bindings-from-frame var frame)
   (filter (lambda (binding) (not (eq? (car binding) var)))
 	  frame))
@@ -81,9 +81,6 @@
     '*
     '=
     '-
-    'car 
-    'cons 
-    'cdr
     'get-universal-time
     'null?
     '>
@@ -94,9 +91,6 @@
     (make-primitive-procedure *)
     (make-primitive-procedure =)
     (make-primitive-procedure -)
-    (make-primitive-procedure car)
-    (make-primitive-procedure cons)
-    (make-primitive-procedure cdr)
     (make-primitive-procedure get-universal-time)
     (make-primitive-procedure null?)
     (make-primitive-procedure >)

@@ -2745,23 +2745,549 @@
      1
      #+END_SRC
 
+**** Representing thunks
+     Our evaluator must arrange to create thunks when procedures are
+     applied to arguments and to force these thunks later. A thunk
+     must package an expression together with the environment, so that
+     the argument can be produced later. To force the thunk, we simply
+     extract the expression and environment from the thunk and
+     evaluate the expression in the environment. We use actual-value
+     rather than eval so that in case the value of the expression is
+     itself a thunk, we will force that, and so on, until we reach
+     something that is not a thunk:
+
+     #+BEGIN_SRC scheme
+     (define (force-it obj)
+      (if (thunk? obj)
+          (actual-value (thunk-exp obj) (thunk-env obj))
+          obj))
+     #+END_SRC
+
+     One easy way to package an expression with an environment is to
+     make a list containing the expression and the environment. Thus,
+     we create a thunk as follows:
+
+     #+BEGIN_SRC
+     (define (delay-it exp env)
+      (list 'thunk exp env))
+     (define (thunk? obj)
+      (tagged-list? obj 'thunk))
+     (define (thunk-exp thunk) (cadr thunk))
+     (define (thunk-env thunk) (caddr thunk))
+     #+END_SRC
      
+     Actually, what we want for our interpreter is not quite this, but
+     rather chunks that have been memoized. When a thunk is forced, we
+     will turn it into an evaluated thunk by replacing the stored
+     expression with its value and changing the thunk tag so that it
+     can be recognized as already evaluated.
 
-     
+     #+BEGIN_SRC scheme
+     (define (evaluated-thunk? obj)
+      (tagged-list? obj 'evaluated-thunk))
+     (define (thunk-value eavluated-thunk)
+      (cadr evaluated-thunk))
+     (define (force-it obj)
+      (cond ((thunk? obj)
+             (let ((result (actual-value (thunk-exp obj)
+                                         (thunk-env obj))))
+              (set-car! obj 'evaluated-thunk)
+              (set-car! (cdr obj)             ;; replace exp with value
+                        result)
+              (set-cdr! (cdr obj)             ;; forget unneeded env.
+                        '())
+              result))
+            ((evaluated-thunk? obj) (thunk-value obj))
+            (else obj)))
+     #+END_SRC
 
-     
+     Notice that the same delay-it procedure works both with and
+     without memoization.
 
+     - Exercise 4.27: Suppose we type in the following definitions to
+       the lazy evaluator:
+
+       #+BEGIN_SRC scheme
+       (define count 0)
+       (define (id x) (set! count (+ count 1)) x)
+       #+END_SRC
+
+       Give the missing values in the following sequence of
+       interactions, and explain your answers.
+
+       #+BEGIN_SRC scheme
+       (define w (id (id 10)))
+       ;;; L-Eval input:
+       count
+       ;;; L-Eval value:
+       <response>
+       ;;; L-Eval input:
+       w
+       ;;; L-Eval value:
+       <response>
+       ;;; L-Eval input:
+       count
+       ;;; L-Eval value:
+       <response>
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define w (id (id 10)))
+       ;;; L-Eval input:
+       count
+       ;;; L-Eval value:
+       1
+       ;;; L-Eval input:
+       w
+       ;;; L-Eval value:
+       10
+       ;;; L-Eval input:
+       count
+       ;;; L-Eval value:
+       2
+       #+END_SRC
+
+       When we evaluate (define w (id (id 10))), the evaluator sees a
+       define. eval-define then evals the expression (id (id 10))
+       before assigning it to w. We see the application of id, and
+       eval-sequence the body of id after thunkifying its
+       arguments. The body is ((set! count (+ count 1)) x). We do the
+       set since that is a separate syntactical construct not subject
+       to laziness, and it uses a primitive procedure on the
+       right-hand side of the assignment. So, count is altered to
+       be 1. Then we see x, which in this case is a thunkified
+       argument -- (thunk (id 10)). Since we are lazy, we return this
+       value from eval, and w is assigned to (thunk (id 10)), the
+       return value of the initial id call. So then when we ask for
+       count without first evaluating w, we get 1. Then, we evaluate
+       w, which forces the thunk. We eval the call (id 10) all the way
+       through. The first thing is again set!, which increments count
+       from 1 to 2. Then we return x, which is self-evaluating 10. So
+       w is 10. Then, we ask for count and get the again-altered
+       value, 2.
+
+       - Exercise 4.28: eval uses actual-value rather than eval to
+         evaluate the operator before passing it to apply, in order to
+         force the value of the operator. Give an example that
+         demonstrates the need for this forcing. 
+
+	 #+BEGIN_SRC scheme
+         (define (f g x) (* 2 (g x)))
+	 #+END_SRC
+
+	 Without actual-value, when we try to evaluate (g x), we
+         lookup g and get a thunk and try to apply using a thunk,
+         which is an unknown procedure type.
+
+       - Exercise 4.29: Exhibit a program that you would expect to run
+         much more slowly without memoization than with
+         memoization. Also, consider the following interaction, where
+         the id procedure is defined as in Exercise 4.27 and count
+         starts at 0:
+
+	 Any program that uses arguments multiple times will run more
+         slowly without memoization, especially if you pass it a
+         parameter that is a function call.
+
+	 In fibo, for example, we test n twice, and then call fibo
+         with (- n 1) and (- n 2). So, in the case where n is not 0 or
+         1, we have to force the thunk a total of four times every
+         call to fibo we make (which will be a lot of calls since it's
+         multiply recursive).
+	 #+BEGIN_SRC scheme
+         (define (fibo n)
+          (cond
+           ((= n 0) 0)
+           ((= n 1) 1)
+           (else (+ (fibo (- n 1)) (fibo (- n 2))))))
+	 #+END_SRC
+
+	 The ackermann function is worse, because of the call (a (-
+         m 1) (a m (- n 1))). If we call a with a value where m and n
+         are both greater than zero, we will have to call a with (a m
+         (- n 1)) as n, and n will have to be forced in the cond
+         condition clauses twice at least, and if it's still greater
+         than 0, again in the final default case. This is a huge
+         overhead since the thunk is a function call and not a simple
+         variable lookup, and it will re-evaluate a potentially
+         multiply-recursive call each time.
+	 #+BEGIN_SRC scheme
+         (define (a m n)
+          (cond
+           ((= m 0) (+ n 1))
+           ((and (> m 0) (= n 0)) (a (- m 1) 1))
+           (else (a (- m 1) (a m (- n 1))))))
+
+	 #+END_SRC
+
+	 #+BEGIN_SRC scheme
+         (define (square x) (* x x))
+         ;;; L-Eval input:
+         (square (id 10))
+         ;;; L-Eval value:
+         <response>
+         ;;; L-Eval input:
+         count
+         ;;; L-Eval value:
+         <response>
+	 #+END_SRC
+
+	 Give the responses both when the evaluator memoizes and when
+         it does not.
+
+	 memoized:
+	 #+BEGIN_SRC scheme
+         (define (square x) (* x x))
+         ;;; L-Eval input:
+         (square (id 10))
+         ;;; L-Eval value:
+         100
+         ;;; L-Eval input:
+         count
+         ;;; L-Eval value:
+         1
+	 #+END_SRC
+
+	 non-memoized:
+
+	 #+BEGIN_SRC scheme
+         (define (square x) (* x x))
+         ;;; L-Eval input:
+         (square (id 10))
+         ;;; L-Eval value:
+         100
+         ;;; L-Eval input:
+         count
+         ;;; L-Eval value:
+         2
+	 #+END_SRC
+
+	 - Exercise 4.30: Cy D. Fect, a reformed C programmer, is
+           worried that some side effects may never take place,
+           because the lazy evaluator doesn't force the expressions in
+           a sequence. Since the value of an expression in a sequence
+           other than the last one is not used (the expression is
+           there only for effect, such as assigning to a variable or
+           printing), there can be no subsequent use of this value
+           (e.g., as an argument to a primitive procedure) that will
+           cause it to be forced. Cy thus thinks that when evaluating
+           sequences, we must force all expressions in the sequence
+           except the final one. He proposes to modify eval-sequence
+           from Section 4.1.1 to use actual-value rather than eval:
+
+	   #+BEGIN_SRC scheme
+           (define (eval-sequence exps env)
+            (cond ((last-exp? exps) (eval (first-exp exps) env))
+                  (else (actual-value (first-exp exps) env)
+                        (eval-sequence (rest-exps exps) env))))
+	   #+END_SRC
+
+	   a. Ben Bitdiddle thinks Cy is wrong. He shows Cy the
+           for-each procedure described in Exercise 2.23, which gives
+           an important example of a sequence with side effects:
+
+	   #+BEGIN_SRC scheme
+           (define (for-each proc items)
+            (if (null? items)
+                'done
+                (begin (proc (car items))
+                       (for-each proc (cdr items)))))
+	   #+END_SRC
+
+	   He claims that the evaluator in the text (with the original
+           eval-sequence) handles this correctly:
+
+	   #+BEGIN_SRC scheme
+	   ;;; L-Eval input:
+           (for-each (lambda (x) (newline) (display x))
+                     (list  57 321 88))
+           57
+           321
+           88
+           ;;; L-Eval value:
+           done
+	   #+END_SRC
+
+	   Explain why Ben is right about the behavior of for-each.
+
+	   Although we don't evauate arguments to a procedure, we do
+           recursively evaluate procedure applications, and any
+           side-effect must be either a primitive or a syntactical
+           eval-construct, which will get evaluated (like set!). In
+           this example, newline and display are both primitives, so
+           they have to be evaluated, we only thunk
+           arguments. However, if we write a sequence where we have an
+           evauation of an argument that has a side-effect, then the
+           behavior will not be as simple.
+
+	   
+
+	   b. Cy agrees that Ben is right about the for-each example,
+	   but says that that's not the kind of program he was
+	   thinking about when he proposed his change to
+	   eval-sequence. He defines the following two procedures in
+	   the lazy evaluator:
+
+	   #+BEGIN_SRC scheme
+           (define (p1 x)
+            (set! x (cons x '(2)))
+            x)
+           (define (p2 x)
+            (define (p e)
+             e
+             x)
+            (p (set! x (cons x '(2)))))
+	   #+END_SRC
+
+	   What are the values of (p1 1) and (p2 1) with the original
+	   eval-sequence? What would the values be with Cy's proposed
+	   change to eval-sequence?
+
+	   (p1 1) is basically as expected since set! is a syntactical
+	   construct and doesn't thunk its arguments, (cons x '(2)) is
+	   also a primitive, so it forces the value of x. The returned
+	   value is (1 2).
+
+	   (p2 1) is different. The call to p will thunk the
+	   expression (set! x (cons x '(2))). Then, e is
+	   evaled. However, since all we do is lookup-variable-value
+	   and don't actually force the thunk, e is never forced. x is
+	   returned, unaltered. This is counterintuitive. The returned
+	   value is the original value of x, 1. The set! was never
+	   actually evaluated, because it was an argument and not an
+	   application. So even though set! is a syntactical
+	   construct, that didn't save it from being thunked and not
+	   evaluated during the eval-sequence.
+
+	   c. Cy also points out that changing eval-sequence as he
+	   proposes does not affect the behavior of the example in
+	   part a. Explain why this is true.
+
+	   It doesn't change behavior because the only difference is
+	   that he's forcing each expression, the expression in Ben's
+	   example was already basically being 'forced' by the
+	   primitives functions he was using. So there is no
+	   difference.
+
+	   d. How do you think sequence ought to be treated in the
+	   lazy evaluator? Do you like Cy's approach, the approach in
+	   the text, or some other approach?
+
+	   Our evaluator has no way to, inside the language, force an
+	   expression. So without this I think Cy's approach is best,
+	   although the side effects themselves are probably examples
+	   of bad programming practice, the behavior of p2 doesn't
+	   make sense and we should try to make the results of the
+	   evaluator make sense as much as possible, and it does not
+	   make sense that some expressions would be effectively
+	   unevaluated or unforced. However, if we could write a
+	   'primtive' function or syntax that allows a programmer to
+	   force values inside a begin, that might make more
+	   sense. For the majority of applications, the current
+	   evaluator works well, do just adding that would make sense
+	   too.
+
+         - Exercise 4.31: The approach taken in this section is
+           somewhat unpleasant, because it makes an incompatible
+           change to Scheme. It might be nicer to implement lazy
+           evaluation as an _upward-compatible extension_, that is, so
+           that ordinary Scheme programs will work as before.  We can
+           do this by extending the syntax of procedure declarations
+           to let the user control whether or not arguments are to be
+           delayed. While we're at it, we may as well also give the
+           user the choice between delaying with and without
+           memoization. For example, the definition
+
+	   #+BEGIN_SRC scheme
+           (define (f a (b lazy) c (d lazy-memo))
+            ...)
+	   #+END_SRC
+
+	   would define f to be a procedure of four arguments, where
+           the first and third arguments are evaluated when the
+           procedure is called, the second argument is delayed, and
+           the fourth argument is both delayed and memoized. Thus,
+           ordinary procedure definitions will produce the same
+           behavior as ordinary Scheme, while adding the lazy-memo
+           declaration to each parameter of every compound procedure
+           will produce the behavior of the lazy evaluator defined in
+           this section. Design and implement the changes required to
+           produce such an extension to Scheme. You will have to
+           implement new syntax procedures to handle the new syntax
+           for define. You must also arrange for eval or apply to
+           determine when arguments are to be delayed, and to force or
+           delay arguments accordingly, and you must arrange for
+           forcing to memoize or not, as appropriate.
+
+*** 4.2.3 Streams as Lazy Lists
+    In Section 3.4.1, we showed how to implement streams as delayed
+    lists. We introduced special forms delay and cons-stream, which
+    allowed us to construct a "promise" to compute the cdr of a
+    stream, without actually fulfilling that promise until later. We
+    could use this general technique of introducing special forms
+    whenever we need more control over the evaluation process, but
+    this is awkward. For one thing, a special form is not a
+    first-class object like a procedure, so we cannot use it together
+    with higher-order procedures. Additionally, we were forced to
+    create streams as a new kind of data object similar but not
+    identical to lists, and this required us to reimplement many
+    ordinary list operations (map, append, and so on) for use with
+    streams.
+
+    With lazy evaluation, streams and lists can be identical, so there
+    is no need for special forms or for separate list and stream
+    operations. All we need to do is arrange matters so that cons is
+    non-strict. One way to accomplish this is to extend the lazy
+    evaluator to allow for non-strict primitives, and to implement
+    cons as one of these. An easier way is to recall (Section 2.1.3)
+    that there is no fundamental need to implement cons as a primitive
+    at all. Instead, we can represent pairs as procedures:
+
+    #+BEGIN_SRC scheme
+    (define (cons x y) (lambda (m) (m x y)))
+    (define (car z) (z (lambda (p q) p)))
+    (define (cdr z) (z (lambda (p q) q)))
+    #+END_SRC
+
+    In terms of these basic operations, the standard definitions of
+    the list operations will work with infinite lists (streams) as
+    well as finite ones, and the stream operations can be implemented
+    as list operations. Here are some examples:
+
+    #+BEGIN_SRC scheme
+    (define (list-ref items n)
+     (if (= n 0)
+         (car items)
+         (list-ref (cdr items) (- n 1))))
+    (define (map proc items)
+     (if (null? items)
+         '()
+         (cons (proc (car items))
+               (map proc (cdr items)))))
+    (define (scale-list items factor)
+     (map (lambda (x) (* x factor)) items))
+
+    (define (add-lists list1 list2)
+     (cond ((null? list1) list2)
+           ((null? list2) list1)
+           (else (cons (+ (car list1) (car list2))
+                       (add-lists (cdr list1) (cdr list2))))))
+    (define ones (cons 1 ones))
+    (define integers (cons 1 (add-lists ones integers)))
+    ;;; L-Eval input:
+    (list-ref integers 17)
+    ;;; L-Eval value:
+    18
+    #+END_SRC
+
+    Note that these lazy lists are even lazier than the streams of
+    Chapter 3: The car of the list, as well as the cdr, is delayed. In
+    fact, even accessing the car or cdr of a lazy pair need not force
+    the value of a list element. The value will be forced only when it
+    is really needed -- e.g., for use as the argument of a primitive,
+    or to be printed as an answer.
+
+    Lazy pairs also help with the problem that arose with streams in
+    Section 3.5.4, where we found that formulating stream models of
+    systems with loops may require us to sprinkle our programs with
+    explicit delay operations, beyond the ones supplied by
+    cons-stream. With lazy evaluation, all arguments to procedures are
+    delayed uniformly. For instance, we can implement procedures to
+    integrate lists and solve differential equations as we originally
+    intended in Section 3.5.4:
+
+    #+BEGIN_SRC scheme
+    (define (integral integrand initial-value dt)
+     (define int
+      (cons initial-value
+            (add-lists (scale-list integrand dt) int)))
+     int)
+
+    (define (solve f y0 dt)
+     (define y (integral dy y0 dt))
+     (define dy (map f y))
+     y)
+    ;;; L-Eval input:
+    (list-ref (solve (lambda (x) x) 1 0.001) 1000)
+    ;;; L-Eval value:
+    2.716924
+    #+END_SRC
+
+    - Exercise 4.32: Give some examples that illustrate the difference
+      between the streams of Chapter 3 and the "lazier" lazy lists
+      described in this section. How can you take advantage of this
+      extra laziness?
+
+      The full laziness allows us to have infinite car components. So
+      for exmaple,
+
+      #+BEGIN_SRC scheme
+      (define (infinite-tree a b)
+       (cons (infinite-tree b a) (infinite-tree a b)))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+      (define (pt n)
+       (cons (pt-list n) (pt (+ n 1))))
+
+
+      (define (pt-list n)
+       (cond
+        ((= n 0) ones)
+        ((= n 1) integers)
+        (else (pt-rec 0 (pt-list (- n 1)) 0))))
+
+       (define (pt-rec i side-list last-element)
+        (cond
+         ((= i 0) (cons 1 (pt-rec 1 (cdr side-list) 1)))
+         (else (let ((new-elem (+ last-element (car side-list))))
+                (cons new-elem
+                      (pt-rec (+ i 1) (cdr side-list)))))))
+      #+END_SRC
+   
+      is possible. Even using cons-stream, calling this function in
+      our normal evaluator would never end. Another example is that we
+      can take as arguments non-terminating expressions, and put them
+      into lists, even the car.
+
+      (define x (let ((a <some-infinite-expression>)
+                      (b <some-other-infinite-expression>))
+                 (cons a b)))
+
+      However, what's a little more interesting is that since we
+      package an environment in our thunks, it can get modified after
+      the fact.
+
+      #+BEGIN_SRC scheme
+      (define (solve-2nd f dt y0 dy0)
+       (define y (integral
+                  dy
+                  y0
+                  dt))
+       (define dy (integral
+                   ddy
+                   dy0
+                   dt))
+      (define ddy (stream-map f y dy))
+      y)
+      #+END_SRC
+
+      This function can now stand on its own. That's because we don't
+      force the arguments dy or ddy. So they don't have to mean
+      anything until we start referencing items of the list, this
+      would not have happened just using lazy streams, we had to delay
+      manually, creating a bit of a mess. Now we don't need that.
+
+    - Exercise 4.33: Ben Bitdiddle tests the lazy list implementation
+      given above by evaluating the expression:
+
+      #+BEGIN_SRC scheme
+      (car '(a b c))
+      #+END_SRC
       
-
-      
-
-      
-
-
-    
-      
-
-
-
-    
-      
+      To his surprise, this produces an error. After some thought, he
+      realizes that the "lists" obtained by reading in quoted
+      expressions are different from the lists manipulated by the new
+      definitions of cons, car, and cdr. Modify the evaluator's
+      treatment of quoted expressions so that that quoted lists typed
+      at the driver loop will produce true lazy lists.
