@@ -1,5 +1,6 @@
 (load "interpreter-prompt.scm")
 (load "lazy-eval.scm")
+(define LIST-PRINT-LIMIT 250)
 (define input-prompt  ";;; L-Eval input:")
 (define output-prompt ";;; L-Eval value:")
 

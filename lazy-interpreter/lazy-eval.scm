@@ -56,13 +56,18 @@
     (lazycons (car in)
 	      (schemelist->lazylist (cdr in))))))
 
-(define (lazylist->schemelist in)
+(define (lazylist->schemelist in n)
   (cond
+   ((= n 0) (list '...))
    ((null? (force-it in))
     '())
+   ((not (lazycons-cell? (force-it in)))
+    (list '. (force-it in)))
+   ((equal? in (lazycdr in))
+    (list (force-it (lazycar in)) '<infinite-repititions>))
    (else
     (cons (force-it (lazycar in))
-	  (lazylist->schemelist (lazycdr in))))))
+	  (lazylist->schemelist (lazycdr in) (- n 1))))))
 
 (define (eval-if exp env)
   (if (true? (actual-value (if-predicate exp) env))

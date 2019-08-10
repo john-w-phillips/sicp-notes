@@ -40,7 +40,7 @@
 	(cproc (analyze (if-consequent exp)))
 	(aproc (analyze (if-alternative exp))))
     (lambda (env)
-      (if (true? (pproc env))
+      (if (truthy? (pproc env))
 	  (cproc env)
 	  (aproc env)))))
 

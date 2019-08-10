@@ -11,12 +11,20 @@
 	  (set-car! env (remove-bindings-from-frame var frame))))))
 
 (define (make-frame variables values)
-  (map cons variables values))
-(define (frame-variables frame) (map car frame))
-(define (frame-values frame) (map cdr frame))
+  (list 'frame (map cons variables values)))
+(define (frame-variables frame) (map car (cadr frame)))
+(define (frame-values frame) (map cdr (cadr frame)))
+(define (frame-variable-value-pairs frame)
+  (cadr frame))
+(define (frame-has-values? frame)
+  (not (null? (cadr frame))))
+
 (define (add-binding-to-frame! var val frame)
-  (let ((last-cell (last-pair frame)))
-    (set-cdr! last-cell (list (cons var val)))))
+  (if (frame-has-values? frame)
+      (let ((last-cell (last-pair (frame-variable-value-pairs frame))))
+	(set-cdr! last-cell (list (cons var val))))
+      (set-car! (cdr frame) (list (cons var val)))))
+
 ;; extend-environment is the same.
 (define (extend-environment vars vals base-env)
   (if (= (length vars) (length vals))
@@ -30,7 +38,8 @@
 (define (enclosing-environment env) (cdr env))
 
 (define (find-cell-in-frame var frame)
-  (filter (lambda (x) (eq? (car x) var)) frame))
+  (filter (lambda (x) (eq? (car x) var))
+	  (frame-variable-value-pairs frame)))
 
 (define (set-cell-val! val cell)
   (set-cdr! (car cell) val))
@@ -73,6 +82,23 @@
 	      (add-binding-to-frame! var val frame) 
 	      (set-cdr! (car lookup) val)))))
 
+(define (false? value)
+  (or (eq? value #f)
+      (eq? value 'false)))
+
+(define (falsy? value)
+  (or (false? value)
+      (null? value)
+      (eq? value 0)))
+
+
+(define (true? value)
+  (or (eq? value #t)
+      (eq? value 'true)))
+
+(define (truthy? value)
+  (or (true? value)
+      (not (falsy? value))))
 
 (define primitive-environment
   (extend-environment
@@ -88,7 +114,9 @@
     'null?
     '>
     '<
-    'not)
+    'not
+    'true?
+    'false?)
    (list
     (make-primitive-procedure +)
     (make-primitive-procedure *)
@@ -101,7 +129,9 @@
     (make-primitive-procedure null?)
     (make-primitive-procedure >)
     (make-primitive-procedure <)
-    (make-primitive-procedure not))
+    (make-primitive-procedure not)
+    (make-primitive-procedure true?)
+    (make-primitive-procedure false?))
    the-empty-environment))
 
 (define (setup-environment)

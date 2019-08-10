@@ -115,9 +115,7 @@
 	     first
 	     rest)))))
 
-(define (true? value)
-  (or (eq? value #t)
-      (eq? value 'true)))
+
 
 
 (define (cond? exp) (tagged-list? exp 'cond))
@@ -201,6 +199,7 @@
 (define (self-evaluating? exp)
   (cond ((number? exp) true)
 	((string? exp) true)
+	((boolean? exp) true)
 	(else false)))
 
 (define (make-primitive-procedure proc)
@@ -302,3 +301,4 @@
   (null? exp))
 
 (define (and? expr) (tagged-list? expr 'and))
+(define (or? expr) (tagged-list? expr 'or))

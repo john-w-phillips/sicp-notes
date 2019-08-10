@@ -11,7 +11,7 @@
 (define (user-print object)
   (cond
    ((lazycons-cell? object)
-    (display (lazylist->schemelist object)))
+    (display (lazylist->schemelist object LIST-PRINT-LIMIT)))
    ((compound-procedure? object)
       (display (list 'compound-procedure
 		     (procedure-parameters object)
