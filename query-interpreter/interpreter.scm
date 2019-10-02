@@ -143,7 +143,7 @@
 	((eq? frame 'failed) 'failed)
 	((false? b2)
 	 (extend (binding-variable b1)
-		 (binding-value b2)
+		 (binding-value b1)
 		 frame))
 	(else (extend-bindings b1 b2 frame))))
 
@@ -182,12 +182,40 @@
 				     stream2)
 			(delay (join-frames (stream-cdr stream1) stream2)))))))
 
-(define (conjoin conjuncts frame-stream)
-  (if (empty-conjunction? conjuncts)
+(define (dependent-clause? a-clause)
+  (or (tagged-list? a-clause 'lisp-value)
+      (tagged-list? a-clause 'not)))
+
+(define (condense-frames listof-frames)
+  (if (null? listof-frames) 
       the-empty-stream
-      (join-frames
-       (qeval (first-conjunct conjuncts) frame-stream)
-       (conjoin (rest-conjuncts conjuncts) frame-stream))))
+      (join-frames (car listof-frames)
+		   (condense-frames (cdr listof-frames)))))
+
+(define (conjoin conjuncts frame-stream)
+  (define (conjoin-iter conjuncts current-frame-stream frame-streams)
+    (cond
+     ((empty-conjunction? conjuncts) (condense-frames frame-streams))
+     ((dependent-clause? (first-conjunct conjuncts))
+      (let ((eval-result (qeval (first-conjunct conjuncts) 
+                                (condense-frames frame-streams))))
+	(conjoin-iter (rest-conjuncts conjuncts)
+		      eval-result
+		      (list eval-result))))
+     (else
+      (conjoin-iter (rest-conjuncts conjuncts)
+		    current-frame-stream
+		    (cons (qeval (first-conjunct conjuncts)
+				 current-frame-stream)
+			  frame-streams)))))
+  (conjoin-iter conjuncts frame-stream '()))
+
+;; (define (conjoin conjuncts frame-stream)
+;;   (if (empty-conjunction? conjuncts)
+;;       the-empty-stream
+;;       (join-frames
+;;        (qeval (first-conjunct conjuncts) frame-stream)
+;;        (conjoin (rest-conjuncts conjuncts) frame-stream))))
 (put 'and 'qeval conjoin)
 
 (define (disjoin disjuncts frame-stream)
