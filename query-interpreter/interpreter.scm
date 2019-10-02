@@ -99,51 +99,53 @@
       'failed
       (extend var val frame)))
 
+(define (extend-bindings
+	 b1
+	 b2
+	 frame)
+  (let* ((var (binding-variable b1))
+	 (val (binding-value b1))
+	 (var2 (binding-variable b2))
+	 (val2 (binding-value b2)))
+    (cond
+     ((and (not (var? val))
+	   (not (var? val2))
+	   (equal? val val2))
+      (extend var val frame))
+     ((and (var? val2) (not (var? val)))
+      (extend-if-not-failed var2 val2
+			    (extend-if-binding-possible
+			     b1
+			     (binding-in-frame val2 frame)
+			     frame)))
+     ((and (var? val) (not (var? val2)))
+      (extend-if-not-failed var val
+			    (extend-if-not-failed
+			     (binding-in-frame val frame)
+			     b2
+			     frame)))
+     ((and (var? val) (var? val2))
+      (extend-if-not-failed var val
+			    (extend-if-not-failed
+			     var2
+			     val2
+			     (extend-if-binding-possible
+			      (binding-in-frame val frame)
+			      (binding-in-frame val2 frame)
+			      frame))))
+     (else 'failed))))
+
 (define (extend-if-binding-possible
 	 b1
 	 b2
 	 frame)
-  (if (false? b1) 'failed
-      (let ((var (binding-variable b1))
-	    (val (binding-value b1)))
-	(cond
-	 ((and (not (var? val))
-	       (not (var? (binding-value b2)))
-	       (equal? val (binding-value b2)))
-	  (extend var val frame))
-	 ((false? b2) (extend var val frame))
-	 ((and (var? (binding-value b2))
-	       (not (var? val)))
-	  (extend-if-not-failed
-	   (binding-variable b2)
-	   (binding-value b2)
-	   (extend-if-binding-possible
-	    b1
-	    (binding-in-frame (binding-value b2) frame)
-	    frame)))
-	 ((and (var? val)
-	       (not (var? (binding-value b2))))
-	  (extend
-	   var
-	   val
-	   (extend-if-not-failed
-	    (binding-in-frame val frame)
-	    b2
-	    frame)))
-	 ((and (var? val)
-	       (var? (binding-value b2)))
-	  (let ((frame (extend-if-binding-possible
-			(binding-in-frame val frame)
-			(binding-in-frame (binding-value b2) frame)
-			frame)))
-		(extend-if-not-failed
-		 var
-		 val
-		 (extend-if-not-failed
-		  (binding-variable b2)
-		  (binding-value b2)
-		  frame))))
-	 (else 'failed)))))
+  (cond ((false? b1) 'failed)
+	((eq? frame 'failed) 'failed)
+	((false? b2)
+	 (extend (binding-variable b1)
+		 (binding-value b2)
+		 frame))
+	(else (extend-bindings b1 b2 frame))))
 
 (define (bindings-unify
 	 frame1
