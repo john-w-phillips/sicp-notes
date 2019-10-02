@@ -125,14 +125,27 @@
 			     b2
 			     frame)))
      ((and (var? val) (var? val2))
-      (extend-if-not-failed var val
-			    (extend-if-not-failed
-			     var2
-			     val2
-			     (extend-if-binding-possible
-			      (binding-in-frame val frame)
+      (let ((binding-1 (binding-in-frame val frame))
+	    (binding-2 (binding-in-frame val2 frame)))
+	(cond
+	 ((and (false? binding-1) (false? binding-2))
+	  frame)
+	 ((false? binding-2)
+	  (extend val2 (binding-value binding-1)
+		  frame))
+	 ((false? binding-1)
+	  (extend val
+		  (binding-value binding-2)
+		  frame))
+	 (else
+	  (extend-if-not-failed var val
+				(extend-if-not-failed
+				 var2
+				 val2
+				 (extend-if-binding-possible
+				  (binding-in-frame val frame)
 			      (binding-in-frame val2 frame)
-			      frame))))
+			      frame)))))))
      (else 'failed))))
 
 (define (extend-if-binding-possible
@@ -195,10 +208,10 @@
 (define (conjoin conjuncts frame-stream)
   (define (conjoin-iter conjuncts current-frame-stream frame-streams)
     (cond
-     ((empty-conjunction? conjuncts) (condense-frames frame-streams))
+     ((empty-conjunction? conjuncts) (condense-frames (reverse frame-streams)))
      ((dependent-clause? (first-conjunct conjuncts))
       (let ((eval-result (qeval (first-conjunct conjuncts) 
-                                (condense-frames frame-streams))))
+                                (condense-frames (reverse frame-streams)))))
 	(conjoin-iter (rest-conjuncts conjuncts)
 		      eval-result
 		      (list eval-result))))
@@ -208,7 +221,7 @@
 		    (cons (qeval (first-conjunct conjuncts)
 				 current-frame-stream)
 			  frame-streams)))))
-  (conjoin-iter conjuncts frame-stream '()))
+  (conjoin-iter conjuncts frame-stream (list frame-stream)))
 
 ;; (define (conjoin conjuncts frame-stream)
 ;;   (if (empty-conjunction? conjuncts)

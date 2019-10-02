@@ -8414,11 +8414,198 @@
        compatibility checks -- a factor of _k_ fewer than the number
        of matches required in our current method.
 
-       
+       #+BEGIN_SRC scheme
+	 (define (extend-if-not-failed
+		  var
+		  val
+		  frame)
+	   (if (eq? frame 'failed)
+	       'failed
+	       (extend var val frame)))
+
+	 (define (extend-bindings
+		  b1
+		  b2
+		  frame)
+	   (let* ((var (binding-variable b1))
+		  (val (binding-value b1))
+		  (var2 (binding-variable b2))
+		  (val2 (binding-value b2)))
+	     (cond
+	      ((and (not (var? val))
+		    (not (var? val2))
+		    (equal? val val2))
+	       (extend var val frame))
+	      ((and (var? val2) (not (var? val)))
+	       (extend-if-not-failed var2 val2
+				     (extend-if-binding-possible
+				      b1
+				      (binding-in-frame val2 frame)
+				      frame)))
+	      ((and (var? val) (not (var? val2)))
+	       (extend-if-not-failed var val
+				     (extend-if-not-failed
+				      (binding-in-frame val frame)
+				      b2
+				      frame)))
+	      ((and (var? val) (var? val2))
+	       (extend-if-not-failed var val
+				     (extend-if-not-failed
+				      var2
+				      val2
+				      (extend-if-binding-possible
+				       (binding-in-frame val frame)
+				       (binding-in-frame val2 frame)
+				       frame))))
+	      (else 'failed))))
+
+	 (define (extend-if-binding-possible
+		  b1
+		  b2
+		  frame)
+	   (cond ((false? b1) 'failed)
+		 ((false? b2)
+		  (extend (binding-variable b1)
+			  (binding-value b2)
+			  frame))
+		 (else (extend-bindings b1 b2))))
+
+	 (define (bindings-unify
+		  frame1
+		  frame2)
+	   (cond ((null? frame1) frame2)
+		 ((null? frame2) frame1)
+		 (else
+		  (let* ((b1 (first-binding frame1))
+			 (b2 (binding-in-frame (binding-variable b1) frame2))
+			 (rest-unified
+			  (bindings-unify
+			   (rest-bindings frame1)
+			   (remove-binding (binding-variable b1) frame2))))
+		    (extend-if-binding-possible
+		     b1
+		     b2
+		     rest-unified)))))
+
+
+
+	 (define (join-frames stream1 stream2)
+	   (cond ((empty-stream? stream1)
+		  the-empty-stream)
+		 ((empty-stream? stream2)
+		  stream1)
+		 (else
+		  (stream-filter (lambda (f)
+				   (not (eq? f 'failed)))
+				 (interleave-delayed
+				  (stream-map (lambda (f)
+						(bindings-unify
+						 (stream-car stream1)
+						 f))
+					      stream2)
+				  (delay (join-frames (stream-cdr stream1) stream2)))))))
+
+	 (define (conjoin conjuncts frame-stream)
+	   (if (empty-conjunction? conjuncts)
+	       the-empty-stream
+	       (join-frames
+		(qeval (first-conjunct conjuncts) frame-stream)
+		(conjoin (rest-conjuncts conjuncts) frame-stream))))
+       #+END_SRC
+
+       The code above works for most simple queries and
+       rules. However, it doesn't work for recursive rules or queries
+       with a not clause. 
+
+       - Recursive queries don't work because any invocation of a
+         recursive query that references bindings inside the
+         conjoin/and statement will effectively just be a recursive
+         call with the exact same bindings as the one we're in. It
+         will have a different frame because of unification but the
+         effect is the same. So if you call a query like 
+
+	 #+BEGIN_SRC scheme
+         (outranked-by ?x ?y)
+	 #+END_SRC
+
+	 it will just spin.
+
+       - Not queries won't work because of the issues we discussed
+         earlier -- they are effectively a filter on
+         previously-created frames, and so we need a way to give the
+         not query the results of the clauses before it.
+
+       - lisp-value queries won't work because they also operate on a
+         stream of frames with expected bindings. For example, if I
+         run
+
+	 #+BEGIN_SRC scheme
+         (and (salary ?person ?amount) (lisp-value > ?amount 30000))
+	 #+END_SRC
+
+	 I get an error because lisp-value is being run before ?amount
+         is bound. 
+
+       The only available solution is to scan a disjoin clause for
+       recursive queries, recursions, or lisp-values, execute the
+       statements before in the way we've just done, and _then_
+       execute that query as you would have before. This involves
+       partitioning and query into parts that can an cannot be
+       evaluated in parallel.
+
+       Our interpreter has:
+       #+BEGIN_SRC scheme
+       (define (conjoin conjuncts frame-stream)
+        (if (empty-conjunction? conjuncts)
+            the-empty-stream
+            (join-frames
+             (qeval (first-conjunct conjuncts) frame-stream)
+             (conjoin (rest-conjuncts conjuncts) frame-stream))))
+       #+END_SRC
+
+       The original was:
+       #+BEGIN_SRC scheme
+       (define (conjoin conjuncts frame-stream)
+        (if (empty-conjunction? conjuncts)
+             the-empty-stream
+             (conjoin (rest-conjuncts conjuncts)
+                      (qeval (first-conjunct conjuncts) frame-stream))))
+       #+END_SRC
+
+       So if we create a function called dependent-clause?, which is a
+       predicate indicating that a clause is dependent on the clause
+       before it, we can modify our conjoin:
+
+       #+BEGIN_SRC scheme
+       (define (dependent-clause? a-clause)
+        (or (tagged-list? a-clause 'lisp-value)
+            (tagged-list? a-clause 'not)))
+
+       (define (condense-frames listof-frames)
+        (if (null? listof-frames) 
+            the-empty-stream
+            (join-frames (car listof-frames)
+                         (condense-frames (cdr listof-frames)))))
+
+       (define (conjoin conjuncts frame-stream)
+        (define (conjoin-iter conjuncts current-frame-stream frame-streams)
+         (cond
+          ((empty-conjunction? conjuncts) (condense-frames frame-streams))
+          ((dependent-clause? (first-conjunct conjuncts))
+           (let ((eval-result (qeval (first-conjunct conjuncts) 
+                                (condense-frames frame-streams))))
+           (conjoin-iter (rest-conjuncts conjuncts)
+                          eval-result
+                          (list eval-result))))
+          (else
+           (conjoin-iter (rest-conjuncts conjuncts)
+                         current-frame-stream
+                         (cons (qeval (first-conjunct conjuncts)
+                                      current-frame-stream)
+                               frame-streams)))))
+         (conjoin-iter conjuncts frame-stream '()))
+       #+END_SRC
 
        
-    
 
-
-
-       
+     
