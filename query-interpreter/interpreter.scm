@@ -61,8 +61,8 @@
 		   q
 		   frame
 		 (lambda (v f)
-		 (contract-question-mark v))))
-	     (qeval q (singleton-stream '()))))
+		   (contract-question-mark v))))
+	     (qeval false q (singleton-stream '()))))
 	   (query-driver-loop)))))
 
 (define (instantiate exp frame unbound-var-handler)
@@ -77,10 +77,10 @@
 	  (else exp)))
   (copy exp))
 
-(define (qeval query frame-stream)
+(define (qeval rulename query frame-stream)
   (let ((qproc (get (type query) 'qeval)))
     (if qproc
-	(qproc (contents query) frame-stream)
+	(qproc rulename (contents query) frame-stream)
 	(simple-query query frame-stream))))
 
 (define (simple-query query-pattern frame-stream)
@@ -99,83 +99,253 @@
       'failed
       (extend var val frame)))
 
-(define (extend-bindings
-	 b1
-	 b2
-	 frame)
-  (let* ((var (binding-variable b1))
-	 (val (binding-value b1))
-	 (var2 (binding-variable b2))
-	 (val2 (binding-value b2)))
-    (cond
-     ((and (not (var? val))
-	   (not (var? val2))
-	   (equal? val val2))
-      (extend var val frame))
-     ((and (var? val2) (not (var? val)))
-      (extend-if-not-failed var2 val2
-			    (extend-if-binding-possible
-			     b1
-			     (binding-in-frame val2 frame)
-			     frame)))
-     ((and (var? val) (not (var? val2)))
-      (extend-if-not-failed var val
-			    (extend-if-not-failed
-			     (binding-in-frame val frame)
-			     b2
-			     frame)))
-     ((and (var? val) (var? val2))
-      (let ((binding-1 (binding-in-frame val frame))
-	    (binding-2 (binding-in-frame val2 frame)))
-	(cond
-	 ((and (false? binding-1) (false? binding-2))
-	  frame)
-	 ((false? binding-2)
-	  (extend val2 (binding-value binding-1)
-		  frame))
-	 ((false? binding-1)
-	  (extend val
-		  (binding-value binding-2)
-		  frame))
-	 (else
-	  (extend-if-not-failed var val
-				(extend-if-not-failed
-				 var2
-				 val2
-				 (extend-if-binding-possible
-				  (binding-in-frame val frame)
-			      (binding-in-frame val2 frame)
-			      frame)))))))
-     (else 'failed))))
 
-(define (extend-if-binding-possible
-	 b1
-	 b2
-	 frame)
-  (cond ((false? b1) 'failed)
-	((eq? frame 'failed) 'failed)
-	((false? b2)
-	 (extend (binding-variable b1)
-		 (binding-value b1)
-		 frame))
-	(else (extend-bindings b1 b2 frame))))
+(define (unify-frames-with-variables
+	 bindings-list
+	 higher-frame
+	 lower-frame)
+  (cond
+   ((null? bindings-list) '())
+   (else
+    (let* ((rest-frame-unified
+	    (unify-frames-with-variables
+	     (cdr bindings-list)
+	     higher-frame
+	     lower-frame)))
+      (cond ((eq? 'failed rest-frame-unified) 'failed)
+	    (else
+	     (let ((unified (unify-binding (car bindings-list)
+					   higher-frame
+					   lower-frame)))
+	       (cond
+		((eq? 'failed unified) 'failed)
+		((eq? 'unbound unified) rest-frame-unified)
+		(else
+		 (begin
+;;		   (display "E: ") (display unified) (newline) (flush-output)
+		   (extend (car bindings-list)
+			   unified
+			   rest-frame-unified)))))))))))
 
-(define (bindings-unify
+(define (get-variable-list frame)
+  (map binding-variable frame))
+
+(define (unique a-list)
+  (define (unique-iter output-list a-list)
+    (cond ((null? a-list)
+	   output-list)
+	  ((member (car a-list) output-list)
+	   (unique-iter output-list (cdr a-list)))
+	  (else
+	   (unique-iter (cons (car a-list) output-list)
+			(cdr a-list)))))
+  (unique-iter '() a-list))
+	
+(define (unify-frames
 	 frame1
 	 frame2)
-  (cond ((null? frame1) frame2)
-	((null? frame2) frame1)
-	(else
-	 (let* ((b1 (first-binding frame1))
-		(b2 (binding-in-frame (binding-variable b1) frame2))
-		(rest-unified
-		  (bindings-unify
-		   (rest-bindings frame1)
-		   (remove-binding (binding-variable b1) frame2))))
-	     (extend-if-binding-possible
-	      b1
-	      b2
-	      rest-unified)))))
+  (let ((varslist (unique (append
+			   (get-variable-list frame1)
+			   (get-variable-list frame2)))))
+;;    (display "VL: ") (display varslist) (newline)
+    (unify-frames-with-variables
+     varslist
+     frame1
+     frame2)))
+
+(define (print-if-middle-manager string binding)
+  (if (and (pair? binding) (not (null? (member 'middle-manager binding))))
+      (begin
+	(display string)
+	(display binding)
+	(newline))
+      '()))
+(define (unify-binding
+	 variable
+	 higher-frame
+	 lower-frame)
+  ;;  (display "R3\n")
+  ;; (display "f1: ") (display higher-frame) (newline)
+  ;; (display "F2: ") (display lower-frame) (newline)
+  (let* ((b1 (binding-in-frame variable higher-frame))
+	 (b2 (binding-in-frame variable lower-frame)))
+    (cond
+     ((and (false? b1) (false? b2)) (display "UNBOUND\n") 'unbound)
+     ((false? b1)
+      ;; (print-if-middle-manager "B2 is middle manager, B1 false, overiding: "
+      ;; 			       b2)
+      (binding-value b2))
+     ((false? b2)
+      ;; (print-if-middle-manager "B1 is middle manager, B2 false, overidding: "
+      ;; 			       b1)
+      (binding-value b1))
+     ((equal?  b1 b2)
+      ;; (print-if-middle-manager "B1 and B2 are equal, setting: "
+      ;; 			       b1)
+      (binding-value b1))
+     ((and (var? (binding-value b1))
+	   (not (var? (binding-value b2))))
+      ;; (display "CB1\n")
+      (check-binding
+       (binding-value b1)
+       (binding-value b2)
+       higher-frame))
+     ((and (var? (binding-value b2))
+	   (not (var? (binding-value b1))))
+      ;; (display "CB2\n")
+      (check-binding
+       (binding-value b2)
+       (binding-value b1)
+       lower-frame))
+     ((and (var? (binding-value b1))
+	   (var? (binding-value b2)))
+      ;; (display "FBC\n")			;
+      (follow-binding-chain
+       b1
+       b2
+       higher-frame
+       lower-frame))
+
+     (else (display "fail\n") 'failed))))
+
+(define (follow-binding-chain
+	 b1
+	 b2
+	 higher-frame
+	 lower-frame)
+;;  (display "R1\n")
+  (cond
+   ;;   ((equal? (binding-value b1) (binding-value b2)) (binding-value b1))
+   ((and (false? b1) (false? b2)) false)
+   ((and (false? b1) (not (false? b2))) (binding-value b2))
+   ((and (false? b2) (not (false? b1))) (binding-value b1))
+   ((and (var? (binding-value b1))
+	 (var? (binding-value b2)))
+    (let ((followed (follow-binding-chain (binding-in-frame (binding-value b1) higher-frame)
+					  (binding-in-frame (binding-value b2) lower-frame)
+					  higher-frame
+					  lower-frame)))
+      (if (false? followed)
+	  (binding-value b2)
+	  followed)))
+   ((and (var? (binding-value b1))
+	 (not (var? (binding-value b2))))
+    (check-binding
+     (binding-value b2)
+     b1
+     higher-frame))
+   ((and (var? (binding-value b2))
+	 (not (var? (binding-value b1))))
+    (check-binding
+     (binding-value b1)
+     b2
+     lower-frame))
+   ((equal? (binding-value b1) (binding-value b2))
+    (binding-value b2))
+   (else (display "Fail fbc\n") 'failed)))
+
+
+(define (check-binding found-value binding-for-chain-variable frame)
+;;  (display "R2\n")
+  (cond
+   ((false? binding-for-chain-variable) found-value)
+   ((var? (binding-value binding-for-chain-variable))
+    (let ((binding (binding-in-frame
+		    (binding-value binding-for-chain-variable frame))))
+      (if binding
+	  (check-binding found-value binding frame)
+	  found-value)))
+   ((equal? (binding-value binding-for-chain-variable)
+	    found-value)
+    found-value)
+   (else
+    (display "fail check on: ")
+    (display binding-for-chain-variable) (display " | ")
+    (display found-value)
+    (newline)
+    'failed)))
+	  
+			 
+;; (define (extend-bindings
+;; 	 b1
+;; 	 b2
+;; 	 frame)
+;;   (let* ((var (binding-variable b1))
+;; 	 (val (binding-value b1))
+;; 	 (var2 (binding-variable b2))
+;; 	 (val2 (binding-value b2)))
+;;     (cond
+;;      ((and (not (var? val))
+;; 	   (not (var? val2))
+;; 	   (equal? val val2))
+;;       (extend var val frame))
+;;      ((and (var? val2) (not (var? val)))
+;;       (extend-if-not-failed var2 val2
+;; 			    (extend-if-binding-possible
+;; 			     b1
+;; 			     (binding-in-frame val2 frame)
+;; 			     frame)))
+;;      ((and (var? val) (not (var? val2)))
+;;       (extend-if-not-failed var val
+;; 			    (extend-if-not-failed
+;; 			     (binding-in-frame val frame)
+;; 			     b2
+;; 			     frame)))
+;;      ((and (var? val) (var? val2))
+;;       (let ((binding-1 (binding-in-frame val frame))
+;; 	    (binding-2 (binding-in-frame val2 frame)))
+;; 	(cond
+;; 	 ((and (false? binding-1) (false? binding-2))
+;; 	  (extend-if-not-failed
+;; 	   var val
+;; 	   (extend-if-not-failed
+;; 	    var2 val2 frame)))
+;; 	 ((false? binding-2)
+;; 	  (extend-if-not-failed val2 (binding-value binding-1)
+;; 				frame))
+;; 	 ((false? binding-1)
+;; 	  (extend-if-not-failed val
+;; 				(binding-value binding-2)
+;; 				frame))
+;; 	 (else
+;; 	  (extend-if-not-failed var val
+;; 				(extend-if-not-failed
+;; 				 var2
+;; 				 val2
+;; 				 (extend-if-binding-possible
+;; 				  (binding-in-frame val frame)
+;; 			      (binding-in-frame val2 frame)
+;; 			      frame)))))))
+;;      (else 'failed))))
+
+;; (define (extend-if-binding-possible
+;; 	 b1
+;; 	 b2
+;; 	 frame)
+;;   (cond ((false? b1) 'failed)
+;; 	((eq? frame 'failed) 'failed)
+;; 	((false? b2)
+;; 	 (extend (binding-variable b1)
+;; 		 (binding-value b1)
+;; 		 frame))
+;; 	(else (extend-bindings b1 b2 frame))))
+
+;; (define (bindings-unify
+;; 	 frame1
+;; 	 frame2)
+;;   (cond ((null? frame1) frame2)
+;; 	((null? frame2) frame1)
+;; 	(else
+;; 	 (let* ((b1 (first-binding frame1))
+;; 		(b2 (binding-in-frame (binding-variable b1) frame2))
+;; 		(rest-unified
+;; 		  (bindings-unify
+;; 		   (rest-bindings frame1)
+;; 		   (remove-binding (binding-variable b1) frame2))))
+;; 	     (extend-if-binding-possible
+;; 	      b1
+;; 	      b2
+;; 	      rest-unified)))))
 
 
 
@@ -183,45 +353,68 @@
   (cond ((empty-stream? stream1)
 	 the-empty-stream)
 	((empty-stream? stream2)
-	 stream1)
+	 the-empty-stream)
 	(else
 	 (stream-filter (lambda (f)
 			  (not (eq? f 'failed)))
 			(interleave-delayed
 			 (stream-map (lambda (f)
-				       (bindings-unify
-					(stream-car stream1)
-					f))
+				       (let ((unified 
+					      (unify-frames
+					       (stream-car stream1)
+					       f)))
+					 ;; (if (not (eq? unified 'failed))
+					 ;;     (begin
+					 ;;       (display "Unified: ")
+					 ;;       (display unified)
+					 ;;       (newline))
+					 ;;     (begin
+					 ;;       (display "fail: ")
+					 ;;       (display f)
+					 ;;       (newline)
+					 ;;       (display (stream-car stream1))
+					 ;;       (newline)))
+					 unified))
 				     stream2)
 			(delay (join-frames (stream-cdr stream1) stream2)))))))
 
-(define (dependent-clause? a-clause)
+(define (dependent-clause? current-rulename a-clause)
   (or (tagged-list? a-clause 'lisp-value)
-      (tagged-list? a-clause 'not)))
+      (tagged-list? a-clause 'not)
+      (tagged-list? a-clause current-rulename)))
 
 (define (condense-frames listof-frames)
-  (if (null? listof-frames) 
-      the-empty-stream
+  (if (null? (cdr listof-frames))
+      (car listof-frames)
       (join-frames (car listof-frames)
 		   (condense-frames (cdr listof-frames)))))
 
-(define (conjoin conjuncts frame-stream)
+(define (conjoin rulename conjuncts frame-stream)
   (define (conjoin-iter conjuncts current-frame-stream frame-streams)
     (cond
      ((empty-conjunction? conjuncts) (condense-frames (reverse frame-streams)))
-     ((dependent-clause? (first-conjunct conjuncts))
-      (let ((eval-result (qeval (first-conjunct conjuncts) 
-                                (condense-frames (reverse frame-streams)))))
+     ((dependent-clause? rulename (first-conjunct conjuncts))
+      (let ((eval-result (qeval
+			  rulename
+			  (first-conjunct conjuncts) 
+			  (condense-frames (reverse frame-streams)))))
 	(conjoin-iter (rest-conjuncts conjuncts)
 		      eval-result
 		      (list eval-result))))
      (else
       (conjoin-iter (rest-conjuncts conjuncts)
 		    current-frame-stream
-		    (cons (qeval (first-conjunct conjuncts)
+		    (cons (qeval rulename
+				 (first-conjunct conjuncts)
 				 current-frame-stream)
 			  frame-streams)))))
-  (conjoin-iter conjuncts frame-stream (list frame-stream)))
+  (let ((rval
+	 (conjoin-iter conjuncts frame-stream (list frame-stream))))
+    (display "returning")
+    (display rval)
+    (newline)
+    rval))
+	
 
 ;; (define (conjoin conjuncts frame-stream)
 ;;   (if (empty-conjunction? conjuncts)
@@ -231,19 +424,20 @@
 ;;        (conjoin (rest-conjuncts conjuncts) frame-stream))))
 (put 'and 'qeval conjoin)
 
-(define (disjoin disjuncts frame-stream)
+(define (disjoin rulename disjuncts frame-stream)
   (if (empty-disjunction? disjuncts)
       the-empty-stream
       (interleave-delayed
-       (qeval (first-disjunct disjuncts) frame-stream)
-       (delay (disjoin (rest-disjuncts disjuncts) frame-stream)))))
+       (qeval rulename (first-disjunct disjuncts) frame-stream)
+       (delay (disjoin rulename (rest-disjuncts disjuncts) frame-stream)))))
 (put 'or 'qeval disjoin)
 
-(define (negate operands frame-stream)
+(define (negate rulename operands frame-stream)
   (stream-flatmap
    (lambda (frame)
      (if (stream-null?
-	  (qeval (negated-query operands)
+	  (qeval rulename
+		 (negated-query operands)
 		 (singleton-stream frame)))
 	 (singleton-stream frame)
 	 the-empty-stream))
@@ -252,17 +446,20 @@
 
 (define (unique-body call) (car call))
 
-(define (uniquely-asserted call frame-stream)
+(define (uniquely-asserted rulename call frame-stream)
   (stream-flatmap
    (lambda (frame)
-     (let ((evaled (qeval (unique-body call) (singleton-stream frame))))
+     (let ((evaled (qeval
+		    rulename
+		    (unique-body call)
+		    (singleton-stream frame))))
        (if (stream-null? (stream-cdr evaled))
 	   evaled
 	   the-empty-stream)))
    frame-stream))
 (put 'unique 'qeval uniquely-asserted)
 
-(define (lisp-value call frame-stream)
+(define (lisp-value rulename call frame-stream)
   (stream-flatmap
    (lambda (frame)
      (if (execute
@@ -281,7 +478,7 @@
 	 (args exp)))
 
 
-(define (always-true ignore frame-stream) frame-stream)
+(define (always-true ignore1 ignore2 frame-stream) frame-stream)
 (put 'always-true 'qeval always-true)
 
 (define (find-assertions pattern frame)
@@ -326,8 +523,10 @@
 				     query-frame)))
       (if (eq? unify-result 'failed)
 	  the-empty-stream
-	  (qeval (rule-body clean-rule)
-		 (singleton-stream unify-result))))))
+	  (qeval
+	   (rule-name rule)
+	   (rule-body clean-rule)
+	   (singleton-stream unify-result))))))
 
 (define (rename-variables-in rule)
   (let ((rule-application-id (new-rule-application-id)))
@@ -520,6 +719,8 @@
   (tagged-list? statement 'rule))
 
 (define (conclusion rule) (cadr rule))
+(define (rule-name rule)
+  (caadr rule))
 (define (rule-body rule)
   (if (null? (cddr rule))
       '(always-true)
