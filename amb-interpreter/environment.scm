@@ -153,16 +153,18 @@
     'caadr
     'cdar
     'cddar
+    'cddr
     'equal?
     'number?
     'number->string
     'string=?
     'symbol?
     'substring
-    'map
-    'filter
     'error
-    'read)
+    'read
+    'string-length
+    'reverse
+    'append)
    (list
     (make-primitive-procedure list)
     (make-primitive-procedure memq)
@@ -199,16 +201,18 @@
     (make-primitive-procedure caadr)
     (make-primitive-procedure cdar)
     (make-primitive-procedure cddar)
+    (make-primitive-procedure cddr)
     (make-primitive-procedure equal?)
     (make-primitive-procedure number?)
     (make-primitive-procedure number->string)
     (make-primitive-procedure string=?)
     (make-primitive-procedure symbol?)
     (make-primitive-procedure substring)
-    (make-primitive-procedure map)
-    (make-primitive-procedure filter)
     (make-primitive-procedure error)
-    (make-primitive-procedure read))
+    (make-primitive-procedure read)
+    (make-primitive-procedure string-length)
+    (make-primitive-procedure reverse)
+    (make-primitive-procedure append))
    the-empty-environment))
 
 (define (setup-environment)

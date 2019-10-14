@@ -2,20 +2,18 @@
 (define output-prompt ";;; Query results:")
 (define (require x) (if (not x) (amb)))
 
-;; (define put-hash (make-hash-table))
-;; (define (put key ns value)
-;;   (let ((ns-table (hash-table-ref put-hash ns (lambda () #f))))
-;;     (if ns-table
-;; 	(hash-table-set! ns-table key value)
-;; 	(let ((new-hash (make-hash-table)))
-;; 	  (hash-table-set! put-hash ns new-hash)
-;; 	  (hash-table-set! new-hash key value)))))
+(define (map proc items)
+  (if (null? items) '()
+      (cons (proc (car items))
+	    (map proc (cdr items)))))
 
-;; (define (get key ns)
-;;   (let ((ns-table (hash-table-ref put-hash ns (lambda () #f))))
-;;     (if ns-table
-;; 	(hash-table-ref ns-table key (lambda () #f))
-;; 	#f)))
+(define (filter proc items)
+  (if (null? items)
+      '()
+      (cons (proc (car items))
+	    (filter proc (cdr items)))))
+
+
 (define (prompt-for-input string)
   (newline)
   (newline)
@@ -58,7 +56,22 @@
 	   (announce-output output-prompt)
 	   (qeval false q '())
 	   (query-driver-loop)))))
+;; (define (query-process a-query)
+;;   (let
 
+(define (query-input raw-query-input)
+  (let ((q (query-syntax-process raw-query-input)))
+    (cond ((assertion-to-be-added? q)
+	   (add-rule-or-assertion! (add-assertion-body q)))
+	  (else
+	   (let ((frame
+		  (qeval false q '())))
+	     (require q)
+	     (instantiate q frame
+	       (lambda (v f)
+		 (contract-question-mark v))))))))
+	   
+	   
 (define (instantiate exp frame unbound-var-handler)
   (define (copy exp)
     (cond ((var? exp)
@@ -81,6 +94,7 @@
   (let ((result (amb (find-assertions query-pattern frame)
 		     (apply-rules query-pattern frame))))
     (require result)
+    (require (not (null? result)))
     result))
 
   ;; (stream-flatmap
@@ -106,7 +120,7 @@
   (cond
    ((null? bindings-list) '())
    (else
-    (let* ((rest-frame-unified
+    (let ((rest-frame-unified
 	    (unify-frames-with-variables
 	     (cdr bindings-list)
 	     higher-frame
@@ -161,7 +175,7 @@
 	 variable
 	 higher-frame
 	 lower-frame)
-  (let* ((b1 (binding-in-frame variable higher-frame))
+  (let ((b1 (binding-in-frame variable higher-frame))
 	 (b2 (binding-in-frame variable lower-frame)))
     (cond
      ((and (false? b1) (false? b2)) (display "UNBOUND\n") 'unbound)
@@ -328,9 +342,13 @@
 
 
 (define (join-frames frame1 frame2)
-  (require frame1)
-  (require frame2)
-  (join-frames frame1 frame2))
+  ;; (require frame1)
+  ;; (require frame2)
+  ;; (require (not (null? frame1)))
+  ;; (require (not (null? frame2)))
+  (require (not (eq? 'failed frame1)))
+  (require (not (eq? 'failed frame2)))
+  (unify-frames frame1 frame2))
 
 (define (dependent-clause? current-rulename a-clause)
   (or (tagged-list? a-clause 'lisp-value)
@@ -375,23 +393,23 @@
 
 (define (disjoin rulename disjuncts frame-stream)
   (require disjuncts)
+  (require (not (null? disjuncts)))
   (amb
    (qeval rulename (first-disjunct disjuncts) frame-stream)
    (disjoin rulename (rest-disjuncts disjuncts) frame-stream)))
 
 (put 'or 'qeval disjoin)
 
-;; (define (negate rulename operands frame-stream)
-;;   (stream-flatmap
-;;    (lambda (frame)
-;;      (if (stream-null?
-;; 	  (qeval rulename
-;; 		 (negated-query operands)
-;; 		 (singleton-stream frame)))
-;; 	 (singleton-stream frame)
-;; 	 the-empty-stream))
-;;    frame-stream))
-;; (put 'not 'qeval negate)
+(define (negate rulename operands frame)
+  (let ((rval (try-or-return
+	       (qeval
+		rulename
+		(negated-query operands)
+		frame)
+	       '())))
+    (require (null? rval))
+    frame))
+(put 'not 'qeval negate)
 
 ;; (define (unique-body call) (car call))
 
@@ -431,14 +449,13 @@
 (put 'always-true 'qeval always-true)
 
 (define (find-assertions pattern frame)
-   (check-assertion (fetch-assertions pattern frame)))
+   (check-assertion (fetch-assertions pattern frame) pattern frame))
 
 (define (check-assertion assertion query-pat query-frame)
   (let ((match-result
 	 (pattern-match query-pat assertion query-frame)))
-    (if (eq? match-result 'failed)
-	(amb)
-	match-result)))
+    (require (not (eq? match-result 'failed)))
+    match-result))
 
 (define (pattern-match pat dat frame)
   (cond ((eq? frame 'failed) 'failed)
@@ -458,22 +475,23 @@
 	(extend var dat frame))))
 
 (define (apply-rules pattern frame)
-  (let ((rule (get-rule pattern frame)))
+  (let ((rule (fetch-rules pattern frame)))
     (require rule)
-   (apply-a-rule rule pattern-frame)))
+   (apply-a-rule rule pattern frame)))
 
 
 (define (apply-a-rule rule query-pattern query-frame)
+  (require (not (null? rule)))
+  (require rule)
   (let ((clean-rule (rename-variables-in rule)))
     (let ((unify-result (unify-match query-pattern
 				     (conclusion clean-rule)
 				     query-frame)))
-      (if (eq? unify-result 'failed)
-	  (amb)
-	  (qeval
-	   (rule-name rule)
-	   (rule-body clean-rule)
-	   unify-result)))))
+      (require (not (eq? unify-result 'failed)))
+      (qeval
+       (rule-name rule)
+       (rule-body clean-rule)
+       unify-result))))
 
 (define (rename-variables-in rule)
   (let ((rule-application-id (new-rule-application-id)))
@@ -533,9 +551,6 @@
 (define (fetch-assertions pattern frame)
   (get-all-assertions))
 
-  ;; (if (use-index? pattern)
-  ;;     (get-indexed-assertions pattern)
-  ;;     (get-all-assertions)))
 
 (define (get-some-assertions assertion-list)
   (require (not (null? assertion-list)))
@@ -543,38 +558,22 @@
    (car assertion-list)
    (get-some-assertions (cdr assertion-list))))
 
-(define (get-all-assertions) (get-some-assertions THE-ASSERTIONS))
+(define (get-all-assertions)
+  (get-some-assertions THE-ASSERTIONS))
 
 (define (get-indexed-assertions pattern)
   (get-stream (index-key-of pattern) 'assertion-stream))
-
-;; (define (get-stream key1 key2)
-;;   (let ((s (get key1 key2)))
-;;     (if s s the-empty-stream)))
 
 (define THE-RULES '())
 (define (fetch-rules pattern frame)
   (get-all-rules))
 
-  ;; (if (use-index? pattern)
-  ;;     (get-indexed-rules pattern)
-  ;;     (get-all-rules)))
 (define (get-some-rules rule-list)
   (require (not (null? rule-list)))
   (amb (car rule-list)
        (get-some-rules (cdr rule-list))))
 (define (get-all-rules)
   (get-some-rules THE-RULES))
-
-(define (get-rule rulename)
-  (let ((rule (get-all-rules)))
-    (require (eq? (rule-name rule) rulename))
-    rule))
-
-;; (define (get-indexed-rules pattern)
-  ;; (stream-append
-  ;;  (get-stream (index-key-of pattern) 'rule-stream)
-  ;;  (get-stream '? 'rule-stream)))
 
 (define (add-rule-or-assertion! assertion)
   (if (rule? assertion)
@@ -591,68 +590,6 @@
     (set! THE-RULES (cons rule THE-RULES))
     'ok))
 
-;; (define (store-assertion-in-index assertion)
-;;   (if (indexable? assertion)
-;;       (let ((key (index-key-of assertion)))
-;; 	(let ((current-assertion-stream
-;; 	       (get-stream key 'assertion-stream)))
-;; 	  (put key
-;; 	       'assertion-stream
-;; 	       (cons-stream
-;; 		assertion
-;; 		current-assertion-stream))))))
-
-;; (define (store-rule-in-index rule)
-;;   (let ((pattern (conclusion rule)))
-;;     (if (indexable? pattern)
-;; 	(let ((key (index-key-of pattern)))
-;; 	  (let ((current-rule-stream
-;; 		 (get-stream key 'rule-stream)))
-;; 	    (put key
-;; 		 'rule-stream
-;; 		 (cons-stream rule
-;; 			      current-rule-stream)))))))
-;; (define (indexable? pat)
-;;   (or (constant-symbol? (car pat))
-;;       (var? (car pat))))
-
-;; (define (index-key-of pat)
-;;   (let ((key (car pat)))
-;;     (if (var? key) '? key)))
-
-;; (define (use-index? pat)
-;;   (constant-symbol? (car pat)))
-
-;; (define (stream-append-delayed s1 delayed-s2)
-;;   (if (stream-null? s1)
-;;       (force delayed-s2)
-;;       (cons-stream
-;;        (stream-car s1)
-;;        (stream-append-delayed
-;; 	(stream-cdr s1)
-;; 	delayed-s2))))
-
-;; (define (interleave-delayed s1 delayed-s2)
-;;   (if (stream-null? s1)
-;;       (force delayed-s2)
-;;       (cons-stream
-;;        (stream-car s1)
-;;        (interleave-delayed
-;; 	(force delayed-s2)
-;; 	(delay (stream-cdr s1))))))
-
-;; (define (stream-flatmap proc s)
-;;   (flatten-stream (stream-map proc s)))
-
-;; (define (flatten-stream stream)
-;;   (if (stream-null? stream)
-;;       the-empty-stream
-;;       (interleave-delayed
-;;        (stream-car stream)
-;;        (delay (flatten-stream (stream-cdr stream))))))
-
-;; (define (singleton-stream x)
-;;   (cons-stream x the-empty-stream))
 
 (define (type exp)
   (if (pair? exp)
@@ -747,4 +684,3 @@
   (cdr frame))
 (define (extend variable value frame)
   (cons (make-binding variable value) frame))
-	 

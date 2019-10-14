@@ -5,6 +5,7 @@
 (define (analyze exp)
   (cond ((self-evaluating? exp) (analyze-self-evaluating exp))
 	((and? exp) (analyze-and exp))
+	((or? exp) (analyze-or exp))
 	((quoted? exp) (analyze-quoted exp))
 	((variable? exp) (analyze-variable exp))
 	((assignment? exp) (analyze-assignment exp))
@@ -16,6 +17,7 @@
 	((if-fail? exp) (analyze-if-fail exp))
 	((let? exp) (analyze (let->combination exp)))
 	((permanent-set? exp) (analyze-permanent-set exp))
+	((try-or-return? exp) (analyze-try-or-return exp))
 ;;	((require? exp) (analyze-require exp))
 	((amb? exp) (analyze-amb exp))
 	((ramb? exp) (analyze-ramb exp))
@@ -50,15 +52,37 @@
 (define (analyze-and exp)
   (let ((exprs (map analyze (operands exp))))
     (lambda (env succeed fail)
-      (define (and-iter exprs)
+      (define (and-iter exprs fail2)
 	(cond
-	 ((null? exprs) #t)
+	 ((null? exprs) (succeed #t fail2))
 	 (else
-	  (let ((first ((car exprs) env)))
-	    (if (false? first)
-		first
-		(and-iter (cdr exprs)))))))
-      (and-iter exprs))))
+	  ((car exprs)
+	   env
+	   (lambda (value fail3)
+	     (if (false? value)
+		 (succeed false fail3)
+		 (and-iter (cdr exprs) fail3)))
+	   (lambda () (fail2))))))
+      (and-iter exprs fail))))
+
+(define (analyze-or exp)
+  (let ((exprs (map analyze (operands exp))))
+    (lambda (env succeed fail)
+      (define (or-iter exprs fail2)
+	(cond
+	 ((null? exprs)
+	  (succeed #f fail2))
+	 (else
+	  ((car exprs)
+	   env
+	   (lambda (value fail3)
+	     (if (not (false? value))
+		 (succeed true fail3)
+		 (or-iter (cdr exprs)
+			  fail3)))
+	   (lambda () (fail2))))))
+      (or-iter exprs fail))))
+
 
 (define (analyze-amb exp)
   (let ((cprocs (map analyze (amb-choices exp))))
@@ -209,6 +233,21 @@
 		(succeed (cons argval vals) fail3))
 	      fail2))
 	   fail)))
+
+(define (analyze-try-or-return exp)
+  (let ((failure-return
+	 (analyze (try-or-return-failure-value exp)))
+	(expression-to-try
+	 (analyze (try-or-return-expr exp))))
+    (lambda (env succeed fail)
+      (expression-to-try
+       env
+       succeed
+       (lambda ()
+	 (failure-return
+	  env
+	  succeed
+	  fail))))))
 
 (define (analyze-application exp)
   (let ((fproc (analyze (operator exp)))

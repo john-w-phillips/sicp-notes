@@ -1,6 +1,15 @@
+(define (try-or-return? expr)
+  (and (pair? expr) (eq? (car expr) 'try-or-return)))
+
+(define (try-or-return-expr expr)
+  (cadr expr))
+(define (try-or-return-failure-value expr)
+  (caddr expr))
+
 (define (let? expr) (eq? (car expr) 'let))
 
 (define (named-let? expr) (symbol? (cadr expr)))
+
 
 (define (let-bindings expr) 
   (if (named-let? expr)

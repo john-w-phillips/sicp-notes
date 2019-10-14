@@ -67,12 +67,19 @@
 	      (and (supervisor ?staff-person ?middle-manager)
 		   (outranked-by ?middle-manager ?boss))))))
 
-(for-each
- (lambda (entry)
-   (let ((assertion (list 'assert! entry)))
-     (display assertion)
-     (newline)))
- *db*)
 
 
-  
+
+(define (print-it)
+  (for-each
+   (lambda (entry)
+     (let ((assertion (list 'assert! entry)))
+       (display assertion)
+       (newline)))
+   *db*))
+
+(define (print-mappable)
+  (display (map (lambda (entry)
+		  (list 'assert! entry))
+		*db*)))
+       
