@@ -34,30 +34,6 @@
 
 (define (tagged-list? obj symb)
   (and (pair? obj) (eq? (car obj) symb)))
-(define (display-stream a-stream)
-  (if (not (stream-null? a-stream))
-      (begin
-	(user-print (stream-car a-stream))
-	(newline)
-	(flush-output)
-	(display-stream (stream-cdr a-stream)))))
-
-      
-(define (query-driver-loop)
-  (prompt-for-input input-prompt)
-  (let ((q (query-syntax-process (read))))
-    (cond ((assertion-to-be-added? q)
-	   (add-rule-or-assertion! (add-assertion-body q))
-	   (newline)
-	   (display "Assertion added to data base.")
-	   (query-driver-loop))
-	  (else
-	   (newline)
-	   (announce-output output-prompt)
-	   (qeval false q '())
-	   (query-driver-loop)))))
-;; (define (query-process a-query)
-;;   (let
 
 (define (query-input raw-query-input)
   (let ((q (query-syntax-process raw-query-input)))
