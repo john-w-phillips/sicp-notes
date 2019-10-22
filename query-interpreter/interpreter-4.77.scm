@@ -62,7 +62,8 @@
 		   frame
 		 (lambda (v f)
 		   (contract-question-mark v))))
-	     (qeval false q (singleton-stream the-empty-frame))))
+	     (apply-frame-filters
+	      (qeval false q (singleton-stream the-empty-frame)))))
 	   (query-driver-loop)))))
 
 (define (instantiate exp frame unbound-var-handler)
@@ -77,11 +78,33 @@
 	  (else exp)))
   (copy exp))
 
+(define (unbound-variables? exp frame)
+  (define (walk exp)
+    (cond ((var? exp)
+	   (let ((binding (binding-in-frame exp frame)))
+	     (if binding
+		 (walk (binding-value binding))
+		 true)))
+	  ((pair? exp)
+	   (or (walk (car exp)) (walk (cdr exp))))
+	  (else
+	   false)))
+  (walk exp))
+
 (define (qeval rulename query frame-stream)
   (let ((qproc (get (type query) 'qeval)))
     (if qproc
 	(qproc rulename (contents query) frame-stream)
 	(simple-query query frame-stream))))
+
+(define (apply-frame-filters frame-stream)
+  (stream-filter
+   (lambda (frame)
+     (not (eq? frame 'failed)))
+   (stream-map
+    (lambda (frame)
+      (apply-filters frame))
+    frame-stream)))
 
 (define (simple-query query-pattern frame-stream)
   (stream-flatmap
@@ -145,11 +168,20 @@
 	 frame2)
   (let ((varslist (unique (append
 			   (get-variable-list frame1)
-			   (get-variable-list frame2)))))
-    (unify-frames-with-variables
-     varslist
-     frame1
-     frame2)))
+			   (get-variable-list frame2))))
+	(filterlist (append (frame-filters frame1)
+			    (frame-filters frame2))))
+    (let ((frame-withbindings
+	   (unify-frames-with-variables
+	    varslist
+	    frame1
+	    frame2)))
+      (if (not (eq? frame-withbindings 'failed))
+	  (make-frame
+	   (frame-bindings frame-withbindings)
+	   filterlist)
+	  'failed))))
+		       
 
 (define (print-if-middle-manager string binding)
   (if (and (pair? binding) (not (null? (member 'middle-manager binding))))
@@ -396,12 +428,23 @@
 (define (negate rulename operands frame-stream)
   (stream-flatmap
    (lambda (frame)
-     (if (stream-null?
+     (cond
+      ((unbound-variables? (negated-query operands) frame)
+       (singleton-stream (attach-filter frame
+					(lambda (frame2)
+					  (if (stream-null?
+					       (qeval rulename
+						      (negated-query operands)
+						      (singleton-stream frame2)))
+
+						frame2
+						'failed)))))
+      ((stream-null?
 	  (qeval rulename
 		 (negated-query operands)
 		 (singleton-stream frame)))
-	 (singleton-stream frame)
-	 the-empty-stream))
+       (singleton-stream frame))
+      (else the-empty-stream)))
    frame-stream))
 (put 'not 'qeval negate)
 
@@ -421,17 +464,25 @@
 (put 'unique 'qeval uniquely-asserted)
 
 (define (lisp-value rulename call frame-stream)
-  (stream-flatmap
-   (lambda (frame)
-     (if (execute
-	  (instantiate
-	      call
-	      frame
-	    (lambda (v f)
-	      (error "Unkown pat var: LISP-VALUE" v))))
-	 (singleton-stream frame)
-	 the-empty-stream))
-   frame-stream))
+  (let ((execution-proc
+	 (lambda (newframe)
+	   (if (execute (instantiate
+			    call
+			    newframe
+			  (lambda (v f) "Unknown pat var: LISP-VALUE" v)))
+	       newframe
+	       'failed))))
+    (stream-flatmap
+     (lambda (frame)
+       (cond
+	((unbound-variables? call frame)
+	 (singleton-stream (attach-filter frame
+					  execution-proc)))
+	((not (eq? 'failed (execution-proc frame)))
+	 (singleton-stream frame))
+	(else
+	 the-empty-stream)))
+     frame-stream)))
 (put 'lisp-value 'qeval lisp-value)
 
 (define (execute exp)
@@ -757,10 +808,19 @@
 
 (define (attach-filter frame filter)
   (make-frame
-   (cons (frame-bindings frame)
-	 (cons filter
-	       (frame-filters frame)))))
+   (frame-bindings frame)
+   (cons filter
+	 (frame-filters frame))))
 
+(define (apply-filters frame)
+  (fold-right
+   (lambda (new-filter previous)
+     (if (not (eq? previous 'failed))
+	 (new-filter previous)
+	 'failed))
+   (make-frame (frame-bindings frame) '())
+   (frame-filters frame)))
+   
 (define (extend variable value frame)
   (make-frame
    (cons (make-binding variable value)

@@ -242,7 +242,9 @@
     (lambda (env succeed fail)
       (expression-to-try
        env
-       succeed
+       ;; remove the fail condition we gave.
+       (lambda (vals fail2)
+	 (succeed vals fail))
        (lambda ()
 	 (failure-return
 	  env

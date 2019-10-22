@@ -8615,6 +8615,38 @@
        recurse. However, this requires us modifying the entire
        interpreter.
 
+     - Exercise 4.77: In Section 4.4.3 we saw that not and lisp-value
+       can cause the query language to give "wrong" answers if these
+       filtering operations are applied to frames in which variables
+       are unbound. Devise a way to fix this shortcoming. One idea is
+       to perform the filtering in a "delayed" manner by appending to
+       the frame a "promise" to filter that is fulfilled only when
+       enough variables have been bound to make the operation
+       possible. We could wait to perform filtering until all other
+       operations have been performed. However, for efficiency's sake,
+       we would like to perform filtering as soon as possible so as to
+       cut down on the number of intermediate frames generated.
+
+       The solution is probably to do both. Filter all the input
+       frames that you can, if possible, and then also attach a filter
+       promise, to be done when the query is totally finished. 
+
+       So we need to apply the filter straight away if no variables
+       are unbound, but if any are, we should defer. The easiest way
+       to determine this is instantiating the negated pattern, or just
+       creating a predicate function, unbound-variables? which returns
+       true if variables are unbound.
+
+       The final working solution did just that. I created a list in
+       each frame of functions that would filter the frame
+       afterwards. They take the (new, extended) frame, and either
+       return 'failed or the frame, if it fails or passes the filter,
+       respectively. Then, you apply these filters only after all the
+       evaluation is done, right before you actually display the
+       stream. The catch is that when reconstructing frames you need
+       to make sure to preserve the filter list or you will get
+       unfiltered results.
+
      - Exercise 4.78: Redesign the query language as a
        nondeterministic program to be implemented using the evaluator
        of Section 4.3, rather than as a stream process. In this
@@ -8627,4 +8659,142 @@
        the one implemented here. Can you find examples that illustrate
        this difference?
 
+       The big difference is that since we don't use any interleave
+       operations and the search is methodical and deterministic, the
+       order of results is different. If you try outranked-by, for
+       example, you will first get the list of all the results from
+       the first clause of the or:
+
+       #+BEGIN_SRC scheme
+       (or (supervisor ?staff-person ?boss)
+           (and ...))
+       #+END_SRC
+
+       Because we define disjoin as:
+
+       #+BEGIN_SRC scheme
+       (define (disjoin rulename disjuncts frame-stream)
+        (require disjuncts)
+        (require (not (null? disjuncts)))
+        (amb
+         (qeval rulename (first-disjunct disjuncts) frame-stream)
+         (disjoin rulename (rest-disjuncts disjuncts) frame-stream)))
+       #+END_SRC
+
+       and our amb evaluator will exhaust everything it can get out of
+       the first amb clause (the call to qeval) before moving on to
+       anything else. We avoid loops by printing a single result at a
+       time, rather than using special delay and interleave
+       operations. 
+
+       This difference in print-order is seen at every layer of the
+       evaluator where we would use interleave (conjoin and disjoin
+       mostly). 
+
+       The evaluator is also extremely slow but I think this is just
+       an implementation side-effect (I didn't implement indexing, and
+       we're running a scheme on a scheme on a scheme).
+
+     - Exercise 4.79: When we implemented the Lisp evaluator in
+       Section 4.1, we saw how to use local environments to avoid name
+       conflicts between the parameters of procedures. For example, in
+       evaluating
+
+       #+BEGIN_SRC scheme
+       (define (square x) (* x x))
+       (define (sum-of-squares x y)
+        (+ (square x) (square y)))
+       (sum-of-squares 3 4)
+       #+END_SRC
+
+       there is no confusion between the x in square and the x in
+       sum-of-squares, because we evaluate the body of each procedure
+       in an environment that is specially constructed to contain
+       bindings for the local variables. In the query system, we used
+       a different strategy to avoid name conflicts in applying
+       rules. Each time we apply a rule we rename the variables with
+       new names that are guaranteed to be unique. The analogous
+       strategy for the Lisp evaluator would be to do away with local
+       environments and simply rename the variables in the body of a
+       procedure each time we apply the procedure. 
+
+       Implement for the query language a rule-application method that
+       uses environments rather than renaming. See if you can build on
+       your environment structure to create constructs in the query
+       language for dealing with large systems, such as the rule
+       analog of block-structured procedures. Can you relate any of
+       this to the problem of making deductions in a context (e.g.,
+       "If I supposed that P were true, then I would be able to deduce
+       A and B.") as a method of problem solving? (This problem is
+       open-ended. A good answer is probably worth a Ph.D.)
+
+       An issue with this is that you need multiple return values from
+       a rule -- it has to set all the pattern variables -- and to do
+       this you need to return not a single value but basically
+       something like the frame structure we have. You still need
+       unification, and a mapping of some kind between variables on
+       the 'caller' side and variables on the 'callee' side. This is
+       what frames do. A difference is that a frame continues through
+       the whole process, whereas at each 'boundary' between rules, we
+       would have something that copies needed values 'up' and then
+       discards the lower environment or frame.
+
+       So, we still need frames (or some kind of association between
+       variable and value), but we are using them in a more
+       restricted sense. Pattern matching against basic assertions
+       should work in the same way, since it involves no nesting. 
+
+       But if we also want block-structured rules, this does change
+       things a bit. Now, we need to keep the actual rules themselves
+       in an environment structure. Rules and pattern variables are,
+       unlike a normal scheme's variables and procedures,
+       fundamentally different. So our environment will contain rules
+       as well, so rules change totally. 
+
+       In this model we will need to split unification into two
+       procedures -- one to generate bindings that map back to the
+       parent frame, and another that generate bindings that map to
+       the child. We then instantiate the child, apply the rule, and
+       instantiate the parent.
+
+       But there is a problem with this idea. In unification, variable
+       constraints can pass both ways. Sometimes, a child variable
+       needs to map to an actual pattern, which the parent has
+       provided. 
+
+       For example:
+
+       #+BEGIN_SRC scheme
+       (rule (is-a-cat ?x) (cat ?x))
+       (is-a-cat (f ?t))
+       #+END_SRC
+
+       The problem with this is, how do we show that there is a
+       constraint on x? One possibility is only doing the extra
+       pattern matching after we finish in our 'environment' and when
+       we try to map back to the parent. This would waste a lot of
+       time since we would keep evaluating rules that should fail
+       earlier. 
        
+       Another possibility is to map ?x to (f ?t-2), i.e. rename ?t to
+       a new, unique variable that doesn't appear in the is-a-cat
+       rule. This would require that we analyze all the variables in
+       is-a-cat and generate a new one, which seems impractical,
+       although something like gensym could do it.
+
+       Another possibility is to constrain variable bindings by saying
+       that anything on the right-hand side of a variable binding
+       refers to bindings in the parent. So that way we couldn't
+       confuse the two. Then, we would have to modify pattern matching
+       to switch which part of the environment it was looking at. 
+
+       Another problem is thtat the basic way we have thought about
+       environments is as mutable structures. But our query language
+       was designed as a very functional language. Using streams and
+       mutation at the same time is really asking for trouble. So, do
+       we rip out streams, or add some kind of functional environment?
+       What's the point of a functional environment? 
+
+       A functional environment can still offer 'layers' that we got
+       earlier. The way we used mutation mostly had to do with
+       definitions and set!, which we don't have in our language. 

@@ -233,95 +233,8 @@
    (else
     'failed)))
 	  
-			 
-;; (define (extend-bindings
-;; 	 b1
-;; 	 b2
-;; 	 frame)
-;;   (let* ((var (binding-variable b1))
-;; 	 (val (binding-value b1))
-;; 	 (var2 (binding-variable b2))
-;; 	 (val2 (binding-value b2)))
-;;     (cond
-;;      ((and (not (var? val))
-;; 	   (not (var? val2))
-;; 	   (equal? val val2))
-;;       (extend var val frame))
-;;      ((and (var? val2) (not (var? val)))
-;;       (extend-if-not-failed var2 val2
-;; 			    (extend-if-binding-possible
-;; 			     b1
-;; 			     (binding-in-frame val2 frame)
-;; 			     frame)))
-;;      ((and (var? val) (not (var? val2)))
-;;       (extend-if-not-failed var val
-;; 			    (extend-if-not-failed
-;; 			     (binding-in-frame val frame)
-;; 			     b2
-;; 			     frame)))
-;;      ((and (var? val) (var? val2))
-;;       (let ((binding-1 (binding-in-frame val frame))
-;; 	    (binding-2 (binding-in-frame val2 frame)))
-;; 	(cond
-;; 	 ((and (false? binding-1) (false? binding-2))
-;; 	  (extend-if-not-failed
-;; 	   var val
-;; 	   (extend-if-not-failed
-;; 	    var2 val2 frame)))
-;; 	 ((false? binding-2)
-;; 	  (extend-if-not-failed val2 (binding-value binding-1)
-;; 				frame))
-;; 	 ((false? binding-1)
-;; 	  (extend-if-not-failed val
-;; 				(binding-value binding-2)
-;; 				frame))
-;; 	 (else
-;; 	  (extend-if-not-failed var val
-;; 				(extend-if-not-failed
-;; 				 var2
-;; 				 val2
-;; 				 (extend-if-binding-possible
-;; 				  (binding-in-frame val frame)
-;; 			      (binding-in-frame val2 frame)
-;; 			      frame)))))))
-;;      (else 'failed))))
-
-;; (define (extend-if-binding-possible
-;; 	 b1
-;; 	 b2
-;; 	 frame)
-;;   (cond ((false? b1) 'failed)
-;; 	((eq? frame 'failed) 'failed)
-;; 	((false? b2)
-;; 	 (extend (binding-variable b1)
-;; 		 (binding-value b1)
-;; 		 frame))
-;; 	(else (extend-bindings b1 b2 frame))))
-
-;; (define (bindings-unify
-;; 	 frame1
-;; 	 frame2)
-;;   (cond ((null? frame1) frame2)
-;; 	((null? frame2) frame1)
-;; 	(else
-;; 	 (let* ((b1 (first-binding frame1))
-;; 		(b2 (binding-in-frame (binding-variable b1) frame2))
-;; 		(rest-unified
-;; 		  (bindings-unify
-;; 		   (rest-bindings frame1)
-;; 		   (remove-binding (binding-variable b1) frame2))))
-;; 	     (extend-if-binding-possible
-;; 	      b1
-;; 	      b2
-;; 	      rest-unified)))))
-
-
 
 (define (join-frames frame1 frame2)
-  ;; (require frame1)
-  ;; (require frame2)
-  ;; (require (not (null? frame1)))
-  ;; (require (not (null? frame2)))
   (require (not (eq? 'failed frame1)))
   (require (not (eq? 'failed frame2)))
   (unify-frames frame1 frame2))
@@ -357,14 +270,6 @@
 				 current-frame-stream)
 			  frame-streams)))))
   (conjoin-iter conjuncts frame-stream (list frame-stream)))
-	
-
-;; (define (conjoin conjuncts frame-stream)
-;;   (if (empty-conjunction? conjuncts)
-;;       the-empty-stream
-;;       (join-frames
-;;        (qeval (first-conjunct conjuncts) frame-stream)
-;;        (conjoin (rest-conjuncts conjuncts) frame-stream))))
 (put 'and 'qeval conjoin)
 
 (define (disjoin rulename disjuncts frame-stream)
@@ -383,8 +288,9 @@
 		(negated-query operands)
 		frame)
 	       '())))
-    (require (null? rval))
-    frame))
+    (if (null? rval)
+	frame
+	(amb))))
 (put 'not 'qeval negate)
 
 ;; (define (unique-body call) (car call))
@@ -402,19 +308,15 @@
 ;;    frame-stream))
 ;; (put 'unique 'qeval uniquely-asserted)
 
-;; (define (lisp-value rulename call frame-stream)
-;;   (stream-flatmap
-;;    (lambda (frame)
-;;      (if (execute
-;; 	  (instantiate
-;; 	      call
-;; 	      frame
-;; 	    (lambda (v f)
-;; 	      (error "Unkown pat var: LISP-VALUE" v))))
-;; 	 (singleton-stream frame)
-;; 	 the-empty-stream))
-;;    frame-stream))
-;; (put 'lisp-value 'qeval lisp-value)
+(define (lisp-value rulename call frame)
+  (if (execute
+       (instantiate
+	   call
+	   frame
+	 (lambda (v f) "Unknown pattern variable: LISP-VALUE" v)))
+      frame
+      (amb)))
+(put 'lisp-value 'qeval lisp-value)
 
 (define (execute exp)
   (apply (eval (predicate exp) user-initial-environment)
