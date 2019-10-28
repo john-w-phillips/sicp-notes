@@ -1,3 +1,4 @@
+(define (make-cell x) (error "Bad"))
 (define input-prompt ";;; Query input:")
 (define output-prompt ";;; Query results:")
 (define put-hash (make-hash-table))
@@ -11,9 +12,9 @@
 	  (hash-table-set! new-hash key value)))))
 
 (define (get key ns)
-  (let ((ns-table (hash-ref put-hash ns (lambda () #f))))
+  (let ((ns-table (hash-table-ref put-hash ns (lambda () #f))))
     (if ns-table
-	(hash-ref ns-table key (lambda () #f))
+	(hash-table-ref ns-table key (lambda () #f))
 	#f)))
 (define (prompt-for-input string)
   (newline)
@@ -58,25 +59,31 @@
 	   (display-stream
 	    (stream-map
 	     (lambda (frame)
+	       (display "Environ: ") (newline)
+	       (display frame) (newline)
 	       (%instantiate
 		   q
 		   frame
 		 (lambda (v f)
 		   (contract-question-mark v))))
-	     (qeval false q (singleton-stream the-empty-environment))))
+	     (qeval false q (singleton-stream 
+			     (extend-environment
+			      the-empty-frame
+			      the-empty-environment)))))
 	   (query-driver-loop)))))
 
 (define (%instantiate exp environment unbound-var-handler)
-  (define (copy exp)
+  (define (copy exp env)
     (cond ((var? exp)
-	   (let ((binding (binding-in-environment exp environment)))
-	     (if binding
-		 (copy (binding-value binding))
-		 (unbound-var-handler exp frame))))
+	   (let ((splice (splice-environment-on-binding exp env)))
+	     (if splice
+		 (copy (binding-value (splice-binding splice))
+		       (parent-environment (splice-lower splice)))
+		 (unbound-var-handler exp env))))
 	  ((pair? exp)
-	   (cons (copy (car exp)) (copy (cdr exp))))
+	   (cons (copy (car exp) env) (copy (cdr exp) env)))
 	  (else exp)))
-  (copy exp))
+  (copy exp environment))
 
 (define (qeval rulename query frame-stream)
   (let ((qproc (get (type query) 'qeval)))
@@ -85,227 +92,22 @@
 	(simple-query query frame-stream))))
 
 (define (simple-query query-pattern environment-stream)
-  (stream-flatmap
-   (lambda (environment)
-     (stream-append-delayed
-      (stream-flatmap
-       (lambda (extended-frame)
-	 (singleton-stream (extend-environment
-			    extended-frame
-			    environment)))
-       (find-assertions query-pattern environment))
-      (delay (apply-rules query-pattern environment))))
-   environment-stream))
+    (stream-flatmap
+     (lambda (environment)
+       (stream-append-delayed
+	(find-assertions query-pattern environment)
+	(delay (apply-rules query-pattern environment))))
+     environment-stream))
 
-(define (extend-if-not-failed
-	 var
-	 val
-	 frame)
-  (if (eq? frame 'failed)
-      'failed
-      (extend var val frame)))
-
-
-(define (unify-frames-with-variables
-	 bindings-list
-	 higher-frame
-	 lower-frame)
-  (cond
-   ((null? bindings-list) the-empty-frame)
-   (else
-    (let* ((rest-frame-unified
-	    (unify-frames-with-variables
-	     (cdr bindings-list)
-	     higher-frame
-	     lower-frame)))
-      (cond ((eq? 'failed rest-frame-unified) 'failed)
-	    (else
-	     (let ((unified (unify-binding (car bindings-list)
-					   higher-frame
-					   lower-frame)))
-	       (cond
-		((eq? 'failed unified) 'failed)
-		((eq? 'unbound unified) rest-frame-unified)
-		(else
-		 (begin
-		   (extend (car bindings-list)
-			   unified
-			   rest-frame-unified)))))))))))
-
-(define (get-variable-list frame)
-  (map binding-variable (frame-bindings frame)))
-
-(define (unique a-list)
-  (define (unique-iter output-list a-list)
-    (cond ((null? a-list)
-	   output-list)
-	  ((member (car a-list) output-list)
-	   (unique-iter output-list (cdr a-list)))
-	  (else
-	   (unique-iter (cons (car a-list) output-list)
-			(cdr a-list)))))
-  (unique-iter '() a-list))
 	
-(define (unify-frames	
-	 frame1
-	 frame2)
-  (let ((varslist (unique (append
-			   (get-variable-list frame1)
-			   (get-variable-list frame2)))))
-    (unify-frames-with-variables
-     varslist
-     frame1
-     frame2)))
-
-(define (print-if-middle-manager string binding)
-  (if (and (pair? binding) (not (null? (member 'middle-manager binding))))
-      (begin
-	(display string)
-	(display binding)
-	(newline))
-      '()))
-(define (unify-binding
-	 variable
-	 higher-frame
-	 lower-frame)
-  (let* ((b1 (binding-in-frame variable higher-frame))
-	 (b2 (binding-in-frame variable lower-frame)))
-    (cond
-     ((and (false? b1) (false? b2)) (display "unbound\n") 'unbound)
-     ((false? b1)
-      (binding-value b2))
-     ((false? b2)
-      (binding-value b1))
-     ((equal?  b1 b2)
-      (binding-value b1))
-     ((and (var? (binding-value b1))
-	   (not (var? (binding-value b2))))
-      (check-binding
-       (binding-value b1)
-       (binding-value b2)
-       higher-frame))
-     ((and (var? (binding-value b2))
-	   (not (var? (binding-value b1))))
-      (check-binding
-       (binding-value b2)
-       (binding-value b1)
-       lower-frame))
-     ((and (var? (binding-value b1))
-	   (var? (binding-value b2)))
-      (follow-binding-chain
-       b1
-       b2
-       higher-frame
-       lower-frame))
-
-     (else 'failed))))
-
-(define (follow-binding-chain
-	 b1
-	 b2
-	 higher-frame
-	 lower-frame)
-  (cond
-   ((and (false? b1) (false? b2)) false)
-   ((and (false? b1) (not (false? b2))) (binding-value b2))
-   ((and (false? b2) (not (false? b1))) (binding-value b1))
-   ((and (var? (binding-value b1))
-	 (var? (binding-value b2)))
-    (let ((followed (follow-binding-chain (binding-in-frame (binding-value b1) higher-frame)
-					  (binding-in-frame (binding-value b2) lower-frame)
-					  higher-frame
-					  lower-frame)))
-      (if (false? followed)
-	  (binding-value b2)
-	  followed)))
-   ((and (var? (binding-value b1))
-	 (not (var? (binding-value b2))))
-    (check-binding
-     (binding-value b2)
-     b1
-     higher-frame))
-   ((and (var? (binding-value b2))
-	 (not (var? (binding-value b1))))
-    (check-binding
-     (binding-value b1)
-     b2
-     lower-frame))
-   ((equal? (binding-value b1) (binding-value b2))
-    (binding-value b2))
-   (else 'failed)))
-
-
-(define (check-binding found-value binding-for-chain-variable frame)
-  (cond
-   ((false? binding-for-chain-variable) found-value)
-   ((var? (binding-value binding-for-chain-variable))
-    (let ((binding (binding-in-frame
-		    (binding-value binding-for-chain-variable frame))))
-      (if binding
-	  (check-binding found-value binding frame)
-	  found-value)))
-   ((equal? (binding-value binding-for-chain-variable)
-	    found-value)
-    found-value)
-   (else
-    'failed)))
-
-
-(define (join-frames stream1 stream2)
-  (cond ((empty-stream? stream1)
-	 the-empty-stream)
-	((empty-stream? stream2)
-	 the-empty-stream)
-	(else
-	 (stream-filter (lambda (f)
-			  (not (eq? f 'failed)))
-			(interleave-delayed
-			 (stream-map (lambda (f)
-				       (unify-frames
-					(stream-car stream1)
-					f))
-				     stream2)
-			(delay (join-frames (stream-cdr stream1) stream2)))))))
-
-(define (dependent-clause? current-rulename a-clause)
-  (or (tagged-list? a-clause 'lisp-value)
-      (tagged-list? a-clause 'not)
-      (tagged-list? a-clause current-rulename)))
-
-(define (condense-frames listof-frames)
-  (if (null? (cdr listof-frames))
-      (car listof-frames)
-      (join-frames (car listof-frames)
-		   (condense-frames (cdr listof-frames)))))
 
 (define (conjoin rulename conjuncts frame-stream)
-  (define (conjoin-iter conjuncts current-frame-stream frame-streams)
-    (cond
-     ((empty-conjunction? conjuncts) (condense-frames (reverse frame-streams)))
-     ((dependent-clause? rulename (first-conjunct conjuncts))
-      (let ((eval-result (qeval
-			  rulename
-			  (first-conjunct conjuncts) 
-			  (condense-frames (reverse frame-streams)))))
-	(conjoin-iter (rest-conjuncts conjuncts)
-		      eval-result
-		      (list eval-result))))
-     (else
-      (conjoin-iter (rest-conjuncts conjuncts)
-		    current-frame-stream
-		    (cons (qeval rulename
-				 (first-conjunct conjuncts)
-				 current-frame-stream)
-			  frame-streams)))))
-  (conjoin-iter conjuncts frame-stream (list frame-stream)))
-	
-
-;; (define (conjoin conjuncts frame-stream)
-;;   (if (empty-conjunction? conjuncts)
-;;       the-empty-stream
-;;       (join-frames
-;;        (qeval (first-conjunct conjuncts) frame-stream)
-;;        (conjoin (rest-conjuncts conjuncts) frame-stream))))
+  (if (empty-conjunction? conjuncts)
+      frame-stream
+      (conjoin
+       rulename
+       (rest-conjuncts conjuncts)
+       (qeval rulename (first-conjunct conjuncts) frame-stream))))
 (put 'and 'qeval conjoin)
 
 (define (disjoin rulename disjuncts frame-stream)
@@ -373,50 +175,44 @@
 
 (define (check-assertion assertion query-pat query-environment)
   (let ((match-result
-	 (pattern-match query-pat assertion query-environment
-			the-empty-frame)))
+	 (pattern-match query-pat
+			assertion
+			(extend-environment the-empty-frame query-environment))))
     (if (eq? match-result 'failed)
 	the-empty-stream
 	(singleton-stream match-result))))
 
-(define (pattern-match pat dat query-environment frame)
-  (begin 
-    (display "MATCH ")
-    (display pat)
-    (display dat)
-    (newline))
-  (cond ((eq? frame 'failed) 'failed)
-	((equal? pat dat) frame)
+(define (pattern-match pat dat query-environment)
+  (cond ((eq? query-environment 'failed) 'failed)
+	((equal? pat dat) query-environment)
 	((var? dat) (error "Var is dat"))
-	((var? pat) (extend-if-consistent pat dat query-environment frame))
+	((var? pat) (extend-if-consistent pat dat query-environment))
 	((and (pair? pat) (pair? dat))
 	 (pattern-match
 	  (cdr pat)
 	  (cdr dat)
-	  query-environment
-	  (pattern-match (car pat) (car dat) query-environment frame)))
+	  (pattern-match (car pat) (car dat) query-environment)))
 	(else 'failed)))
 
-(define (make-frame-delegate
-	 environment
-	 extender)
-  (lambda (message . args)
-    (cond
-     ((eq? message 'extend)
-      (extender (car args) (cadr args) (caddr args)))
-     ((eq? message 'environment)
-      (environment (car args))))))
 
-	 
-(define (extend-if-consistent var dat query-environment frame)
-  (let ((binding (binding-in-environment var (extend-environment frame
-								 query-environment))))
-    (if binding
-	(pattern-match (binding-value binding) dat query-environment
-		       frame)
-	(begin
-	  (display "NOVAL\n")
-	  (extend-frame var dat frame)))))
+(define (extend-if-consistent var dat query-environment)
+  (let ((splice
+	 (splice-environment-on-binding var query-environment)))
+    (if splice
+	(let ((patmatch
+	       (pattern-match (binding-value (splice-binding splice))
+			      dat
+			      (parent-environment (splice-lower splice)))))
+	  (if (eq? patmatch 'failed)
+	      'failed
+	      (concat-splice
+	       (splice-upper splice)
+	       (extend-environment
+		(first-frame (splice-lower splice))
+		patmatch))))
+	  (extend-environment
+	   (extend-frame var dat (first-frame query-environment))
+	   (parent-environment query-environment)))))
 
 (define (apply-rules pattern frame)
   (stream-flatmap (lambda (rule)
@@ -425,7 +221,8 @@
 
 (define (apply-a-rule rule query-pattern environment)
   (let ((new-frame (unify-match query-pattern
-				(conclusion rule))))
+				(conclusion rule)
+				the-empty-frame)))
     (if (eq? new-frame 'failed)
 	the-empty-stream
 	(qeval
@@ -723,21 +520,52 @@ pattern-match to work.
 
 
 
-(define (make-frame bindings)
-  bindings)
-
 (define the-empty-environment '())
+(define (environment-frame? e)
+  (= (length e) 3))
 
-(define (extend-environment env env-frame)
-  (cons env-frame env))
+(define (extend-environment env-frame env)
+  (cond ((not (environment-frame? env-frame))
+	 (error "Invalid frame" env-frame))
+	((not (or (pair? env) (null? env)))
+	 (error "Invalid environment" env))
+	(else
+	 (cons env-frame env))))
+
+(define (splice-environment-on-binding variable environment)
+  (define (iter current-upper-part current-lower-part)
+    (if (null? current-lower-part)
+	false
+	(let ((binding (binding-in-frame variable (first-frame current-lower-part))))
+	  (if binding
+	      (list binding current-upper-part current-lower-part)
+	      (iter (extend-environment (first-frame current-lower-part) current-upper-part)
+		    (parent-environment current-lower-part))))))
+  (iter '() environment))
+(define (splice-binding splice)
+  (car splice))
+(define (splice-upper splice)
+  (cadr splice))
+(define (splice-lower splice)
+  (caddr splice))
+(define (concat-splice upper lower)
+  (append upper lower))
+
 (define (binding-in-environment variable environment)
   (if (null? environment)
       false
-      (let ((binding (binding-in-frame variable environment)))
+      (let ((binding (binding-in-frame variable (car environment))))
 	(if binding
 	    binding
 	    (binding-in-environment variable (cdr environment))))))
 
+(define (parent-environment env)
+  (cdr env))
+(define (first-frame env)
+  (let ((thecar (car env)))
+    (if (environment-frame? thecar)
+	thecar
+	(error "Not an environment frame -- FIRST-FRAME" env))))
 
 (define (make-environment-frame parent-variable-mappings
 				variable-bindings
@@ -839,7 +667,3 @@ pattern-match to work.
 (define (rest-bindings frame)
   (cdr frame))
 
-(define (extend variable value frame)
-   (cons (make-binding variable value)
-	 frame))
-	 
