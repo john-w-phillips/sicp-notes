@@ -1,4 +1,4 @@
-(define (make-cell x) (error "Bad"))
+(load-option 'format)
 (define input-prompt ";;; Query input:")
 (define output-prompt ";;; Query results:")
 (define put-hash (make-hash-table))
@@ -121,12 +121,17 @@
 (define (negate rulename operands frame-stream)
   (stream-flatmap
    (lambda (frame)
-     (if (stream-null?
-	  (qeval rulename
-		 (negated-query operands)
-		 (singleton-stream frame)))
-	 (singleton-stream frame)
-	 the-empty-stream))
+     (let ((qeval-result (qeval rulename
+				(negated-query operands)
+				(singleton-stream frame))))
+       (if (stream-null?
+	    qeval-result)
+	   (singleton-stream frame)
+	   (begin
+	     (display "QEVAL: ")
+	     (display qeval-result)
+	     (newline)
+	     the-empty-stream))))
    frame-stream))
 (put 'not 'qeval negate)
 
@@ -177,13 +182,14 @@
   (let ((match-result
 	 (pattern-match query-pat
 			assertion
-			(extend-environment the-empty-frame query-environment))))
+			query-environment)))
     (if (eq? match-result 'failed)
 	the-empty-stream
 	(singleton-stream match-result))))
 
 (define (pattern-match pat dat query-environment)
-  (cond ((eq? query-environment 'failed) 'failed)
+  (cond ((eq? query-environment 'failed)
+	 (trace-fail 'pattern-match "Recursive fail" query-environment))
 	((equal? pat dat) query-environment)
 	((var? dat) (error "Var is dat"))
 	((var? pat) (extend-if-consistent pat dat query-environment))
@@ -192,7 +198,11 @@
 	  (cdr pat)
 	  (cdr dat)
 	  (pattern-match (car pat) (car dat) query-environment)))
-	(else 'failed)))
+	(else (trace-fail 'pattern-match
+			  (format #f "Pattern: ~a and data: ~a do not match"
+				  pat
+				  dat)
+			  query-environment))))
 
 
 (define (extend-if-consistent var dat query-environment)
@@ -218,19 +228,57 @@
   (stream-flatmap (lambda (rule)
 		    (apply-a-rule rule pattern frame))
 		  (fetch-rules pattern frame)))
+(define *is-tracing-on* false)
+(define (set-tracing) (set! *is-tracing-on* true) 'tracing-on)
+(define (stop-tracing) (set! *is-tracing-on* false) 'tracing-off)
+(define (trace-fail identifier message environment)
+  (if *is-tracing-on*
+    (begin
+      (format #t "Failing from ~a message: ~a~%" identifier message)
+      (format #t " ENV: ~a~%" environment)
+      'failed)
+    'failed))
+
+(define (scan-rule-for-vars rule-body frame)
+  (cond
+   ((eq? frame 'failed) 'failed)
+   ((null? rule-body) frame)
+   ((var? rule-body)
+    (if (or (binding-in-frame rule-body frame)
+	    (bound-in-parents? rule-body frame))
+	frame
+	(add-declared rule-body frame)))
+   ((pair? rule-body)
+    (scan-rule-for-vars
+     (car rule-body)
+     (scan-rule-for-vars
+      (cdr rule-body)
+      frame)))
+   (else frame)))
+
+(define (add-declared var frame)
+  (extend-parent-binding-in-frame #f var frame))
 
 (define (apply-a-rule rule query-pattern environment)
-  (let ((new-frame (unify-match query-pattern
-				(conclusion rule)
-				the-empty-frame)))
-    (if (eq? new-frame 'failed)
-	the-empty-stream
-	(qeval
-	 (rule-name rule)
-	 (rule-body rule)
-	 (singleton-stream (extend-environment
-			    new-frame
-			    environment))))))
+  (let ((new-env (unify-match query-pattern
+			      (conclusion rule)
+			      (extend-environment the-empty-frame environment))))
+    (let ((scanned-env
+	   (extend-environment
+	    (scan-rule-for-vars (rule-body rule)
+				(first-frame new-env))
+	    (parent-environment new-env))))
+      (format #t "Frame on pat ~a rule ~a: ~a~%" rule query-pattern
+	      (first-frame scanned-env))
+      (if (eq? scanned-env 'failed)
+	  the-empty-stream
+	  (stream-map
+	   (lambda (environ)
+	     (collapse-environment-by-one environ))
+	   (qeval
+	    (rule-name rule)
+	    (rule-body rule)
+	    (singleton-stream scanned-env)))))))
 
 ;; (define (apply-a-rule rule query-pattern query-frame)
 ;;   (let ((clean-rule (rename-variables-in rule)))
@@ -274,34 +322,39 @@ parent variables. The parent variable expressions will, on a pattern
 match, need to be 'resolved'. So a challenge left is to modify
 pattern-match to work.
 |#
-(define (unify-match parent-pat child-pat env-frame)
-  (cond ((eq? env-frame 'failed) 'failed)
-	((and (null? parent-pat) (null? child-pat)) env-frame)
-	((var? parent-pat) (extend-parent-binding parent-pat child-pat env-frame))
-	((var? child-pat) (extend-child-binding child-pat parent-pat env-frame))
+(define (unify-match parent-pat child-pat env)
+  (cond ((eq? env 'failed) (trace-fail 'unify-match "Recursive fail case" env))
+	((and (null? parent-pat) (null? child-pat)) env)
+	((var? parent-pat) (extend-parent-binding parent-pat child-pat env))
+	((var? child-pat) (extend-child-binding child-pat parent-pat env))
 	((and (pair? parent-pat) (pair? child-pat))
 	 (unify-match (cdr parent-pat)
 		      (cdr child-pat)
 		      (unify-match (car parent-pat)
 				   (car child-pat)
-				   env-frame)))
-	((equal? parent-pat child-pat) env-frame)
-	(else 'failed)))
+				   env)))
+	((equal? parent-pat child-pat) env)
+	(else (trace-fail 'unify-match "Bad child/parent pair" env))))
 
-(define (extend-child-binding child-pat parent-pat env-frame)
-  (let ((binding (binding-in-frame child-pat env-frame)))
+(define (extend-child-binding child-pat parent-pat env)
+  (let ((binding (binding-in-frame child-pat (first-frame env))))
     (cond (binding
-	   (unify-match parent-pat (binding-value binding) env-frame))
-	  (else (extend-frame child-pat parent-pat env-frame)))))
+	   (unify-match parent-pat (binding-value binding) env))
+	  (else (extend-environment
+		 (extend-frame child-pat parent-pat
+			       (first-frame env))
+		 (parent-environment env))))))
 
-(define (extend-parent-binding parent-pat child-pat env-frame)
-  (let ((binding (parent-binding-in-frame parent-pat env-frame)))
+(define (extend-parent-binding parent-pat child-pat env)
+  (let ((binding (binding-in-environment parent-pat env)))
     (cond (binding
-	   (unify-match parent-pat (binding-value binding) env-frame))
-	  (else (extend-parent-binding-in-frame
-		 parent-pat
-		 child-pat
-		 env-frame)))))
+	   (unify-match (binding-value binding) child-pat env))
+	  (else (extend-environment
+		 (extend-parent-binding-in-frame
+		  parent-pat
+		  child-pat
+		  (first-frame env))
+		 (parent-environment env))))))
 
 (define (extend-if-possible var val
 			    frame)
@@ -532,16 +585,31 @@ pattern-match to work.
 	(else
 	 (cons env-frame env))))
 
+(define (bound-in-parents? variable frame)
+  (if (not (null? (filter
+		   (lambda (cell)
+		     (equal? (binding-value cell) variable))
+		   (environment-frame-parent-mappings frame))))
+      true
+      false))
+
 (define (splice-environment-on-binding variable environment)
   (define (iter current-upper-part current-lower-part)
     (if (null? current-lower-part)
 	false
 	(let ((binding (binding-in-frame variable (first-frame current-lower-part))))
-	  (if binding
-	      (list binding current-upper-part current-lower-part)
-	      (iter (extend-environment (first-frame current-lower-part) current-upper-part)
-		    (parent-environment current-lower-part))))))
+	  (cond
+	   (binding (list binding current-upper-part current-lower-part))
+	   ((bound-in-parents? variable (first-frame current-lower-part))
+	    ;; if the variable is pointed to by a parent 'binding' but not
+	    ;; actually bound yet, it should be bound at some point, and 
+	    ;; should not be considered 'bound' if a parent frame has it.
+	    false)
+	   (else
+	    (iter (extend-environment (first-frame current-lower-part) current-upper-part)
+		  (parent-environment current-lower-part)))))))
   (iter '() environment))
+
 (define (splice-binding splice)
   (car splice))
 (define (splice-upper splice)
@@ -555,9 +623,12 @@ pattern-match to work.
   (if (null? environment)
       false
       (let ((binding (binding-in-frame variable (car environment))))
-	(if binding
-	    binding
-	    (binding-in-environment variable (cdr environment))))))
+	(cond
+	 (binding
+	  binding)
+	 ((bound-in-parents? variable (first-frame environment))
+	  false)
+	 (else (binding-in-environment variable (cdr environment)))))))
 
 (define (parent-environment env)
   (cdr env))
@@ -594,6 +665,8 @@ pattern-match to work.
 
 (define (parent-binding-in-frame variable frame)
   (assoc variable (environment-frame-parent-mappings frame)))
+(define (binding-from-bindings variable bindings)
+  (assoc variable bindings))
 
 (define (environment-frame-parent-mappings frame)
   (car frame))
@@ -632,6 +705,22 @@ pattern-match to work.
    (environment-frame-bindings frame)
    (environment-frame-rule-bindings frame)))
 
+(define (extend-bindings var val bindings)
+  (cons (cons var val) bindings))
+
+;; Take a 'lower' frame from a rule application
+;; or pattern match, and merge it up into the parent frame.
+;;
+;; This involves:
+;; 1. eliminating any local bindings except
+;; 2. Any bindings in the lower frame parent mappings,
+;;    These bindings are in the form (parent-variable -> child-variable),
+;;    i.e. parent bound to child var. Any variable found in this form
+;;    will be 'collapsed', the parent-variable binding will take on the value
+;;    of the child-variable binding.
+;;
+;; The reutrned frame has the same local bindings as the parent (env-to-instantiate),
+;; except ones bound transitively in the child through parent bindings.
 (define (instantiate-environment-frame
 	 env-to-instantiate
 	 env-instantiate-from)
@@ -639,24 +728,46 @@ pattern-match to work.
     (if (null? child-mappings)
 	parent-bindings
 	(let ((first-child-binding (first-binding child-mappings)))
-	  (let ((parent-binding (binding-in-frame
+	  (let ((parent-binding (binding-from-bindings
 				 (binding-variable
 				  first-child-binding)
 				 parent-bindings)))
 	    (if parent-binding
-		(error "binding already exists")
-		(iterate-mappings (rest-bindings child-mappings)
-				  (extend-parent-binding
-				   (binding-variable first-child-binding)
-				   first-child-binding
-				   (environment-frame-bindings
-				    env-instantiate-from)
-				   parent-bindings)))))))
+		(error "binding already exists" parent-binding)
+		(let ((child-variable-binding
+			(binding-from-bindings 
+			 (binding-value first-child-binding)
+			 (environment-frame-bindings
+			  env-instantiate-from))))
+		  (if child-variable-binding
+		      (iterate-mappings (rest-bindings child-mappings)
+					(extend-bindings
+					 (binding-variable first-child-binding)
+					 (binding-value child-variable-binding)
+					 parent-bindings))
+		      (iterate-mappings (rest-bindings child-mappings)
+					parent-bindings))))))))
+
   (let ((mappings (environment-frame-parent-mappings env-instantiate-from)))
     (let ((parent-bindings (environment-frame-bindings
 			    env-to-instantiate)))
-      (iterate-mappings mappings parent-bindings))))
+      (make-environment-frame
+       (environment-frame-parent-mappings env-to-instantiate)
+       (iterate-mappings mappings parent-bindings)
+       (environment-frame-rule-bindings env-to-instantiate)))))
 
+(define (collapse-environment-by-one
+	 environment)
+  (if (or (null? environment) (null? (cdr environment)))
+      environment
+      (let ((first (car environment))
+	    (second (cadr environment))
+	    (rest (cddr environment)))
+	(extend-environment
+	 (instantiate-environment-frame
+	  second
+	  first)
+	 rest))))
 ;; (define (remove-binding variable frame)
 ;;   (filter (lambda (binding)
 ;; 	    (not (equal? (binding-variable binding) variable)))
