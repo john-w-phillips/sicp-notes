@@ -3,6 +3,8 @@
 (define output-prompt ";;; Query results:")
 (define put-hash (make-hash-table))
 (define the-empty-stream '())
+
+
 (define (put key ns value)
   (let ((ns-table (hash-table-ref put-hash ns (lambda () #f))))
     (if ns-table
@@ -48,19 +50,17 @@
 (define (query-driver-loop)
   (prompt-for-input input-prompt)
   (let ((q (query-syntax-process (read))))
-    (cond ((assertion-to-be-added? q)
-	   (add-rule-or-assertion! (add-assertion-body q))
-	   (newline)
-	   (display "assertion added to data base.")
-	   (query-driver-loop))
+    (cond ;; ((assertion-to-be-added? q)
+	  ;;  (add-rule-or-assertion! (add-assertion-body q))
+	  ;;  (newline)
+	  ;;  (display "assertion added to data base.")
+	  ;;  (query-driver-loop))
 	  (else
 	   (newline)
 	   (announce-output output-prompt)
 	   (display-stream
 	    (stream-map
 	     (lambda (frame)
-	       (display "Environ: ") (newline)
-	       (display frame) (newline)
 	       (%instantiate
 		   q
 		   frame
@@ -69,7 +69,7 @@
 	     (qeval false q (singleton-stream 
 			     (extend-environment
 			      the-empty-frame
-			      the-empty-environment)))))
+			      the-global-environment)))))
 	   (query-driver-loop)))))
 
 (define (%instantiate exp environment unbound-var-handler)
@@ -110,6 +110,26 @@
        (qeval rulename (first-conjunct conjuncts) frame-stream))))
 (put 'and 'qeval conjoin)
 
+(define (query-debug rulename ignore1 ignore2)
+  (debug)
+  the-empty-stream)
+(put 'debug 'qeval query-debug)
+
+(define (store-rule cur-rulename new-rule-expr environment-stream)
+  (let ((actual-expr (car new-rule-expr)))
+    (begin
+      (if (rule? actual-expr)
+	  (stream-map
+	   (lambda (environment)
+	     (add-rule-binding-to-frame!
+	      actual-expr
+	      (first-frame environment))
+	     environment)
+	   environment-stream)
+	  (add-assertion! actual-expr))
+      the-empty-stream)))
+(put 'assert! 'qeval store-rule)
+
 (define (disjoin rulename disjuncts frame-stream)
   (if (empty-disjunction? disjuncts)
       the-empty-stream
@@ -127,11 +147,7 @@
        (if (stream-null?
 	    qeval-result)
 	   (singleton-stream frame)
-	   (begin
-	     (display "QEVAL: ")
-	     (display qeval-result)
-	     (newline)
-	     the-empty-stream))))
+	   the-empty-stream)))
    frame-stream))
 (put 'not 'qeval negate)
 
@@ -224,10 +240,10 @@
 	   (extend-frame var dat (first-frame query-environment))
 	   (parent-environment query-environment)))))
 
-(define (apply-rules pattern frame)
+(define (apply-rules pattern environment)
   (stream-flatmap (lambda (rule)
-		    (apply-a-rule rule pattern frame))
-		  (fetch-rules pattern frame)))
+		    (apply-a-rule rule pattern environment))
+		  (fetch-rules pattern environment)))
 (define *is-tracing-on* false)
 (define (set-tracing) (set! *is-tracing-on* true) 'tracing-on)
 (define (stop-tracing) (set! *is-tracing-on* false) 'tracing-off)
@@ -258,27 +274,43 @@
 
 (define (add-declared var frame)
   (extend-parent-binding-in-frame #f var frame))
+(define (scan-for-local-rules rule env)
+  (let ((rule-body-forms (cddr rule)))
+    (define (scan-body body)
+      (if (null? body) (list env body)
+	  (let ((form-tag (caar body)))
+	    (if (eq? form-tag 'assert!)
+		(begin (qeval
+			(rule-name rule)
+			(car body)
+			(singleton-stream env))
+		       (scan-body (cdr body)))
+		(list env (car body))))))
+    (scan-body rule-body-forms)))
 
+	  
 (define (apply-a-rule rule query-pattern environment)
   (let ((new-env (unify-match query-pattern
 			      (conclusion rule)
 			      (extend-environment the-empty-frame environment))))
-    (let ((scanned-env
-	   (extend-environment
-	    (scan-rule-for-vars (rule-body rule)
-				(first-frame new-env))
-	    (parent-environment new-env))))
-      (format #t "Frame on pat ~a rule ~a: ~a~%" rule query-pattern
-	      (first-frame scanned-env))
-      (if (eq? scanned-env 'failed)
+    (let* ((scanned-env
+	   (if (eq? new-env 'failed) 'failed
+	       (extend-environment
+		(scan-rule-for-vars (rule-body rule)
+				    (first-frame new-env))
+		(parent-environment new-env))))
+	  (env-with-rules-and-body
+	   (if (eq? scanned-env 'failed) 'failed
+	       (scan-for-local-rules rule scanned-env))))
+      (if (eq? env-with-rules-and-body 'failed)
 	  the-empty-stream
 	  (stream-map
 	   (lambda (environ)
 	     (collapse-environment-by-one environ))
 	   (qeval
 	    (rule-name rule)
-	    (rule-body rule)
-	    (singleton-stream scanned-env)))))))
+	    (cadr env-with-rules-and-body)
+	    (singleton-stream (car env-with-rules-and-body))))))))
 
 ;; (define (apply-a-rule rule query-pattern query-frame)
 ;;   (let ((clean-rule (rename-variables-in rule)))
@@ -345,6 +377,7 @@ pattern-match to work.
 			       (first-frame env))
 		 (parent-environment env))))))
 
+
 (define (extend-parent-binding parent-pat child-pat env)
   (let ((binding (binding-in-environment parent-pat env)))
     (cond (binding
@@ -403,10 +436,23 @@ pattern-match to work.
     (if s s the-empty-stream)))
 
 (define the-rules the-empty-stream)
-(define (fetch-rules pattern frame)
-  (if (use-index? pattern)
-      (get-indexed-rules pattern)
-      (get-all-rules)))
+(define (fetch-rules pattern environment)
+  (if (pair? pattern)
+      (fetch-all-rules (car pattern) environment)
+      the-empty-stream))
+
+(define (fetch-all-rules name environment)
+  (cond
+   ((null? environment) the-empty-stream)
+   (else
+    (let ((assoc-result (assoc name (environment-frame-rule-bindings
+				     (first-frame environment)))))
+      (if assoc-result
+	  (cons-stream
+	   (cdr assoc-result)
+	   (fetch-all-rules name (parent-environment environment)))
+	  (fetch-all-rules name (parent-environment environment)))))))
+
 (define (get-all-rules) the-rules)
 (define (get-indexed-rules pattern)
   (stream-append
@@ -646,6 +692,8 @@ pattern-match to work.
    variable-bindings
    procedure-bindings))
 (define the-empty-frame (make-environment-frame '() '() '()))
+(define the-empty-environment (list the-empty-frame))
+(define the-global-environment (list the-empty-frame))
 (define (extend-frame var val frame)
   (make-environment-frame
    (environment-frame-parent-mappings frame)
@@ -653,13 +701,26 @@ pattern-match to work.
 	 (environment-frame-bindings frame))
    (environment-frame-rule-bindings frame)))
 
+(define (extend-frame-with-rule rule-expr frame)
+  (make-environment-frame
+   (environment-frame-parent-mappings frame)
+   (environment-frame-bindings frame)
+   (cons rule-expr (environment-frame-rule-bindings frame))))
+
+(define (add-rule-binding-to-frame! binding-form frame)
+  (set-car! (cddr frame) (cons (cons (rule-name binding-form) binding-form)
+			       (caddr frame))))
+(define (rule-binding-in-frame rule-name frame)
+  (assoc rule-name frame))
 
 (define (make-binding variable value)
   (cons variable value))
 
 (define (binding-variable binding) (car binding))
 (define (binding-value binding) (cdr binding))
-
+(define (rule-binding-in-frame rulename frame)
+  (assoc rulename frame))
+ 
 (define (binding-in-frame variable frame)
   (assoc variable (environment-frame-bindings frame)))
 
@@ -672,6 +733,7 @@ pattern-match to work.
   (car frame))
 (define (environment-frame-bindings frame)
   (cadr frame))
+
 (define (environment-frame-rule-bindings frame)
   (caddr frame))
 
@@ -733,7 +795,9 @@ pattern-match to work.
 				  first-child-binding)
 				 parent-bindings)))
 	    (if parent-binding
-		(error "binding already exists" parent-binding)
+		;; If the parent has a binding, it 'shadows' the child binding.
+		(iterate-mappings (rest-bindings child-mappings)
+				  parent-bindings)
 		(let ((child-variable-binding
 			(binding-from-bindings 
 			 (binding-value first-child-binding)
@@ -777,4 +841,3 @@ pattern-match to work.
   (car bindings-list))
 (define (rest-bindings frame)
   (cdr frame))
-
