@@ -67,9 +67,7 @@
 		 (lambda (v f)
 		   (contract-question-mark v))))
 	     (qeval false q (singleton-stream 
-			     (extend-environment
-			      the-empty-frame
-			      the-global-environment)))))
+			      the-global-environment))))
 	   (query-driver-loop)))))
 
 (define (%instantiate exp environment unbound-var-handler)
@@ -118,15 +116,14 @@
 (define (store-rule cur-rulename new-rule-expr environment-stream)
   (let ((actual-expr (car new-rule-expr)))
     (begin
-      (if (rule? actual-expr)
-	  (stream-map
-	   (lambda (environment)
+      (stream-map
+       (lambda (environment)
+	 (if (rule? actual-expr)
 	     (add-rule-binding-to-frame!
 	      actual-expr
 	      (first-frame environment))
-	     environment)
-	   environment-stream)
-	  (add-assertion! actual-expr))
+	     (add-assertion-to-frame! actual-expr (first-frame environment))))
+       environment-stream)
       the-empty-stream)))
 (put 'assert! 'qeval store-rule)
 
@@ -292,7 +289,7 @@
 (define (apply-a-rule rule query-pattern environment)
   (let ((new-env (unify-match query-pattern
 			      (conclusion rule)
-			      (extend-environment the-empty-frame environment))))
+			      (extend-environment (the-empty-frame) environment))))
     (let* ((scanned-env
 	   (if (eq? new-env 'failed) 'failed
 	       (extend-environment
@@ -302,6 +299,7 @@
 	  (env-with-rules-and-body
 	   (if (eq? scanned-env 'failed) 'failed
 	       (scan-for-local-rules rule scanned-env))))
+      (if (eq? (rule-name rule) 'helper-rule) (debug))
       (if (eq? env-with-rules-and-body 'failed)
 	  the-empty-stream
 	  (stream-map
@@ -421,10 +419,16 @@ pattern-match to work.
   (tree-walk exp))
 
 (define the-assertions the-empty-stream)
-(define (fetch-assertions pattern frame)
-  (if (use-index? pattern)
-      (get-indexed-assertions pattern)
-      (get-all-assertions)))
+;; (define (fetch-assertions pattern frame)
+;;   (if (use-index? pattern)
+;;       (get-indexed-assertions pattern)
+;;       (get-all-assertions)))
+
+(define (fetch-assertions pattern environment)
+  (if (eq? environment '()) the-empty-stream
+      (stream-append-delayed
+       (get-assertions-in-frame pattern (first-frame environment))
+       (delay (fetch-assertions pattern (parent-environment environment))))))
 
 (define (get-all-assertions) the-assertions)
 
@@ -621,7 +625,7 @@ pattern-match to work.
 
 (define the-empty-environment '())
 (define (environment-frame? e)
-  (= (length e) 3))
+  (= (length e) 4))
 
 (define (extend-environment env-frame env)
   (cond ((not (environment-frame? env-frame))
@@ -686,30 +690,43 @@ pattern-match to work.
 
 (define (make-environment-frame parent-variable-mappings
 				variable-bindings
-				procedure-bindings)
+				procedure-bindings
+				assertion-bindings)
   (list
    parent-variable-mappings
    variable-bindings
-   procedure-bindings))
-(define the-empty-frame (make-environment-frame '() '() '()))
-(define the-empty-environment (list the-empty-frame))
-(define the-global-environment (list the-empty-frame))
+   procedure-bindings
+   assertion-bindings))
+
+(define (the-empty-frame) (make-environment-frame '() '() '() '()))
+(define (the-empty-environment) (list (the-empty-frame)))
+(define the-global-environment (list (the-empty-frame)))
 (define (extend-frame var val frame)
   (make-environment-frame
    (environment-frame-parent-mappings frame)
    (cons (make-binding var val)
 	 (environment-frame-bindings frame))
-   (environment-frame-rule-bindings frame)))
+   (environment-frame-rule-bindings frame)
+   (environment-frame-assertions frame)))
 
 (define (extend-frame-with-rule rule-expr frame)
   (make-environment-frame
    (environment-frame-parent-mappings frame)
    (environment-frame-bindings frame)
-   (cons rule-expr (environment-frame-rule-bindings frame))))
+   (cons rule-expr (environment-frame-rule-bindings frame))
+   (environment-frame-assertions frame)))
 
 (define (add-rule-binding-to-frame! binding-form frame)
   (set-car! (cddr frame) (cons (cons (rule-name binding-form) binding-form)
 			       (caddr frame))))
+
+(define (get-assertions-in-frame pat frame)
+  (list->stream (list-ref frame 3)))
+
+(define (add-assertion-to-frame! assertion-form frame)
+  (set-car! (cdddr frame) (cons  assertion-form
+				 (list-ref frame 3))))
+
 (define (rule-binding-in-frame rule-name frame)
   (assoc rule-name frame))
 
@@ -736,6 +753,9 @@ pattern-match to work.
 
 (define (environment-frame-rule-bindings frame)
   (caddr frame))
+
+(define (environment-frame-assertions frame)
+  (list-ref frame 3))
 
 ;; (define (extend-parent-binding
 ;; 	 variable
@@ -765,7 +785,8 @@ pattern-match to work.
    (cons (make-binding variable value)
 	 (environment-frame-parent-mappings frame))
    (environment-frame-bindings frame)
-   (environment-frame-rule-bindings frame)))
+   (environment-frame-rule-bindings frame)
+   (environment-frame-assertions frame)))
 
 (define (extend-bindings var val bindings)
   (cons (cons var val) bindings))
@@ -818,7 +839,8 @@ pattern-match to work.
       (make-environment-frame
        (environment-frame-parent-mappings env-to-instantiate)
        (iterate-mappings mappings parent-bindings)
-       (environment-frame-rule-bindings env-to-instantiate)))))
+       (environment-frame-rule-bindings env-to-instantiate)
+       (environment-frame-assertions env-to-instantiate)))))
 
 (define (collapse-environment-by-one
 	 environment)
