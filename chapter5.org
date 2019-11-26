@@ -1025,12 +1025,12 @@ operations of the evaluator register machine.
 
 	 #+BEGIN_SRC scheme
          (controller
-          (assign (reg p) (const 1)) ;; set product to 1.
-          (assign (reg c) (reg n))   ;; set counter to n.
+          (assign p (const 1)) ;; set product to 1.
+          (assign c (reg n))   ;; set counter to n.
           expt-iter
           (test (op =) (reg c) (const 0)) ;; if counter is 0, exit.
           (branch (label expt-done))
-          (assign val (op *) (reg b) (reg p)) ;; otherwise, multiply b and p.
+          (assign p (op *) (reg b) (reg p)) ;; otherwise, multiply b and p.
           (assign c (op -) (reg c) (const 1))
           (goto (label expt-iter))
           expt-done)
@@ -1041,7 +1041,513 @@ operations of the evaluator register machine.
          at least one recursive call). Show the contents of the stack
          at each significant point in the execution.
 
-	 
+       - Exercise 5.6: Ben Bitdiddle observes that the Fibonacci
+         machine's controller sequence has an extra save and an extra
+         restore, which can be removed to make a faster. Where are
+         these instructions?
+
+         #+BEGIN_SRC scheme
+	   (controller
+	    (assign continue (label fib-done))
+	    fib-loop
+	    (test (op <) (reg n) (const 2))
+	    (branch (label immediate-answer))
+	    ;; set up to compute Fib(n-1)
+	    (save continue)
+	    (assign continue (label afterfib-n-1))
+	    (save n)
+	    (assign n (op -) (reg n) (const 1))
+	    (goto (label fib-loop))
+	    afterfib-n-1
+	    (restore n)
+	    ;; The lines marked 'redundant:' were unnecessary.
+	    ;; redundant: (restore continue)
+	    ;; set up to compute Fib(n-2)
+	    (assign n (op -) (reg n) (const 2))
+	    ;; redundant: (save continue)
+	    (assign continue (label afterfib-n-2))
+	    (save val)
+	    (goto (label fib-loop))
+	    afterfib-n-2
+	    (assign n (reg val))
+	    (restore val)
+	    (restore continue)
+	    (assign val (op +) (reg val) (reg n))
+	    (goto (reg continue))
+	    immediate-answer
+	    (assign val (reg n))
+	    (goto (reg continue))
+	    fib-done)
+       #+END_SRC	 
+
+*** 5.1.5 Instruction Summary	 
+    A controller instruction in our register-machine language has one
+    of the following forms, where each <input_i> is either (reg
+    <register-name>) or (const <constant-value>). These instructions
+    were introduced in Section 5.1.1:
+
+    #+BEGIN_SRC scheme
+    (assign <register-name>  (reg <register-name>))
+    (assign <register-name> (const <constant-value>))
+    (assign <register-name>
+            (op <operation-name>)
+            <input1> ... <inputn>)
+    (perform (op <operation-name>) <input1> ... <inputn>)
+    (test (op <operation-name>) <input1> ... <inputn>)
+    (branch (label <label-name>))
+    (goto (label <label-name>))
+    #+END_SRC
+
+    The use of registers to hold labels was introduced in Section
+    5.1.3:
+
+    #+BEGIN_SRC scheme
+    (assign <register-name> (label <label-name>))
+    (goto (reg <register-name>))
+    #+END_SRC
+
+    Instructions to use the stack were introduced in Section 5.1.4:
+
+    #+BEGIN_SRC scheme
+    (save <register-name>)
+    (restore <register-name>)
+    #+END_SRC
+
+    The only kind of <constant-value> we have seen so far is a number,
+    but later we will use strings, symbols, and lists. For example,
+
+    #+BEGIN_SRC scheme
+    (const "abc") is the string "abc",
+    (const abc) is the symbol abc,
+    (const (a b c)) is the list (a b c),
+    and (const ()) is the empty list.
+    #+END_SRC
+
+** 5.2 A Register-Machine Simulator
+   In order to gain a good understanding of the design of register
+   machines, we must test the machines we design to see if they
+   perform as expected. One way to test a design is to hand-simulate
+   the operation of the controller, as in Exercise 5.5. But this is
+   extremely tedious for all but the simplest machines. In this
+   section we construct a simulator for machines described in the
+   register-machine language. The simulator is a Scheme program with
+   four interface procedures. The first uses a description of a
+   register machine to construct a model of the machine (a data
+   structure whose parts correspond to the parts of the machine to be
+   simulated), and the other three allow us to simulate the machine by
+   manipulating the model:
+
+- Specification   
+    #+BEGIN_SRC scheme
+    (make-machine <register-names> <operations> <controller>)
+    #+END_SRC
+
+    constructs and returns a model of the machine with the given
+    registers, operations, and controller.
+
+    #+BEGIN_SRC scheme
+    (set-register-contents! <machine-model>
+                            <register-name>
+                            <value>)
+    #+END_SRC
+
+    stores a value in a simulated register in the given machine.
+
+    #+BEGIN_SRC scheme
+    (get-register-contents <machine-model> <register-name>)
+    #+END_SRC
+
+    returns the contents of a simulated register in the given machine.
+
+    #+BEGIN_SRC scheme
+    (start <machine-model>)
+    #+END_SRC
+
+    simulates the execution of the given machine, starting from the
+    beginning of the controller sequence and stopping when it reaches
+    the end of the sequence.
+
+   As an example of how these procedures are used, we can define
+   gcd-machine to be a model of the GCD machine of Section 5.1.1 as
+   follows:
+
+   #+BEGIN_SRC scheme
+     (define gcd-machine
+       (make-machine
+	'(a b t)
+	(list (list 'rem remainder) (list '= =))
+	'(test-b (test (op =) (reg b) (const 0))
+		 (branch (label gcd-done))
+		 (assign t (op rem) (reg a) (reg b))
+		 (assign a (reg b))
+		 (assign b (reg t))
+		 (goto (label test-b))
+		 gcd-done)))
+   #+END_SRC
+
+
+   The first argument to make-machine is a list of register names. The
+   next argument is a table (a list of two-element lists) that pairs
+   each operation name with a Scheme procedure that implements the
+   operation (that is, produces the same output value given the same
+   input values). The last argument specifies the controller as a list
+   of labels and machine instructions, as in Section 5.1.
+
+   To compute GCDs with this machine, we set the input registers,
+   start the machine, and examine the result when the simulation
+   terminates:
+
+   #+BEGIN_SRC scheme
+   (set-register-contents! gcd-machine 'a 206)
+   ;; => done
+   (set-register-contents! gcd-machine 'b 40)
+   ;; => done
+   (start gcd-machine)
+   ;; => done
+   (get-register-contents gcd-machine 'a)
+   ;; => 2
+   #+END_SRC
+
+   This computation will run much more slowly than a gcd procedure
+   written in Scheme, becase we will simulate low-level machine
+   instructions, such as assign, by much more complex operations.
+
+   - Exercise 5.7: Use the simulator to test the machines you designed
+     in Exercise 5.4.
+
+*** 5.2.1 The Machine Model     
+    The machine model generated by make-machine is represented as a
+    procedure with local state using the message-passing techniques
+    developed in Chapter 3. To build this model, make-machine begins
+    by calling the procedure make-new-machine to construct the parts
+    of the machine model that are common to all register
+    machines. This basic machine model constructed by make-new-machine
+    is essentially a container for some registers and a stack,
+    together with an execution mechanism that processes controller
+    instructions one by one. 
+
+    make-mahine then extends this basic model (by sending it messages)
+    to include the registers, operations, and controller of the
+    particular machine being defined. First it allocates a register in
+    the new machine for each of the supplied register names and
+    installs the designated operations in the machine. Then it uses an
+    _assembler_ (described below in Section 5.2.2) to transform the
+    controller list into instructions for the new machine and installs
+    these as the machine's instruction sequence. make-machine returns
+    as its value the modified machine model.
+
+    #+BEGIN_SRC scheme
+    (define (make-machine register-names ops controller-text)
+     (let ((machine (make-new-machine)))
+      (for-each (lambda (register-name)
+                 ((machine 'allocate-register) register-name))
+       register-names)
+      ((machine 'install-operations) ops)
+      ((machine 'install-instruction-sequence)
+       (assemble controller-text machine))
+      machine))
+    #+END_SRC
+
+**** Registers    
+     We will represent a register as a procedure with local state, as
+     in Chapter 3. The procedure make-register creates a register that
+     holds a value that can be accessed or changed:
+
+     #+BEGIN_SRC scheme
+     (define (make-register name)
+      (let ((contents '*unassigned*))
+       (define (dispatch message)
+        (cond ((eq? message 'get) contents)
+              ((eq? message 'set)
+               (lambda (value) (set! contents value)))
+              (else
+               (error "Unknown request: REGISTER" message))))
+       dispatch))
+     #+END_SRC
+
+     The following procedures are used to access registers:
+
+     #+BEGIN_SRC scheme
+     (define (get-contents register) (register 'get))
+     (define (set-contents! register value) ((register 'set) value))
+     #+END_SRC
+
+**** The stack     
+     We can also represent a stack as a procedure with local
+     state. The procedure make-stack creates a stack whose local state
+     consists of a list of the items on the stack. A stack accepts
+     requests to push an item onto the stack, to pop the top item off
+     the stack and return it, and to initialize the stack to empty.
+
+     #+BEGIN_SRC scheme
+     (define (make-stack)
+      (let ((s '()))
+       (define (push x) (set! s (cons x s)))
+       (define (pop)
+        (if (null? s)
+            (error "Empty stack: POP")
+            (let ((top (car s)))
+             (set! s (cdr s))
+             top)))
+       (define (initialize)
+        (set! s '())
+        'done)
+       (define (dispatch message)
+        (cond ((eq? message 'push) push)
+              ((eq? message 'pop) (pop))
+              ((eq? message 'initialize) (initialize))
+              (else (error "Unknown request: STACK" message))))
+       dispatch))
+     #+END_SRC
+
+     The following procedures are used to access stacks:
+
+     #+BEGIN_SRC scheme
+     (define (pop stack) (stack 'pop))
+     (define (push stack value) ((stack 'push) value))
+     #+END_SRC
+
+**** The basic machine     
+     
+     The make-new-machine procedure, shown in Figure 5.13, constructs
+     an object whose local state consists of a stack, an initially
+     empty instruction sequence, a list of operations that initially
+     contains an operation to initialize the stack, and a _register
+     table_ that initially contains two registers, named flag and pc
+     (for "program counter"). The internal procedure allocate-register
+     adds new entries to the register table, and the internal
+     procedure lookup-register looks up registers in the table.
+
+     The flag register is used to control branching in the simulated
+     machine. test instructions set the contents of flag to the result
+     of the test (true or false). branch instructions decide whether
+     or not to branch by examining the contents of flag.
+
+     The pc register determines the sequencing of instructions as the
+     machine runs. This sequencing is implemented by the internal
+     procedure execute. In the simulation model, each machine
+     instruction is a data structure that includes a procedure of no
+     arguments, called the _instruction execution procedure_, such
+     that calling this procedure simulates executing the
+     instruction. As the simulation runs, pc points to the place in
+     the instruction sequence beginning with the next instruction to
+     be executed. execute gets that instruction, executes it by
+     calling the instruction execution procedure, and repeats this
+     cycle until there are no more instructions to execute (i.e.,
+     until pc points to the end of the instruction sequence). 
+
+     - Figure 5.13: The make-new-machine procedure, which implements
+       the basic machine model.
+
+       #+BEGIN_SRC scheme
+	 (define (make-new-machine)
+	  (let ((pc (make-register 'pc))
+		(flag (make-register 'flag))
+		(stack (make-stack))
+		(the-instruction-sequence '()))
+	   (let ((the-ops
+		  (list (list 'initialize-stack
+			      (lambda () (stack 'initialize)))))
+		 (register-table
+		  (list (list 'pc pc) (list 'flag flag))))
+	    (define (allocate-register name)
+	     (if (assoc name register-table)
+		 (error "Multiply defined register: " name)
+		 (set! register-table
+		       (cons (list name (make-register name))
+			      register-table)))
+	     'register-allocated)
+	    (define (lookup-register name)
+	     (let ((val (assoc name register-table)))
+	      (if val
+		  (cadr val)
+		  (error "Unknown register:" name))))
+	    (define (execute)
+	     (let ((insts (get-contents pc)))
+	      (if (null? insts)
+		  'done
+		  (begin
+		   ((instruction-execution-proc (car insts)))
+		   (execute)))))
+	    (define (dispatch message)
+	     (cond ((eq? message 'start)
+		    (set-contents! pc the-instruction-sequence)
+		    (execute))
+		   ((eq? message 'install-instruction-sequence)
+		    (lambda (seq)
+		     (set! the-instruction-sequence seq)))
+		   ((eq? message 'allocate-register)
+		    allocate-register)
+		   ((eq? message 'get-register)
+		    lookup-register)
+		   ((eq? message 'install-operations)
+		    (lambda (ops)
+		      (set! the-ops (append the-ops ops))))
+		   ((eq? message 'stack) stack)
+		   ((eq? message 'operations) the-ops)
+		   (else (error "Unknown request: MACHINE"
+				message))))
+	    dispatch)))
+       #+END_SRC
+
+       As part of its operation, each instruction execution procedure
+       modifies pc to indicate the next instruction to be
+       executed. branch and goto instructions change pc to point to
+       the new destination. All other instructions simply advance pc,
+       making it point to the next instruction in the
+       sequence. Observe that each call to execute calls execute
+       again, but this does not produce an infinite loop because
+       running the instruction execution procedure changes the
+       contents of pc.
+
+       make-new-machine returns a dispatch procedure that implements
+       message-passing access to the internal state. Notice that
+       starting the machine is accomplished by setting pc to the
+       beginning of the instruction sequence and calling execute.
+
+       For convenience, we provide an alternate procedural interface
+       to a machine's start operation, as well as procedures to set
+       and examine register contents, as specified at the beginning of
+       Section 5.2:
+
+       #+BEGIN_SRC scheme
+       (define (start machine) (machine 'start))
+       (define (get-register-contents machine register-name)
+        (get-contents (get-register machine register-name)))
+       (define (set-register-contents! machine register-name value)
+        (set-contents! (get-register machine register-name)
+                       value)
+        'done)
+       #+END_SRC
+
+       These procedures (and many procedures in Section 5.2.2 and
+       Section 5.2.3) use the following to look up the register with a
+       given name in a given machine:
+
+       #+BEGIN_SRC scheme
+       (define (get-register machine reg-name)
+        ((machine 'get-register) reg-name))
+       #+END_SRC
+
+*** 5.2.2 The Assembler       
+
+    The assembler transforms the sequence of controller expressions
+    for a machine into a corresponding list of machine instructions,
+    each with its execution procedure. Overall, the assembler is much
+    like the evaluators we studied in Chapter 4 -- there is an input
+    language (in this case, the register-machine language) and we must
+    perform an appropriate action for each type of expression in the
+    language.
+
+    The technique of producing an execution procedure for each
+    instruction is just what we used in Section 4.1.7 to speed up the
+    evaluator by separating analysis from runtme exection. As we saw
+    in Chapter 4, much useful analysis of Scheme expressions could be
+    performed without knowing the actual values of variables. Here,
+    analogously, much useful analysis of register-machine-language
+    expressions can be performed without knowing the actual contents
+    of machine registers. For example, we can replace references to
+    registers by pointers to the register objects, and we can replace
+    references to labels by pointers to the place in the instruction
+    sequence that the label designates. 
+
+    Before it can generate the instruction execution procedures, the
+    assembler must know what all the labels refer to, so it begins by
+    scanning the controller text to separate the labels from the
+    instructions. As it scans the text, it constructs both a list of
+    instructions and a table that associates each label with a pointer
+    into that list. Then the assembler augments the instruction list
+    by inserting the execution procedure for each instruction.
+
+    The assemble procedure is the main entry to the assembler. it
+    takes the controller text and the machine model as arguments and
+    returns the instruction sequence to be stored in the
+    model. assemble calls extract-labels to build the initial
+    instruction list and label table from the supplied controller
+    text. The second argument to extract-labels is a procedure to be
+    called to process these results: This procedure uses update-insts!
+    to generate the instruction execution procedures and insert them
+    into the instruction list, and returns the modified list.
+
+    #+BEGIN_SRC scheme
+    (define (assemble controller-text machine)
+     (extract-labels
+      controller-text
+      (lambda (insts labels)
+       (update-insts! insts labels machine)
+       insts)))
+    #+END_SRC
+
+    extract-labels takes as arguments a list text (the sequence of
+    controller instruction expressions) and a receive
+    procedure. receive will be called with two values: (1) a list of
+    insts of instruction data structures, each containing an
+    instruction from text; and (2) a table called labels, which
+    associates each label from text with the position in the list
+    insts that the label designates.
+
+    #+BEGIN_SRC scheme
+      (define (extract-labels text receive)
+       (if (null? text)
+	   (receive '() '())
+	   (extract-labels
+	    (cdr text)
+	    (lambda (insts labels)
+	      (let ((next-inst (car text)))
+		(if (symbol? next-inst)
+		    (receive
+			insts
+			(cons (make-label-entry next-inst
+						insts)
+			      labels))
+		    (receive
+			(cons
+			 (make-instruction next-inst)
+			 insts)
+			labels)))))))
+    #+END_SRC
+
+    extract-labels works by sequentially scanning the elements of the
+    text and accumulating the insts and the labels. If an element is a
+    symbol (and thus a label) an appropriate entry is added to the
+    labels table. Otherwise the element is accumulated onto the insts
+    list. 
+
+    update-insts! modifies the instruction list, which initially
+    contains only the text of the instructions, to include the
+    corresponding execution procedures:
+
+    #+BEGIN_SRC scheme
+    (define (update-insts! insts labels machine)
+     (let ((pc (get-register machine 'pc))
+           (flag (get-register machine 'flag))
+           (stack (machine 'stack))
+           (ops (machine 'operations)))
+       (for-each
+        (lambda (inst)
+         (set-instruction-execution-proc!
+          inst
+          (make-execution-procedure
+           (instruction-text inst)
+           labels machine pc flag stack ops)))
+         insts)))
+    #+END_SRC
+
+    The machine instruction data structure simply pairs the
+    instruction text with the corresponding execution procedure. The
+    execution procedure is not yet available wihen extract-labels
+    constructs the instruction, and is inserted later by
+    update-insts!.
+
+    #+BEGIN_SRC scheme
+    #+END_SRC
+     
+   
+   
+
+    
+
+    
 
 	 
 
