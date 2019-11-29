@@ -142,14 +142,14 @@
   (let ((reg (get-register machine
 			   (stack-inst-reg-name inst))))
     (lambda ()
-      (push stack (get-contents reg))
+      (push stack (stack-inst-reg-name inst) (get-contents reg))
       (advance-pc pc))))
 
 (define (make-restore inst machine stack pc)
   (let ((reg (get-register machine
 			   (stack-inst-reg-name inst))))
     (lambda ()
-      (set-contents! reg (pop stack))
+      (set-contents! reg (pop stack (stack-inst-reg-name inst)))
       (advance-pc pc))))
 
 

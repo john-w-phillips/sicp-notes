@@ -1,4 +1,5 @@
 (load "syntax.scm")
+(load-option 'format)
 (define (assemble controller-text machine)
   (extract-labels
    controller-text
@@ -142,14 +143,28 @@
   (let ((reg (get-register machine
 			   (stack-inst-reg-name inst))))
     (lambda ()
-      (push stack (get-contents reg))
+      (display inst)
+      (push stack (cons (stack-inst-reg-name inst)
+			(get-contents reg)))
       (advance-pc pc))))
 
 (define (make-restore inst machine stack pc)
   (let ((reg (get-register machine
 			   (stack-inst-reg-name inst))))
     (lambda ()
-      (set-contents! reg (pop stack))
+      (display inst)
+      (let ((new-contents (pop stack)))
+	(let ((name (car new-contents))
+	      (value (cdr new-contents)))
+	  (if (eq? name (stack-inst-reg-name inst))
+	      (set-contents! reg value)
+	      (error
+	       (format
+		#f
+		"Bad restore instruction, wrong dest register ~a expected ~a (inst ~a) MAKE-RESTORE"
+		(stack-inst-reg-name inst)
+		name
+		inst)))))
       (advance-pc pc))))
 
 
