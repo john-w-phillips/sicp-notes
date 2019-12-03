@@ -1078,7 +1078,7 @@ operations of the evaluator register machine.
 	    (assign val (reg n))
 	    (goto (reg continue))
 	    fib-done)
-       #+END_SRC	 
+       #+END_SRC
 
 *** 5.1.5 Instruction Summary	 
     A controller instruction in our register-machine language has one
@@ -2002,9 +2002,276 @@ operations of the evaluator register machine.
 	  gcd-done)
        #+END_SRC
 
-       How exactly we assemble is in some ways not that important it
-       seems. The instructions accomplish the exact same things -- I
-       had to change more than the syntax procedures _but_ 
+     - Exercise 5.11: When we introduced save and restore in Section
+       5.1.4, we didn't specify what would happen if you tried to
+       restore in Section 5.1.4, we didn't specify what would happen
+       if you tried to restore a register that was not the last one
+       saved, as in the sequence
+
+       #+BEGIN_SRC scheme
+       (save y) (save x) (restore y)
+       #+END_SRC
+
+       There are several reasonable possibilities for the meaning of
+       restore:
+
+       a. (restore y) puts into y the last value saved on the stack,
+       regardless of what register that value came from. This is the
+       way our simulator behaves. Show how to take advantage of this
+       behavior to eliminate one instruction from the Fibonacci
+       machine of Section 5.1.4 (Figure 5.12).
+
+       We already did this in Exercise 5.6.
+         #+BEGIN_SRC scheme
+	   (controller
+	    (assign continue (label fib-done))
+	    fib-loop
+	    (test (op <) (reg n) (const 2))
+	    (branch (label immediate-answer))
+	    ;; set up to compute Fib(n-1)
+	    (save continue)
+	    (assign continue (label afterfib-n-1))
+	    (save n)
+	    (assign n (op -) (reg n) (const 1))
+	    (goto (label fib-loop))
+	    afterfib-n-1
+	    (restore n)
+	    ;; The lines marked 'redundant:' were unnecessary.
+	    ;; redundant: (restore continue)
+	    ;; set up to compute Fib(n-2)
+	    (assign n (op -) (reg n) (const 2))
+	    ;; redundant: (save continue)
+	    (assign continue (label afterfib-n-2))
+	    (save val)
+	    (goto (label fib-loop))
+	    afterfib-n-2
+            ;; ** REMOVED **
+	    ;; (assign n (reg val))
+	    ;; (restore val)
+            (restore n) ;; << Added. Restore old val directly to n.
+	    (restore continue)
+	    (assign val (op +) (reg val) (reg n))
+	    (goto (reg continue))
+	    immediate-answer
+	    (assign val (reg n))
+	    (goto (reg continue))
+	    fib-done)
+       #+END_SRC
+
+       b. (restore y) puts into y the last value saved on the stack,
+       but only if that value was saved from y; otherwise, it signals
+       an error. Modify the simulator to behave this way. You will
+       have to change save to put the register name on the stack along
+       with the value.
+       (In directory register-sim-5.10-b)
+
+       c. (restore y) puts into y the last value saves from y
+       regardless of what other registers were saved after y and not
+       restored. Modify the simulator to behave this way. You will
+       have to associate a separate stack with each register. You
+       should make the initialize-stack operation initialize the all
+       register stacks.
+
+       (In directory register-sim-5.10-c)
+
+     - Exercise 5.12: The simulator can be used to help determine the
+       data paths required for implementing a machine with a given
+       controller. Extend the assembler to store the following
+       information in the machine model:
+
+       * A list of all instructions, with duplicates removed, sorted
+         by instruction type (assign, goto, and so on).
+
+       * A list (without duplicates) of the registers used to hold
+         entry points (these are teh registers referenced by goto
+         instructions);
+
+       * for each register, a list (without duplicates) of the sources
+         from which it is assigned (for example, the sources for
+         register val in the factorial machine of Figure 5.11 are
+         (const 1) and ((op *) (reg n) (reg val))).
+
+	 #+BEGIN_SRC scheme
+	   1 ]=> (fibom 'print-control-data)
+	   Table assignment-values
+	   ((val (reg n) ((op +) (reg val) (reg n)))
+	    (n (reg val) ((op -) (reg n) (const 2)) ((op -) (reg n) (const 1)))
+	    (continue (label afterfib-n-2) (label afterfib-n-1) (label fib-done)))
+
+	   Table saved-regs
+	   (val n continue)
+
+	   Table instructions
+	   ((assign val (reg n)) (assign val (op +) (reg val) (reg n))
+				 (assign n (reg val))
+				 (assign continue (label afterfib-n-2))
+				 (assign n (op -) (reg n) (const 2))
+				 (assign n (op -) (reg n) (const 1))
+				 (assign continue (label afterfib-n-1))
+				 (assign continue (label fib-done))
+				 (test (op <) (reg n) (const 2))
+				 (branch (label immediate-answer))
+				 (save val)
+				 (save n)
+				 (save continue)
+				 (goto (reg continue))
+				 (goto (label fib-loop))
+				 (restore val)
+				 (restore continue)
+				 (restore n))
+
+	   Table restored-regs
+	   (val continue n)
+	 #+END_SRC
+
+     - Exercise 5.13: Modify the simulator so that it uses the
+       controller sequence ot determine what registers the machine has
+       rather than requiring a list of registers as an argument to
+       make-machine. Instead of pre-allocating the registers in
+       make-machine, you can allocate them one at a time when they are
+       first seen during assembly of the instructions. (Done in the
+       5-12 folder).
+
+*** 5.2.4 Monitoring Machine Performance 
+
+    Simulation is useful not only for verifying the correctness of a
+    proposed machine design but also for measuring the machine's
+    performance. For example, we can install in our simulation program
+    a "meter" that measures the number of stack operations used in a
+    computation. To do this, we modify our simulated stack to keep
+    track of the number of times registers are saved on the stack and
+    the maximum depth reached by the stack, and add a message to the
+    stack's interface that prints the statistics, as shown below. We
+    also add an operation to the basic machine model to print the
+    stack statistics, by initializing the-ops in make-new-machine to
+
+    #+BEGIN_SRC scheme
+    (list (list 'initialize-stack
+                (lambda () (stack 'initialize)))
+          (list 'print-statistics 
+                (lambda () (stack 'print-statistics))))
+    #+END_SRC
+
+    Here is the new version of make-stack:
+
+    #+BEGIN_SRC scheme
+      (define (make-stack)
+       (let ((s '())
+	     (number-pushes 0)
+	     (max-depth 0)
+	     (current-depth 0))
+	 (define (push x)
+	   (set! s (cons x s))
+	   (set! number-pushes (+ 1 number-pushes))
+	   (set! current-depth (+ 1 current-depth))
+	   (set! max-depth (max current-depth max-depth)))
+	 (define (pop)
+	   (if (null? s)
+	       (error "Empty stack: POP")
+	       (let ((top (car s)))
+		 (set! s (cdr s))
+		 (set! current-depth (- current-depth 1))
+		 top)))
+	 (define (initialize)
+	   (set! s '())
+	   (set! number-pushes 0)
+	   (set! max-depth 0)
+	   (set! current-depth 0)
+	   'done)
+	 (define (print-statistics)
+	   (newline)
+	   (display (list 'total-pushes '= number-pushes
+			  'maximum-depth '= max-depth)))
+	 (define (dispatch message)
+	   (cond ((eq? message 'push) push)
+		 ((eq? message 'pop) (pop))
+		 ((eq? message 'initialize) (initialize))
+		 ((eq? message 'print-statistics)
+		  (print-statistics))
+		 (else (error "Unknown request: STACK" message))))
+	 dispatch))
+    #+END_SRC
+
+    Exercise 5.15 through Exercise 5.19 describe other useful
+    monitoring and debugging features that can be added to the
+    register-machine simulator.
+
+    - Exercise 5.14: Measure the number of pushes and the maximum
+      stack depth required to compute n! for various small values of
+      _n_ using the factorial machine shown in Figure 5.11. From your
+      data determine formulas in terms of _n_ for the total number of
+      push operations and the maximum stack depth used in computing n!
+      for any n > 1. Note that each of these is a linear function of n
+      and is thus determined by two constants. In order to get the
+      statistics printed, you will have to augment the factorial
+      machine with instructions to initialize the stack and print the
+      statistics. You may want to also modify the machine so that it
+      repeatedly reads a value for n, computes the factorial, and
+      prints the result (as we did for the GCD machine in Figure 5.4),
+      so that you will not have to repeatedly invoke
+      get-register-contents, set-register-contents!, and start.
+
+      #+BEGIN_SRC scheme
+	(start-fact-readwrite-loop
+	 (assign c (op read))
+	 (assign p (const 1))
+	 (perform (op initialize-stack))
+	 (assign continue (label fact-done))
+	 fact-loop
+	 (test (op <) (reg c) (const 1))
+	 (branch (label fact-done))
+	 (assign p (op *) (reg p) (reg c))
+	 (assign c (op -) (reg c) (const 1))
+	 (goto (label fact-loop))
+	 fact-done
+	 (perform (op print-statistics))
+	 (perform (op display) (reg p))
+	 (perform (op newline))
+	 (goto (label start-fact-readwrite-loop)))
+      #+END_SRC
+      
+      The above function is zero for both. It doesn't use the stack.
+
+      #+BEGIN_SRC scheme
+	(start-fact-readwrite-loop
+	 (assign n (op read))
+	 (assign val (const 0))
+	 (perform (op initialize-stack))
+	 (assign continue (label fact-done))
+	 fact-loop
+	 (test (op <) (reg n) (const 1))
+	 (branch (label immediate-answer))
+	 (save continue)
+	 (save n)
+	 (assign n (op -) (reg n) (const 1))
+	 (assign continue (label after-fact-loop))
+	 (goto (label fact-loop))
+	 after-fact-loop
+	 (restore n)
+	 (assign val (op *) (reg n) (reg val))
+	 (restore continue)
+	 (goto (reg continue))
+	 immediate-answer
+	 (assign val (const 1))
+	 (goto (reg continue))
+	 fact-done
+	 (perform (op print-statistics))
+	 (perform (op newline))
+	 (perform (op display) (reg val))
+	 (perform (op newline))
+	 (goto (label start-fact-readwrite-loop)))
+
+      #+END_SRC
+      For this function/program, the total pushes and depth are equal,
+      and the equation is 2*n. So computing 1! results in 2 stack
+      pushes and a max depth of 2, 7! in 14 pushes and a max depth
+      of 14.
+
+    - Exercise 5.15: Add _instruction counting_ to the register
+      machine simulation. That is, have the machine model keep track
+      of the number of instructions executed. Extend the machine
+      model's interface to accept a new message that prints the value
+      of the instruction count and resets the count to zero. 
 
 
 

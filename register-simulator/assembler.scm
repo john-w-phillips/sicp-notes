@@ -1,16 +1,27 @@
 (load "syntax.scm")
 (define (assemble controller-text machine)
   (extract-labels
+   (get-all-labels controller-text)
    controller-text
    (lambda (insts labels)
      (update-insts! insts labels machine)
      insts)))
 
+(define (get-all-labels text)
+  (filter (lambda (item) (symbol? item)) text))
+(define (get-labels-before all-labels after-labels)
+  (cond
+   ((equal? all-labels after-labels) '())
+   ((null? all-labels) '())
+   (else
+    (cons (car all-labels)
+	  (get-labels-before (cdr all-labels) after-labels)))))
 
-(define (extract-labels text receive)
+(define (extract-labels all-labels text receive)
   (if (null? text)
       (receive '() '())
       (extract-labels
+       all-labels
        (cdr text)
        (lambda (insts labels)
 	 (let ((next-inst (car text)))
@@ -22,7 +33,9 @@
 			 labels))
 	       (receive
 		   (cons
-		    (make-instruction next-inst)
+		    (make-instruction next-inst (get-labels-before
+						 all-labels
+						 (map label-entry-name labels)))
 		    insts)
 		   labels)))))))
 
@@ -40,13 +53,18 @@
 	 labels machine pc flag stack ops)))
      insts)))
 
-(define (make-instruction text) (cons text '()))
+(define (make-instruction text labels)
+  (list text '() labels))
+
 (define (instruction-text inst) (car inst))
 (define (instruction-execution-proc inst)
-  (cdr inst))
+  (cadr inst))
 (define (set-instruction-execution-proc! inst proc)
-  (set-cdr! inst proc))
-
+  (set-car! (cdr inst) proc))
+(define (instruction-preceding-labels inst)
+  (caddr inst))
+(define (label-entry-name entry)
+  (car entry))
 (define (make-label-entry label-name insts)
   (cons label-name insts))
 
