@@ -2339,15 +2339,266 @@ operations of the evaluator register machine.
       (cancel-all-breakpoints <machine>)
       #+END_SRC
 
-      
-      
+      All these are in the register-simulator/ folder.
 
+** 5.3 Storage Allocation and Garbage Collection
+   In Section 5.4, we will show how ot implement a Scheme evaluator as
+   a register machine. In order to simplify the discussion, we will
+   assume that our register machines can be equipped with a
+   _list-structured memory_, in which the basic operations for
+   manipulating list-structured data are primitive. Postulating the
+   existence of such a memory is a useful abstraction when one is
+   focusing on the mechanisms of control in a Scheme interpreter, but
+   this does not reflect a realistic view of hte actual primitive data
+   operations of contemporary computers. To obtain a more complete
+   picture of how a Lisp system operates, we must investigate how list
+   structure can be represented in a way that is compatible with
+   conventional computer memories. 
+
+   There are two considerations in implementing list structure. The
+   first is purely an issue of representation: how to represent the
+   "box-and-pointer" structure of Lisp pairs, using only the storage
+   and addressing capabilities of typical computer memories. The
+   second issue concerns the management of memory as a computation
+   proceeds. The operation of a Lisp system depends crucially on the
+   ability to continually create new data objects. These include
+   objects that are explicitly created by the interpreter itself, such
+   as environments and argument lists. Although the constant creation
+   of new data objects would pose no problem on a computer with an
+   infinite amount of rapidly addressable memory, computer memories
+   are available only in finite sizes (more's the pity). Lisp systems
+   thus provide an _automatic storage allocation_ facility to support
+   the illusion of an infinite memory. When a data object is no longer
+   needed, the memory allocated to it is automatically recycled and
+   used to construct new data objects. There are various techniques
+   for providing such automatic storage allocation. The method we
+   shall discuss in this section is called _garbage collection_. 
+
+*** 5.3.1 Memory as Vectors
+
+    A conventional computer memory can be thought of as an array of
+    cubbyholes, each of which can contain a piece of information: Each
+    cubbyhole has a unique name, called its _address_ or
+    _location_. Typical memory sytems provide two primitive
+    operations: one that fetches the data stored in a specified
+    location and one that assigns new data to a specified
+    location. Memory addresses can be incremented to support
+    sequential access to some set of the cubbyholes. More generally,
+    many important data operations require that memory addresses be
+    treated as data, which can be stored in memory locations and
+    manipulated in machine registers. The representation of list
+    structure is one application of such _address arithmetic_. 
+
+    To model computer memory, we use a new kind of data structure
+    called a _vector_. Abstractly, a vector is a compound data object
+    whose individual elements can be accessed by means of an integer
+    index in an amount of time that is independent of the index. In
+    order to describe memory operations, we use two primitive Scheme
+    procedures for manipulating vectors:
+
+    - (vector-ref <VECTOR> <N>) returns the _n_th element of the vector.
+    - (vector-set! <VECTOR> <N> <VALUE>) sets the _n_th element of the
+      vector to the designated value.
+
+      
+    For example, if v is a vector, then (vector-ref v 5) gets the
+    fifth entry of the vector v and (vector-set! v 5 7) changes the
+    value of the fifth entry of the vector v to 7. For computer
+    memory, this access can be implemented through the use of address
+    arithmetic to combine a _base address_ that specifies the
+    beginning location of a vector in memory with an _index_ that
+    specifies the offset of a particular element of the vector.
+
+**** Representing Lisp data.
+
+     We can use vectors to implement the basic pair structures
+     required for a list-structured memory. Let us imagine that
+     computer memory is divided into two vectors: the-cars and
+     the-cdrs. We will represent list structure as follows: A pointer
+     to a pair is an index into the two vectors. The car of the pair
+     is the entry in the-cars with the designated index, and the cdr
+     of the pair is the entry in the-cdrs with the designated
+     index. We also need a representation for objects other than pairs
+     (such as numbers and symbols) and a way to distinguish one kind
+     of data from another. There are many methods of accomplishing
+     this, but they all reduce to using _typed pointers_, that is, to
+     extending the notion of "pointer" to include information on data
+     type. The data type enables the system to distinguish a pointer
+     to a pair (which consists of the "pair" data type and an index
+     into the memory vectors) from pointers to other kinds of data
+     (which consist of some other data type and whatever is being used
+     to represent data of that type). Two data objects are considered
+     to be the same (eq?) if their pointers are  identical. Figure
+     5.14 illustrates the use of this method to represent the list ((1
+     2) 3 4), whose box-and-pointer diagram is also shown. We use
+     letter prefixes to denote the data-type information. Thus, a
+     pointer to the pair with index 5 is denoted p5, the empty list is
+     denoted by the pointer e0, and a pointer to the number 4 is
+     denoted n4. In the box-and-pointer diagram, we have indicated
+     at the lower left of each pair the vector index that specifies
+     where the car and cdr of the pair are stored. The blank locations
+     in the-cars and the-cdrs may contain parts of other list
+     structures (not of interest here0. 
+
+     A pointer to a number, such as n4, might consist of a type
+     indicating numeric data together with the actual representation
+     of the number 4. To deal with numbers that are too large to be
+     represented in the fixed amount of space allocated for a single
+     pointer, we could use a distinct _bignum_ data type, for which
+     the pointer designates a list in which the parts of the number
+     are stored.
+
+     A symbol might be represented as a typed pointer that designates
+     a sequence of the characters that form the symbol's printed
+     representation. This sequence is constructed by the Lisp reader
+     when the character string is initially encountered in
+     input. SInce we want two instances of a symbol to be recognized
+     as the "same" symbol by eq? and we want eq? to be a simple test
+     for equality of pointers, we must ensure that if the reader sees
+     the same character string twice, it will use the same pointer (to
+     the same sequence of characters) to represent both
+     occurrences. To accomplish this, the reader maintains a table,
+     traditionally called the _obarray_, of all the symbols it has
+     ever encountered. When the reader encounters a character string
+     and is about to construct a symbol, it checks the obarray to see
+     if it has ever before seen the same character string. If it has
+     not, it uses the characters to construct a new symbol (a typed
+     pointer to a new character sequence) and enters this pointer in
+     the obarray. If the reader has seen the string before, it returns
+     the symbol pointer stored in the obarray. This process of
+     replacing character strings by unique pointers is called
+     _interning_ symbols.
+
+**** Implementing the primitive list operations     
+
+     Given the above representation scheme, we can replace each
+     "primitive" list operation of a register machine with one or more
+     primitive vector operations. We will use two registers, the-cars
+     and the-cdrs, to identify the memory vectors, and will assume
+     that vector-ref and vector-set! are available as primitive
+     operations. We also assume that numeric operations on pointers
+     (such as incrementing a pointer, using a pair pointer to index a
+     vector, or adding two numbers) use only the index portion of the
+     typed pointer.
+
+     For example, we can make a register machine support the
+     instructions
+
+     #+BEGIN_SRC scheme
+     (assign <reg1> (op car) (reg <reg2>))
+     (assign <reg1> (op cdr) (reg <reg2>))
+     #+END_SRC
+
+     if we implement these, respectively, as
+
+     #+BEGIN_SRC scheme
+     (assign <reg1> (op vector-ref) (reg the-cars) (reg <reg2>))
+     (assign <reg1> (op vector-ref) (reg the-cdrs) (reg <reg2>))
+     #+END_SRC
+
+     The instructions
+
+     #+BEGIN_SRC scheme
+     (perform (op set-car!) (reg <reg1>) (reg <reg2>))
+     (perform (op set-cdr!) (reg <reg1>) (reg <reg2>))
+     #+END_SRC
+
+     are implemented as
+
+     #+BEGIN_SRC scheme
+     (perform
+      (op vector-set!) (reg the-cars) (reg <reg1>) (reg <reg2>))
+     (perform
+      (op vector-set!) (reg the-cdrs) (reg <reg1>) (reg <reg2>))
+     #+END_SRC
+
+     cons is performed by allocating an unused index and storing the
+     arguments to cons in the-cars and the-cdrs at that indexed vector
+     position. We presume that there is a special register, free, that
+     always holds a pair pointer containing the next available index,
+     and that we can increment the index part of that pointer to find
+     the next free location. For example, the instruction
+
+     #+BEGIN_SRC scheme
+     (assign <reg1> (op cons) (reg <reg2>) (reg <reg3>))
+     #+END_SRC
+
+     is implemented as the following sequence of vector operations:
+
+     #+BEGIN_SRC scheme
+     (perform (op vector-set!) (reg the-cars) (reg free) (reg <reg2>))
+     (perform (op vector-set!) (reg the-cdrs) (reg free) (reg <reg3>))
+     (assign <reg1> (reg free))
+     (assign free (op +) (reg free) (const 1))
+     #+END_SRC
+
+     the eq? operation
+
+     #+BEGIN_SRC scheme
+     (op eq?) (reg <reg1>) (reg <reg2>)
+     #+END_SRC
+
+     simply tests the equality of all fields in the registers, and
+     predicates such as pair?, null?, symbol?, and number? need only
+     check the type field.
+
+**** Implementing stacks     
+     Although our register machines use stacks, we need do nothing
+     special here, since stacks can be modeled in terms of lists. The
+     stack can be a list of the saved values, pointed to by a special
+     register the-stack. Thus, (save <reg>) can be implemented as
+
+     #+BEGIN_SRC scheme
+     (assign the-stack (op cons) (reg <reg>) (reg the-stack))
+     #+END_SRC
+
+     Similarly, (restore <reg>) can be implemented as 
+
+     #+BEGIN_SRC scheme
+     (assign <reg> (op car) (reg the-stack))
+     (assign the-stack (op cdr) (reg the-stack))
+     #+END_SRC
+
+     #+BEGIN_SRC scheme
+     (assign the-stack (op cons) (reg <reg>) (reg the-stack))
+     #+END_SRC
+
+     Similarly, (restore <reg>) can be implemented as
+
+     #+BEGIN_SRC scheme
+     (assign <reg> (op car) (reg the-stack))
+     (assign the-stack (op cdr) (reg the-stack))
+     #+END_SRC
+
+     and (perform (op initialize-stack)) can be implemented as
+
+     #+BEGIN_SRC scheme
+     (assign the-stack (const ()))
+     #+END_SRC
+
+     These operations can be further expanded in terms of the vector
+     operations given above. In conventional computer architectures,
+     however, it is usually advantageous to allocate the stack as a
+     separate vector. Then pushing and popping the stack can be
+     accomplished by incrementing or decrementing an index into that
+     vector.
+
+     - Exercise 5.20: Draw the box-and-pointer representation and the
+       memory-vector representation (as in Figure 5.14) of the list
+       structure produced by
+
+       #+BEGIN_SRC scheme
+       (define x (cons 1 2))
+       (define y (list x x))
+       #+END_SRC
+
+       with free pointer initially p1. What is the final value of
+       free? What pointers represent the values of x and y?
 
        
-    
 
-    
+     - 
 
-	 
+     
 
- 
+
