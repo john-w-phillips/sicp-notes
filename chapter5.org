@@ -2271,8 +2271,76 @@ operations of the evaluator register machine.
       machine simulation. That is, have the machine model keep track
       of the number of instructions executed. Extend the machine
       model's interface to accept a new message that prints the value
-      of the instruction count and resets the count to zero. 
+      of the instruction count and resets the count to zero.
 
+    - Exercise 5.16: Augment the simulator to provide for _instruction
+      tracing_. That is, before each instruction is executed, the
+      simulator should print the text of the instruction. Make the
+      machine model accept trace-on and trace-off messages to turn
+      tracing on and off (Did this in the register-simulator folder).
+
+    - Exercise 5.17: Extend the instruction tracing of Exercise 5.16 so
+      that before printing an instruction, the simulator prints any
+      labels that immediately precede that instruction in the
+      controller sequence. Be careful to do this in a way that does
+      not interfere with instruction counting (Exercise 5.15). You
+      will have to make the simulator retain the necessary label
+      information. (Also done in register-simulator folder).
+
+    - Exercise 5.18: Modify the make-register procedure of Section
+      5.2.1 so that registers can be traced. Registers should accept
+      messages that turn tracing on and off. When a register is
+      traced, assigning a value to the register should print the name
+      of the register, the old contents of the register, and the new
+      contents being assigned. Extend the interface to the machine
+      model to permit you to turn tracing on and off for designated
+      machine registers.
+
+    - Exercise 5.19: Alyssa P. Hacker wants a _breakpoint_ freature in
+      the simulator to help her debug her machine designs. You have
+      been hired to install this feature for her. She wants to be able
+      to specify a place in the controller sequence where the
+      simulator will stop and allow her to examine the state of the
+      machine. You are to implement a procedure
+
+      #+BEGIN_SRC scheme
+      (set-breakpoint <machine> <label> <n>)
+      #+END_SRC
+
+      that sets a breakpoint just before the nth instruction after the
+      given label. For example:
+
+      #+BEGIN_SRC scheme
+      (set-breakpoint gcd-machine 'test-b 4)
+      #+END_SRC
+
+      installs a breakpoint in gcd-machine just before the assignment
+      to register a. When the simulator reaches the breakpoint it
+      should print the label and the offset of the breakpoint and stop
+      executing instructions. Alyssa can then use
+      get-register-contents and set-register-contents! to manipulate
+      the state of the simulated machine. She should then be able to
+      continue execution by saying
+
+      #+BEGIN_SRC scheme
+      (procceed-machine <machine>)
+      #+END_SRC
+
+      She should also be able to remove a specific breakpoint by means
+      of
+
+      #+BEGIN_SRC scheme
+      (cancel-breakpoint <machine> <label> <n>)
+      #+END_SRC
+
+      or to remove all breakpoints by means of 
+
+      #+BEGIN_SRC scheme
+      (cancel-all-breakpoints <machine>)
+      #+END_SRC
+
+      
+      
 
 
        

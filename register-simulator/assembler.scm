@@ -5,6 +5,7 @@
    controller-text
    (lambda (insts labels)
      (update-insts! insts labels machine)
+     ((machine 'install-labels) labels)
      insts)))
 
 (define (get-all-labels text)
@@ -33,11 +34,13 @@
 			 labels))
 	       (receive
 		   (cons
-		    (make-instruction next-inst (get-labels-before
-						 all-labels
-						 (map label-entry-name labels)))
+		    (make-instruction next-inst
+				      (get-labels-before
+				       all-labels
+				       (map label-entry-name labels)))
 		    insts)
 		   labels)))))))
+
 
 (define (update-insts! insts labels machine)
   (let ((pc (get-register machine 'pc))
@@ -67,6 +70,8 @@
   (car entry))
 (define (make-label-entry label-name insts)
   (cons label-name insts))
+(define (label-entry-insts entry)
+  (cdr entry))
 
 (define (lookup-label labels label-name)
   (let ((val (assoc label-name labels)))

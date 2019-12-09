@@ -11,11 +11,23 @@
     machine))
 
 (define (make-register name)
-  (let ((contents '*unassigned*))
+  (let ((contents '*unassigned*)
+	(tracing false))
     (define (dispatch message)
       (cond ((eq? message 'get) contents)
+	    ((eq? message 'trace-on)
+	     (set! tracing true)
+	     'ok)
+	    ((eq? message 'trace-off)
+	     (set! tracing false)
+	     'ok)
 	    ((eq? message 'set)
 	     (lambda (value)
+	       (if tracing
+		   (begin
+		     (newline)
+		   (display (list 'register: name 'change 'old-value '= contents
+				  'new-value '= value))))
 	       (set! contents value)))
 	    (else
 	     (error "Unknown request: REGISTER" message))))
@@ -62,6 +74,41 @@
 (define (pop stack) (stack 'pop))
 (define (push stack item) ((stack 'push) item))
 
+(define (any a-list)
+  (cond
+   ((null? a-list) false)
+   (else
+    (or (and (not (false? (car a-list)))
+	     (not (null? (car a-list))))
+	(any (cdr a-list))))))
+
+(define (make-breakpoint brk-label brk-inst-number)
+  (cons brk-label brk-inst-number))
+(define (breakpoint-label brk) (car brk))
+(define (breakpoint-inst-number brk) (cdr brk))
+
+(define (is-this-break-set? inst labels brk)
+  (let ((label (assoc (breakpoint-label brk) labels)))
+    (display "checking item ")
+    (display (list-ref label (breakpoint-inst-number brk)))
+    (newline)
+    (display "against ")
+    (display inst)
+    (newline)
+    (and label
+	 (equal? (list-ref 
+		  (label-entry-insts label)
+		  (breakpoint-inst-number brk))
+		 inst))))
+
+(define (is-breakpoint-set?
+	 inst
+	 labels
+	 breakpoints)
+  (any (map (lambda (brk) (is-this-break-set? inst labels brk))
+	    breakpoints)))
+
+	    
 (define (make-new-machine)
   (let ((pc (make-register 'pc))
 	(flag (make-register 'flag))
@@ -69,6 +116,9 @@
 	(do-tracing false)
 	(instruction-counter 0)
 	(preceding-label-count 1)
+	(breakpoints '())
+	(break-flag false)
+	(labels '())
 	(the-instruction-sequence '()))
     (let ((the-ops
 	   (list (list 'initialize-stack
@@ -113,13 +163,35 @@
 			(newline)
 			(display "Instruction: ")
 			(display (instruction-text inst))))
-		  ((instruction-execution-proc inst))
-		  (set! instruction-counter (+ instruction-counter 1))
-		  (execute))))))
+		  (if (and (not (eq? break-flag true))
+			   (is-breakpoint-set?
+			    inst
+			    labels
+			    breakpoints))
+		      (begin
+			(set! break-flag true)
+			'break)
+		      (begin
+			(set! break-flag false)
+			((instruction-execution-proc inst))
+			(set! instruction-counter (+ instruction-counter 1))
+			(execute))))))))
       (define (dispatch message)
 	(cond ((eq? message 'start)
 	       (set-contents! pc the-instruction-sequence)
 	       (execute))
+	      ((eq? message 'resume)
+	       (execute))
+	      ((eq? message 'set-breakpoint)
+	       (lambda (brklabel brkoff)
+		 (set! breakpoints
+		       (cons (make-breakpoint
+			      brklabel brkoff)
+			     breakpoints))))
+	      ((eq? message  'install-labels)
+	       (lambda (the-labels)
+		 (set! labels the-labels)
+		 'ok))
 	      ((eq? message 'install-instruction-sequence)
 	       (lambda (seq)
 		 (set! the-instruction-sequence seq)))
@@ -135,6 +207,10 @@
 		 (set! the-ops (append the-ops ops))))
 	      ((eq? message 'instruction-count)
 	       instruction-counter)
+	      ((eq? message 'set-labels)
+	       (lambda (new-labels)
+		 (set! labels new-labels)
+		 'ok))
 	      ((eq? message 'reset-instruction-counter)
 	       (set! instruction-counter 0)
 	       'ok)
@@ -142,6 +218,14 @@
 	      ((eq? message 'trace-on)
 	       (set! do-tracing true)
 	       'ok)
+	      ((eq? message 'set-register-trace)
+	       (lambda (regname)
+		 (let ((register (lookup-register regname)))
+		   (register 'trace-on))))
+	      ((eq? message 'stop-register-trace)
+	       (lambda (regname)
+		 (let ((register (lookup-register regname)))
+		   (register 'trace-off))))
 	      ((eq? message 'trace-off)
 	       (set! do-tracing false))
 	      ((eq? message 'operations) the-ops)
