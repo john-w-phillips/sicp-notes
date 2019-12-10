@@ -133,16 +133,24 @@
 
 (define (make-branch inst machine labels flag pc)
   (let ((dest (branch-dest inst)))
-    (if (label-exp? dest)
-	(let ((insts
-	       (lookup-label
-		labels
-		(label-exp-label dest))))
-	  (lambda ()
-	    (if (get-contents flag)
-		(set-contents! pc insts)
-		(advance-pc pc))))
-	(error "Badn BRANCH instruction: ASSEMBLE" inst))))
+    (cond ((label-exp? dest)
+	   (let ((insts
+		  (lookup-label
+		   labels
+		   (label-exp-label dest))))
+	     (lambda ()
+	       (if (get-contents flag)
+		   (set-contents! pc insts)
+		   (advance-pc pc)))))
+	  ((register-exp? dest)
+	   (let ((reg (get-register machine
+				    (register-exp-reg dest))))
+	     (lambda ()
+	       (if (get-contents flag)
+		   (set-contents! pc (get-contents reg))
+		   (advance-pc pc)))))
+	  (else
+	   (error "Bad BRANCH instruction: ASSEMBLE" inst)))))
 
 (define (make-goto inst machine labels pc)
   (let ((dest (goto-dest inst)))

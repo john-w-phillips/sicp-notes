@@ -2595,10 +2595,114 @@ operations of the evaluator register machine.
        with free pointer initially p1. What is the final value of
        free? What pointers represent the values of x and y?
 
+       In the end, free is p4. x is represented by the pointer p1, the
+       car of p1 is n1 and the cdr is n2. Y is represented by the
+       pointer p2, which points to the first cons cell of the list.
+
+     - Exercise 5.21: Implement register machines for the following
+       procedures. Assume that the list-structured memory operations
+       are available as machine primitives.
+
+       a. Recursive count-leaves:
+       #+BEGIN_SRC scheme
+       (define (count-leaves tree)
+        (cond ((null? tree) 0)
+              ((not (pair? tree)) 1)
+              (else (+ (count-leaves (car tree))
+                       (count-leaves (cdr tree))))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       ;; val: count value.
+       ;; t: current tree.
+       ;; tval: temporary value.
+       ((perform (op initialize-stack))
+        (assign continue (label end-count-leaves))
+        count-leaves-loop
+        (test (op null?) (reg t))
+        (branch (label zero-count))
+        (assign  tval (op pair?) (reg t))
+        (test (op not) (reg tval))
+        (branch (label one-count))
+        (save t)
+        (assign t (op car) (reg t))
+        (save continue)
+        (assign continue (label after-count-car))
+        (goto (label count-leaves-loop))
+        after-count-car
+        (restore continue)
+        (restore t)
+        (save t)
+        (save val)
+        (save continue)
+        (assign t (op cdr) (reg t))
+        (assign continue (label after-count-cdr))
+        (goto (label count-leaves-loop))
+        after-count-cdr
+        (restore continue)
+        (restore tval)
+        (restore t)
+        (assign val (op +) (reg tval) (reg val))
+        (goto (reg continue))
+        zero-count
+        (assign val (const 0))
+        (goto (reg continue))
+        one-count
+        (assign val (const 1))
+        (goto (reg continue))
+        end-count-leaves)
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       (define (count-leaves tree)
+        (define (count-iter tree n)
+         (cond ((null? three) n)
+               ((not (pair? tree)) (+ n 1))
+               (else
+                (count-iter (cdr tree)
+                            (count-iter (car tree) n)))))
+         (count-iter tree 0))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+       ;; n: current count value
+       ;; t: tree
+       ((assign continue (label end-count))
+        (assign n (const 0))
+        count-leaves
+        (test (op null?) (reg t))
+        (branch (reg continue))
+        (assign tval (op pair?) (reg t))
+        (test (op not) (reg tval))
+        (branch (label add-one-and-continue))
+        (save t)
+        (save continue)
+        (assign t (op car) (reg t))
+        (assign continue (label after-car))
+        (goto (label count-leaves))
+        after-car
+        (restore continue)
+        (restore t)
+        (assign t (op cdr) (reg t))
+        (save continue)
+        (assign continue (label after-cdr))
+        (goto (label count-leaves))
+        after-cdr
+        (restore continue)
+        (goto (reg continue))
+        add-one-and-continue
+        (assign n (op +) (reg n) (const 1))
+        (goto (reg continue))
+        end-count)
+       #+END_SRC
+
+     - Exercise 5.22: Exercise 3.12 of Section 3.3.1 presented an
+       append procedure that appends two lists to form a new list and
+       an append! procedure that splices two lists together. Design a
+       register machine to implement each of these procedures. Assume
+       that the list-structure memory operations are available as
+       primitive operations.
+
        
-
-     - 
-
      
-
 
