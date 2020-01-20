@@ -1,5 +1,5 @@
 * Chapter 5 Computing with Register Machines
-We began this book by studying processes and by describing processes
+  We began this book by studying processes and by describing processes
 in terms of procedures written in Lisp. To explain the meanings of
 these procedures, we used a succession of models of evaluation: the
 substitution model of Chapter 1, the environment model of Chapter 3,
@@ -3346,7 +3346,7 @@ operations of the evaluator register machine.
      from the evaluation to a special entry point
      ev-appl-accum-last-arg, which restores the argument list,
      accumulates the new argument, restores the saved procedure, and
-     goes off to perfomr the application.
+     goes off to perform the application.
 
      #+BEGIN_SRC scheme
      ev-appl-last-arg
@@ -3361,7 +3361,7 @@ operations of the evaluator register machine.
 
      The details of the argument-evaluation loop determine the order
      in which the interpreter evaluates the operands of a combination
-     (e.g., left to right or right to left -- see Exercis 3.8). This
+     (e.g., left to right or right to left -- see Exercise 3.8). This
      order is not determined by the metacircular evaluator, which
      inherits its control structure from the underlying Scheme in
      which it is implemented. Because the first-operand selector (used
@@ -3763,6 +3763,484 @@ operations of the evaluator register machine.
        Done in folder lazy-eceval.
 
 *** 5.4.4 Running the Evaluator
+
+    With the implementation of the explicit-control evaluator we come
+    to the end of a development, begun in Chapter 1, in which we have
+    explored successively more precise models of the evaluation
+    process. We started with the relatively informal substitution
+    model, then extended this in Chapter 3 to the environment model,
+    which enabled us to deal with state and change. In the
+    metacircular evaluator of Chapter 4, we used Scheme itself as a
+    language for making more explicit the environment structure
+    constructed during evaluation of an expression. Now, with register
+    machines, we have taken a close look at the evaluator's mechanisms
+    for storage management, argument passing, and control. At each new
+    level of description, we have had to raise issues and resolve
+    ambiguities that were not apparent at the previous, less precise
+    treatment of evaluation. To understand the behavior of the
+    explicit-control evaluator, we can simulate it and monitor its
+    performance. We will install a driver loop in our evaluator
+    machine. This plays the role of the driver-loop procedure of
+    Section 4.1.4. The evaluator will repeatedly print a prompt, read
+    an expression, evaluate the expression by going to eval-dispatch,
+    and print the result. The following instructions form the
+    beginning of the explicit-control evaluator's controller sequence:
+
+    #+BEGIN_SRC scheme
+    read-eval-print-loop
+    (perform (op initialize-stack))
+    (perform (op prompt-for-input) (const ";; EC-Eval input:"))
+    (assign exp (op read))
+    (assign env (op get-global-environment))
+    (assign continue (label print-result))
+    (goto (label eval-dispatch))
+    print-result
+    (perform (op announce-output) (const ";; EC-Eval value: "))
+    (perform (op user-print) (reg val))
+    (goto (label read-eval-print-loop))
+    #+END_SRC
+
+    When we encounter an error in a procedure (such as the "unknown
+    procedure type error" indicated at apply-dispatch), we print an
+    error message and return to the driver loop.
+
+    #+BEGIN_SRC scheme
+    unknown-expression-type
+    (assign val (const unknown-expression-type-error))
+    (goto (label signal-error))
+    unknown-procedure-type
+    (restore continue)
+    (assign val (const unknown-procedure-type-error))
+    (goto (label signal-error))
+    signal-error
+    (perform (op user-print) (reg val))
+    (goto (label read-eval-print-loop))
+    #+END_SRC
+
+    For the purposes of the simulation, we initialize the stack each
+    time through the driver loop, since it might not be empty after an
+    error (such as an undefined variable) interrupts an evaluation. 
+
+    If we combine all the code fragments presented in Section 5.4.1 --
+    Section 5.4.4, we can create an evaluator machine model that we
+    can run using the register-machine simulator of Section 5.2.
+
+    #+BEGIN_SRC scheme
+    (define eceval
+     (make-machine '(exp env val proc argl continue unev)
+      eceval-operations
+      '(read-eval-print-loop
+        <entire machine controller as above>)))
+    #+END_SRC
+
+    We must define Scheme procedures to simulate the operations used
+    as primitives by the evaluator. These are the same procedures we
+    used for the metacircular evaluator in Section 4.1, together with
+    the few additional ones defined in footnotes throughout
+    Section 5.4.
+
+    #+BEGIN_SRC scheme
+    (define eceval-operations
+     (list (list 'self-evaluating? self-evaluating)
+           <complete list of operations for eceval machine>))
+    #+END_SRC
+
+    Finally, we can initialize the global environment and run the
+    evaluator:
+
+    #+BEGIN_SRC scheme
+    (define the-global-environment (setup-environment))
+    (start eceval)
+    ;;; EC-Eval input:
+    (define (append x y)
+     (if (null? x) y (cons (car x) (append (cdr x) y))))
+    ;;; EC-Eval value:
+    ok
+    ;;; EC-Eval input:
+    (append '(a b c) '(d e f))
+    ;;; EC-Eval value:
+    (a b c d e f)
+    #+END_SRC
+
+    Of course, evaluating expressions in this way will take much
+    longer than if we had directly typed them into Scheme, because of
+    the multiple levels of simulation involved. Our expressions are
+    evaluated by the explicit-control-evaluator machine, which is
+    being simulated by a Scheme program, which is itself being
+    evaluated by the Scheme interpreter.
+
+**** Monitoring the performance of the evaluator    
+
+     Simulation can be a powerful tool to guide the implementation of
+     evaulators. Simulations make it easy not only to explore
+     variations of the register-machine design but also to monitor the
+     performance of the simulated evaluator. For example, one
+     important factor in performance is how efficiently the evaluator
+     uses the stack. We can observe the number of stack operations
+     required to evaluate various expressions by defining the
+     evaluator register machine with the previous version of the
+     simulator that collects statistics on stack use (Section 5.2.4),
+     and adding an instruction at the evaluator's print-result entry
+     point to print the statistics:
+
+     #+BEGIN_SRC scheme
+     print-result
+     (perform (op print-stack-statistics))
+     (perform (op announce-output) (const ";;; EC-Eval value:"))
+     #+END_SRC
+
+     Interactions with the evaluator now look like this:
+
+     #+BEGIN_SRC scheme
+     ;;; EC-Eval input:
+     (define (factorial n)
+      (if (= n 1) 1 (* (factorial (- n 1)) n)))
+     (total-pushes = 3 maximum-depth = 3)
+     ;;; EC-Eval value:
+     ok
+     ;;; EC-Eval input:
+     (factorial 5)
+     (total-pushes = 144 maximum-depth = 28)
+     ;;; EC-Eval value:
+     120
+     #+END_SRC
+
+     - Exercise 5.26: Use the monitored stack to explore the
+       tail-recursive property of the evaluator (Section 5.4.2). Start
+       the evaluator and define the iterative factorial procedure from
+       Section 1.2.1:
+
+       #+BEGIN_SRC scheme
+       (define (factorial n)
+        (define (iter product counter)
+         (if (> counter n)
+             product
+             (iter (* counter product) (+ counter 1))))
+        (iter 1 1))
+       #+END_SRC
+
+       Run the procedure with some small values of _n_. Record the
+       maximum stack depth and the number of pushes required to
+       compute n! for each of these values.
+
+       a. You will find that the maximum depth required to evaluate n!
+       is independent of n. What is that depth?
+
+       The maximum depth is 10.
+
+       b. Determine from your data a formula in terms of n for the
+       total number of push operations used in evaluating n! for any n
+       >= 1. Note that the number of operations used is a linear
+       function of n and is thus determined by two constants. 
+
+       The formula is:
+         (n - 1) * 35 + 64
+
+     - Exercise 5.27: For comparison with Exercise 5.26, explore the
+       behavior of the following procedure for computing factorials
+       recursively:
+
+       #+BEGIN_SRC scheme
+       (define (factorial n)
+        (if (= n 1) 1 (* (factorial (- n 1)) n)))
+       #+END_SRC
+
+       By running this procedure with the monitored stack, determine,
+       as a function of n, the maximum depth of the stack and the
+       total number of pushes used in evaluating n! for n
+       >= 1. (Again, these functions will be linear.) Summarize your
+       experiments by filling in the following table with the
+       appropriate expressions in terms of n:
+
+       |                     | Maximum depth | Number of pushes  |
+       |---------------------+---------------+-------------------|
+       | Recursive Factorial | 3 *(n -1) + 8 | 32 * (n - 1) + 16 |
+       | Iterative Factorial | 10            | 35 * (n -1) + 64  |
+
+       The recursive version will actually always use more pushes but
+       much less depth. The number of pushes will never greatly
+       outgrow the recursive version. So the iterative version is
+       actually slightly slower but uses much less space. The reason
+       that the iterative version is 'slower' is because it has three
+       extra pushes per call, because it has an extra item to evaluate
+       in the recursive expression. The first one is (iter (* counter
+       product) (+ counter 1)) which contains seven different
+       expresssions that will be evaluated at some point in argument
+       lists, whereas (* (factorial (- n 1)) n) only has six.
+
+     - Exercise 5.28: Modify the definition of the evaluator by
+       changing eval-sequence as described in Section 5.4.2 so that
+       the evaluator is no longer tail-recursive. Rerun your
+       experiments from Exercise 5.26 and Exercise 5.27 to demonstrate
+       that both versions of the factorial procedure now require space
+       that grows linearly with their input.
+     
+       Although the space is now linear and not constant for the
+       'iterative' version, it still requires less stack space overall
+       than the recursive version. It requires about the same number
+       of total pushes. 
+
+       |                     | Maximum depth  | Number of pushes  |
+       |---------------------+----------------+-------------------|
+       | Recursive Factorial | 8 *(n -1) + 19 | 34 * (n - 1) + 52 |
+       | Iterative Factorial | 3 * (n-1) + 17 | 37 * (n -1) + 70  |
+
+       The other, non-tail-recursive implementation even has
+       detrimental performance effects on the recursive version,
+       because it will still do extra pushes.
+
+     - Exercise 5.29: Monitor the stack operations in the
+       tree-recursive Fibonacci computation:
+
+       #+BEGIN_SRC scheme
+       (define (fib n)
+        (if (< n 2)
+            n
+            (+ (fib (- n 1)) (fib (- n 2)))))
+       #+END_SRC
+
+       a. Give a formula in terms of _n_ for the maximum depth of the
+       stack required to compute Fib(n) for n >= 2. Hint: In Section
+       1.2.2 we argued that the space used by this process grows
+       linearly with _n_. 
+
+       Although the computation complexity isn't linear, the maximum
+       depth is because we return from one fib call before executing
+       the next, which partially unwinds the stack. So although the
+       number of pushes is not linear, the stack depth is. The
+       equation is
+
+       5 * (n - 1) + 8
+
+       So the stack does not get particularly deep. 
+
+       b. Give a formula for the total number of pushes to compute
+       Fib(n) for n >= 2. You should find that the number of pushes
+       (which correlates well with the time used) grows exponentially
+       with n. Hint: Let S(n) be the number of pushes used in
+       computing Fib(n). You should be able to argue that there is a
+       formula that expresses S(n) in terms of S(n - 1), S(n-2), and
+       some fixed "overhead" constant k that is independent of n. Give
+       the formula, and say what k is. Then show that S(n) can be
+       expressed as a * Fib(n + 1) + b and give the values of a and
+       b. 
+
+       Since the computation for Fib(n) is expressed as the addition
+       of fib(n-2) and fib(n-1), the number of pushes is the constant
+       k, which is pushes required to save the values we want to
+       preserve to call fib(n-2) and fib(n-1), plus the pushes
+       required by fib(n-2) and fib(n-1). So if S(n) is the total
+       pushes required by Fib(n), S(n) = k + S(n-1) + S(n-2). 
+       
+       S(n) = k + S(n-1) + S(n-2)
+       S(n) = k + (k + S(n-2) + S(n-3)) + (k + S(n-3) + S(n-4))
+
+       For n >= 2, k is the cost, in pushes, of calling the procedure, calling
+       (fib (- n 1)) and (fib (- n 2)), and then calling + on the
+       result.
+       
+       Initial procedure call (assuming argl is already evaluated and
+       we have modified the environment appropriately):
+       ev if:
+       (save exp)
+       (save env)
+       (save continue)
+       
+       then there is a procedure call for <. 
+       (save continue)
+       (save env)
+       (save unev)
+       <evaluate operator, costing no stack>
+       (save argl)
+       <evaluate operands of (< n 2)>
+       (save env)
+       (save unev)
+       <dispatch>
+       (save argl)
+       <evaluate last argument, costing no pushes, the result is false
+       since n >= 2.>
+       <if costs no additional stack, we begin evaluating the application>
+       (save continue)
+       (save env)
+       (save unev)
+       <evaluating + takes no more stack, begin argument list>
+       (save argl)
+       (save env)
+       (save unev)
+       <evaluating the operator 'fibo', and its argument '(- n 2)' are 
+        part of this procedure call, not the next>
+       (save continue)
+       (save env)
+       (save unev)
+       <dispatch, get back fibo, begin arg list>
+       (save argl)
+       (save env)
+       (save unev)
+       <evaluate another application>
+       (save continue)
+       (save env)
+       (save unev)
+       (save argl)
+       <Evaluate operator ->
+       (save continue)
+       (save env)
+       (save unev)
+       <evaluate n 2>
+       (save env)
+       (save unev)
+       <dispatch>
+       (save argl)
+       <we then apply, don't include this>
+       <evaluating the operator 'fibo', and its argument '(- n 2)' are 
+        part of this procedure call, not the next>
+       (save continue)
+       (save env)
+       (save unev)
+       <dispatch, get back fibo, begin arg list>
+       (save argl)
+       (save env)
+       (save unev)
+       <evaluate another application>
+       (save continue)
+       (save env)
+       (save unev)
+       (save argl)
+       <Evaluate operator ->
+       (save continue)
+       (save env)
+       (save unev)
+       <evaluate n 2>
+       (save env)
+       (save unev)
+       <dispatch>
+       (save argl)
+       ...
+       
+       k = 48. (experimentally, K = 40).
+
+       So, S(n) = 40 + (S(n-1) + S(n-2)).
+       
+       40 + (S(n-1) + S(n-2)) = 40 + (40 + (S(n-2) + S(n-3)) + 40 +
+       (S(n-3) + S(n-4))) ...
+
+       Since Fibo(n) = Fibo(n-1) + Fibo(n-2), and Fibo(n+1) =
+       Fibo(n) + Fibo(n-1), 
+
+       Given that the first two fibonacci numbers are 1, and the first
+       two S(n) are the same, we can for the first S(0), S(1) say that
+       S(0) = 0*k + m*Fibo(1)
+       S(1) = 0*k+ m*Fibo(2)
+       S(2) = 1*k + m*Fibo(2) + m*Fibo(1)
+
+       S(2) = 1*k + m*(Fibo(3))
+       and
+       S(3) = k + S(2) + S(1)
+       S(3) = k + k + m*(Fibo(3)) + m*Fibo(2)
+       S(3) = k + k + m*(Fibo(3) + Fibo(2))
+       S(3) = k + k + m*(Fibo(4))
+       S(3) = 2*k + m(Fibo(4))
+
+       S(4) = k + S(3) + S(2)
+       S(4) = k + (k + k + m*(Fibo(4))) + k + m*(Fibo(3))
+       S(4) = (k + k + k + k) + m*(Fibo(4) + Fibo(3))
+       S(4) = 4*k + m(Fibo(5))
+       
+       S(5) = k + (4*k + m(fibo(5))) + 2*k + m(Fibo(4))
+       S(5) = 7*k + m(Fibo(6))
+
+       S(6) = k + (7*k + m(Fibo(6))) + (4*k + m(Fibo(5)))
+       S(6) = 12 * k + m*Fibo(7)
+       ...
+       k*Fibo(n+1) - k + m*Fibo(n+1)
+       = (k+m)*Fibo(n+1) - k
+       = 56 * Fibo(n+1) - 40
+       
+       56 * Fibo(n+1) - 40
+
+       We can figure out m by calling (fibo 0), it is 16. We can
+       figure out k by just calling (fibo 2) and (fibo 1).  We know
+       that (fibo 1), (fibo 0) have the same overhead so we find k by
+       subtracting 2*m (32) from (fibo 2) (72), and getting 40.
+
+     - Exercise 5.30: Our evaluator currently catches and signals only
+       two kinds of errors -- unknown expression types and unknown
+       procedure types. Other errors will take us out of the evaluator
+       read-eval-print-loop. When we run the evaluator using the
+       register-machine simulator, these errors are caught by the
+       underlying Scheme system. This is analogous to the computer
+       crashing when the user program makes an error. It is a large
+       project to make a real error system work, but it is well worth
+       the effort to understand what is involved here.
+
+       a. Errors that occur in the evlauation process, such as an
+       attempt to access an unbound variable, could be caught by
+       changing the lookup operation to make it return a distinguished
+       condition code, which cannot be a possible value of any user
+       variable. The evaluator can test for this condition code and
+       then do what is necessary to go to signal-error. Find all of
+       the places in the evaluator where such a change is necessary
+       and fix them. This is lots of work.
+
+       b. Much worse is the problem of handling errors that are
+       signaled by applying primitive procedures, such as an attempt
+       to divide by zero or an attempt to extract the car of a
+       symbol. In a professionally written high-quality system, each
+       primitive application is checked for safety as part of the
+       primitive. For example, every call to car could first check
+       that the argument is a pair. If the argument is not a pair, the
+       application would return a distinguished condition code to the
+       evaluator, which would then report the failure. We could
+       arrange for this in our register-machine simulator by making
+       each primitive procedure check for applicability and returning
+       an appropriate distinguished condition code on failure.Then the
+       primitive-apply code in the evaluator can check for the
+       condition code and go to signal-error if necessary. Build this
+       structure and make it work. This is a major project. 
+
+       Most CPUs handle errors by jumping to an interrupt on error. I
+       would like to emulate this. What I could do is define an error
+       structure that can get returned from any primitive that causes
+       a jump to the appropriate error handler. However, a problem
+       with this is that something like car could return basically
+       anything, so it's hard to create a value that can't be returned
+       by car for anything other than an error. One method that would be
+       impossible to confuse with anything legitimate is giving our
+       primitive operations access to a special flags register, and
+       checking it when primitive ops return. Another method would be
+       to create a global variable definition with the value
+       "error-condition", for example. To test if a return is a real
+       error, I use the eq? predicate, rather than the equals? or
+       string=? predicate, to compare the returned value with the
+       global variable, using another operator that I provide the
+       machine. I can actually then use lists and test the first item,
+       like a tagged list (I shouldn't use symbols though because
+       these are interned and eq? will return true if the user program
+       happens to use my symbol. It will not return true if the user
+       program uses an identical text string because these do not get
+       interned). 
+
+       I decided to initially go with the approach of creating a
+       special global variable called ERROR-TAG, which is defined to
+       be the string "error". I check if something is an error by
+       seeing if it is a pair and the first item is eq? to
+       ERROR-TAG. This way, I can't confuse the user program returning
+       a list with the string "error" in the first item with a
+       legitimate error, because only the same string instance will
+       return true for eq? not value.
+
+       Then I replaced several instances of calling the scheme error
+       procedure in the environment code with machine-error, which
+       returns a list with ERROR-TAG and a message (not currently
+       used). This happened in variable lookup code and
+       extend-environment code (when the list of arguments is longer
+       or shorter than the list of parameters). The next issue is to
+       take care of bad syntax, for example, typing (lambda) by itself
+       into the program. I need to catch errors in syntax before using
+       syntax accessors.
+
+       
+     
+       
 
     
 
