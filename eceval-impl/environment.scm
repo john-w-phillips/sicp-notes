@@ -104,17 +104,22 @@
 (define (truthy? value)
   (or (true? value)
       (not (falsy? value))))
-(define (car-wrap alist)
-  (cond
-   ((not (pair? alist))
-    (make-error "Not a list"))
-   (else (car alist))))
 
-(define (cdr-wrap alist)
+(define (car-wrap . alist)
   (cond
-   ((not (pair? alist))
-    (make-error "not a list"))
-   (else (cdr alist))))
+   ((not (= (length alist) 1))
+    (make-error "CAR requires one argument"))
+   ((not (pair? (car alist)))
+    (make-error "CAR -- Not a list"))
+   (else (car (car alist)))))
+
+(define (cdr-wrap . alist)
+  (cond
+   ((not (= (length alist) 1))
+    (make-error "CDR requires one argument")) 
+   ((not (pair? (car alist)))
+    (make-error "CDR -- not a list"))
+   (else (cdr (car alist)))))
 
 (define (make-binary-wrap op)
   (lambda (a b)
@@ -122,6 +127,7 @@
      ((and (number? a) (number? b))
       (op a b))
      (else (make-error "Not a number")))))
+
 (define (make-list-operator error-message initial test binop)
   (define (iter result rest)
     (cond
@@ -131,6 +137,7 @@
 	    (cdr rest)))
      (else
       (make-error error-message))))
+
   (define (op-replacement . args)
     (iter initial args))
   op-replacement)
@@ -147,6 +154,14 @@
    ((null? (cdr args)) (- 0 (car args)))
    (else
     (iterate-list (car args) (cdr args)))))
+
+(define (cons-wrap . args)
+  (cond
+   ((not (= (length args) 2))
+    (make-error "CONS requires exactly two arguments"))
+   (else
+    (cons (car args) (cadr args)))))
+
 (define primitive-environment
   (extend-environment
    (list
@@ -178,7 +193,7 @@
     (make-primitive-procedure (make-binary-wrap =))
     (make-primitive-procedure sub-wrap)
     (make-primitive-procedure car-wrap)
-    (make-primitive-procedure cons)
+    (make-primitive-procedure cons-wrap)
     (make-primitive-procedure cdr-wrap)
     (make-primitive-procedure get-universal-time)
     (make-primitive-procedure null?)

@@ -23,6 +23,7 @@
 	(list 'assignment? assignment?)
 	(list 'definition? definition?)
 	(list 'if? if?)
+	(list 'symbol? symbol?)
 	(list 'lambda? lambda?)
 	(list 'begin? begin?)
 	(list 'application? application?)
@@ -87,6 +88,24 @@
     bad-number-of-arguments-error
     (assign val (const bad-number-of-arguments-error))
     (goto (label signal-error))
+    no-if-predicate
+    (assign val (const no-if-predicate))
+    (assign unev (reg exp))
+    (goto (label signal-error))
+    malformed-if-alternative
+    (assign val (const malformed-if-alternative))
+    (assign unev (reg exp))
+    (goto (label signal-error))
+    malformed-if-consequent
+    (assign val (const malformed-if-consequent))
+    (assign unev (reg exp))
+    (goto (label signal-error))
+    malformed-set-statement
+    (assign val (const malformed-set-statement))
+    (goto (label signal-error))
+    malformed-definition
+    (assign val (const malformed-definition))
+    (goto (label signal-error))
     malformed-syntax
     (assign val (const malformed-syntax-error))
     (assign unev (reg exp))
@@ -143,17 +162,23 @@
     (goto (reg continue))
     ev-application
     (save continue)
-    (save env) 
     (assign unev (op operands) (reg exp))
-    (save unev)
     (assign exp (op operator) (reg exp))
+    (test (op symbol?) (reg exp))
+    (branch (label ev-lookup-symb))
+    (save env) 
+    (save unev)
     (assign continue (label ev-appl-did-operator))
     (goto (label eval-dispatch))
+    ev-lookup-symb
+    (assign proc (op lookup-variable-value) (reg exp) (reg env))
+    (goto (label ev-appl-did-operator-no-restore))
     ev-appl-did-operator
     (restore unev)
     (restore env)
-    (assign argl (op empty-arglist))
     (assign proc (reg val))
+    ev-appl-did-operator-no-restore
+    (assign argl (op empty-arglist))
     (test (op no-operands?) (reg unev))
     (branch (label apply-dispatch))
     (save proc)
@@ -191,6 +216,7 @@
     (assign val (op apply-primitive-procedure)
 	    (reg proc) (reg argl))
     (test (op machine-error?) (reg val))
+    (assign unev (reg val))
     (branch (label primitive-error))
     (restore continue)
     (goto (reg continue))
@@ -232,7 +258,7 @@
     (assign continue (label ev-if-decide))
     (assign exp (op if-predicate) (reg exp))
     (test (op machine-error?) (reg exp))
-    (branch (label malformed-syntax))
+    (branch (label no-if-predicate))
     (goto (label eval-dispatch))
     ev-if-decide
     (restore continue)
@@ -243,17 +269,17 @@
     ev-if-alternative
     (assign exp (op if-alternative) (reg exp))
     (test (op machine-error?) (reg exp))
-    (branch (label malformed-syntax))
+    (branch (label malformed-if-alternative))
     (goto (label eval-dispatch))
     ev-if-consequent
     (assign exp (op if-consequent) (reg exp))
     (test (op machine-error?) (reg exp))
-    (branch (label malformed-syntax))
+    (branch (label malformed-if-consequent))
     (goto (label eval-dispatch))
     ev-assignment
     (assign unev (op assignment-variable) (reg exp))
     (test (op machine-error?) (reg unev))
-    (branch (label malformed-syntax))
+    (branch (label malformed-set-statement))
     (save unev)
     (assign exp (op assignment-value) (reg exp))
     (test (op machine-error?) (reg exp))
@@ -275,11 +301,11 @@
     ev-definition
     (assign unev (op definition-variable) (reg exp))
     (test (op machine-error?) (reg unev))
-    (branch (label malformed-syntax))
+    (branch (label malformed-definition))
     (save unev)
     (assign exp (op definition-value) (reg exp))
     (test (op machine-error?) (reg exp))
-    (branch (label malformed-syntax))
+    (branch (label malformed-definition))
     (save env)
     (save continue)
     (assign continue (label ev-definition-1))
