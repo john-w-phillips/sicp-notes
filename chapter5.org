@@ -4649,6 +4649,7 @@ operations of the evaluator register machine.
        ;; Evaluate (f), assume we get it into proc...
        ;; do what we did earlier with the arguments.
        (restore env)
+       ;; possibly (assign proc (reg val))
        (assign argl (op empty-arglist))
        (assign argl (op adjoin-arglist) (reg argl) (const x))  
        (assign argl (op adjoin-arglist) (reg argl) (const y))
@@ -4854,6 +4855,7 @@ operations of the evaluator register machine.
      #+BEGIN_SRC scheme
      (define (compile-self-evaluating exp target linkage)
       (end-with-linkage
+       linkage
        (make-instruction-sequence '() (list target)
         `((assign ,target (const ,exp))))))
      (define (compile-quoted exp target linkage)
@@ -5299,8 +5301,8 @@ operations of the evaluator register machine.
      (assign val (op compiled-procedure-entry) (reg proc))
      (goto (reg val))
      proc-return
-     (assign <target> (reg val))
-     (goto (label <linkage>))
+     (assign <target> (reg val))   ; included if target is not val.
+     (goto (label <linkage>))      ; linkage code.
      #+END_SRC
 
      or like this if the linkage is return.
@@ -5311,38 +5313,1646 @@ operations of the evaluator register machine.
      (assign val (op compiled-procedure-entry) (reg proc))
      (goto (reg val))
      proc-return
-     (assign <target> (reg val))
-     (restore continue)
-     (goto (reg continue))
+     (assign <target> (reg val)) ; included if target is not val.
+     (restore continue)          
+     (goto (reg continue))       ; linkage code.
      #+END_SRC
 
      This code sets up continue so that the procedure will return to a
-     label proc-return and jumps to the procedure's entry point. The
+     label proc-return and jummps to the procedure's entry point. The
      code at proc-return transfers the procedure's result from val to
      the target register (if necessary) and then jumps to the location
-     specified by the linkage. (The linkage is always return or label,
-     because compile-procedure-call replaces a next linkage for the
-     compound-procedure branch by an after-clal label.)
+     specified by the linkage (The linkage is always return or a
+     label, because compile-procedure-call replaces a next linkage for
+     the compound-procedure branch by an after-call label.)
 
+     In fact, if the target is not val, that is exactly the code our
+     compiler will generate. Usually, however, the target is val (the
+     only time the compiler specifies a different register is when
+     targeting the evaluation of an operator to proc), so the
+     procedure result is put directly into the target register and
+     there is no need to return to a special location that copies
+     it. Instead, we simplify the code by setting up continue so that
+     the procedure will "return" directly to the place specified by
+     the caller's linkage:
+
+     #+BEGIN_SRC scheme
+     <set up continue for linkage>
+     (assign val (op compiled-procedure-entry) (reg proc))
+     (goto (reg val))
+     #+END_SRC
+
+     If the linkage is a label, we set up continue so that the
+     procedure will return to that label. (That is, the (goto reg
+     continue)) the procedure ends with becomes equivalent to the
+     (goto (label <linkage>)) at proc-return above.)
+
+     #+BEGIN_SRC scheme
+     (assign continue (label <linkage>))
+     (assign val (op compiled-procedure-entry) (reg proc))
+     (goto (reg val))
+     #+END_SRC
+
+     If the linkage is return, we don't need to set up continue at
+     all: It already holds the desired location. (That is, the (goto
+     (reg continue)) the procedure ends with goes directly to the
+     place where the (goto (reg continue)) at proc-return would have
+     gone.)
+
+     #+BEGIN_SRC scheme
+     (assign val (op compiled-procedure-entry) (reg proc))
+     (goto (reg val))
+     #+END_SRC
+
+     With this implementation of the return linkage, the compiler
+     generates tail-recursive code. Calling a procedure as the final
+     step in a procedure body does a direct transfer, without saving
+     any information on the stack. Suppose instead that we had handled
+     the case of a procedure call with a linkage of return and a
+     target of val as shown above for a non-val target. This would
+     destroy tail recursion. Our system would still give the same
+     value for any expression. But each time we called a procedure, we
+     would save continue and return after the call to undo the
+     (useless) save. These extra saves would accumulate during a nest
+     of procedure calls.
+
+     compile-proc-appl generates the above procedure-application code
+     by considering four cases, depending on whether the target for
+     the call is val and whether the linkage is return. Observe that
+     the instruction sequences are declared to modify all the
+     registers, since executing the procedure body can change the
+     registers in arbitrary ways. Also note that the code sequence for
+     the case with target val and linkage return is declared to need
+     continue: Even though continue is not explicitly used in the
+     two-instruction sequence, we must be sure that continue will have
+     the correct value when we enter the compiled procedure.
+
+     #+BEGIN_SRC scheme
+       (define (compile-proc-appl target linkage)
+	 (cond ((and (eq? target 'val) (not (eq? linkage 'return)))
+		(make-instruction-sequence
+		 '(proc) all-regs
+		 `((assign continue (label ,linkage))
+		   (assign val
+			   (op compiled-procedure-entry)
+			   (reg proc))
+		   (goto (reg val)))))
+	       ((and (not (eq? target 'val))
+		     (not (eq? linkage 'return)))
+		(let ((proc-return (make-label 'proc-return)))
+		  (make-instruction-sequence
+		   '(proc) all-regs
+		   `((assign continue (label ,proc-return))
+		     (assign val (op compiled-procedure-entry)
+			     (reg proc))
+		     (goto (reg val))
+		     ,proc-return
+		     (assign ,target (reg val))
+		     (goto (label ,linkage))))))
+	       ((and (eq? target 'val) (eq? linkage 'return))
+		(make-instruction-sequence
+		 '(proc continue)
+		 all-regs
+		 '((assign val (op compiled-procedure-entry)
+			   (reg proc))
+		   (goto (reg val)))))
+	       ((and (not (eq? target 'val))
+		     (eq? linkage 'return))
+		(error "return linkage, target not val: COMPILE"
+		       target))))
+     #+END_SRC
+
+*** 5.5.4 Combining Instruction Sequences     
+
+    This section describes the details on how instruction sequences
+    are represented and combined. Recall from Section 5.5.1 that an
+    instruction sequence is represented as a list of all the registers
+    needed, the registers modified, and the actual instructions. We
+    will also consider a label (symbol) to be a degenerate case of an
+    instruction sequence, which doesn't need or modify any
+    registers. So to determine the registers needed and modified by
+    instruction sequences we use the selectors
+
+    #+BEGIN_SRC scheme
+      (define (registers-needed s)
+	(if (symbol? s) '() (car s)))
+      (define (registers-modified s)
+	(if (symbol? s) '() (cadr s)))
+      (define (statements s)
+	(if (symbol? s) (list s) (caddr s)))
+    #+END_SRC
+
+    and to determine whether a given sequence needs or modifies a
+    given register we use the predicates
+
+    #+BEGIN_SRC scheme
+    (define (needs-register? seq reg)
+     (memq reg (registers-needed seq)))
+    (define (modifies-register? seq reg)
+     (memq reg (registers-modified seq)))
+    #+END_SRC
+
+    In terms of these predicates and selectors, we can implement the
+    various instruction sequence combiners used throughout the
+    compiler.
+
+    The basic combiner is append-instruction-sequences. This takes as
+    arguments an arbitrary number of instruction sequences that are to
+    be executed sequentially and returns an instruction sequence whose
+    statements are the statements of all the sequences appended
+    together. The subtle point is to determine the registers that are
+    needed and modified by the resulting sequence. It modifies those
+    registers that are modified by any of the sequences; it needs
+    those regsters that must be initialized before the first sequence
+    can be run (the registers needed by the first sequence), together
+    by with those registers needed by any of the other sequences that
+    are not initialized (modified) by sequences preceding it. 
+
+    The sequences are appeneded two at a time by
+    append-2-sequences. This takes two instruction sequences seq1 and
+    seq2 and returns the instruction sequence whose statements are the
+    statements of seq1 followed by the statements of seq2, whose
+    modified registers are those registers that are modified by either
+    seq1 or seq2, and whose needed registers are the registers needed
+    by seq1 together with those registers needed by seq2 that are not
+    modified by seq. (In terms of set operations, the new set of
+    needed registers is the union of the set of registers needed by
+    seq1 with the set difference of the registers needed by seq2 and
+    the registers modified by seq1.) Thus,
+    append-instruction-sequences is implemented as follows:
+
+    #+BEGIN_SRC scheme
+    (define (append-instruction-sequences . seqs)
+     (define (append-2-sequences seq1 seq2)
+      (make-instruction-sequence
+       (list-union
+        (registers-needed seq1)
+        (list-difference (registers-needed seq2)
+                         (registers-modified seq1)))
+       (list-union (registers-modified seq1)
+                   (registers-modified seq2))
+       (append (statements seq1) (statements seq2))))
+      (define (append-seq-list seqs)
+       (if (null? seqs)
+           (empty-instruction-sequence)
+           (append-2-sequences
+            (car seqs)
+            (append-seq-list (cdr seqs)))))
+      (append-seq-list seqs))
+    #+END_SRC
+
+    This procedure uses some simple operations for manipulating sets
+    represented as lists, similar to the (unordered) set
+    representation described in section 2.3.3:
+
+    #+BEGIN_SRC scheme
+    (define (list-union s1 s2)
+     (cond ((null? s1) s2)
+           ((memq (car s1) s2) (list-union (cdr s1) s2))
+           (else (cons (car s1) (list-union (cdr s1) s2)))))
+    (define (list-difference s1 s2)
+     (cond ((null? s1) '())
+           ((memq (car s1) s2) (list-difference (cdr s1) s2))
+           (else (cons (car s1)
+                       (list-difference (cdr s1) s2)))))
+    #+END_SRC
+
+    preserving, the second major instruction sequence combiner, takes
+    a list of registers regs and two instruction sequences seq1 and
+    seq2 that are to be executed sequentially. It returns an
+    instruction sequence whose statements are the statements of seq1
+    followed by the statements of seq2, with appropriate save and
+    restore instructions around seq1 to protect the registers in regs
+    that are modified by seq1 but needed by seq2. To accomplish this,
+    preserving first creates a sequence that has the required saves
+    followed by the statements of seq1 followed by the required
+    restores. This sequence needs the registers being saved and
+    restored in addition to the registers needed by seq1, and modifies
+    the registers modified by seq1 except for the ones being saved and
+    restored. This augmented sequence and seq2 are then appended in
+    the usual way. The following procedure implements this strategy
+    recursively, walking down the list of registers to be preserved:
+
+    #+BEGIN_SRC scheme
+    (define (preserving regs seq1 seq2)
+     (if (null? regs)
+         (append-instruction-sequences seq1 seq2)
+         (let ((first-reg (car regs)))
+          (if (and (needs-register? seq2 first-reg)
+                   (modifies-register? seq1 first-reg))
+              (preserving (cdr regs)
+               (make-instruction-sequence
+                (list-union (list first-reg) (registers-needed seq1))
+                (list-difference (registers-modified seq1) (list first-reg))
+                (append `((save ,first-reg))
+                        (statements seq1)
+                        `((restore ,first-reg))))
+              seq2)
+              (preserving (cdr regs) seq1 seq2)))))
+    #+END_SRC
+
+    Another sequence combiner, tack-on-instruction-sequence, is used
+    by compile-lambda to append a procedure body to another
+    sequence. Because the procedure body is not "in line" to be
+    executed as part of the combined sequence, its register use has no
+    impact on the register use of the sequence in which it is
+    embedded. We thus ignore the procedure body's sets of needed and
+    modified registers when we tack it onto the other sequence.
+
+    #+BEGIN_SRC scheme
+    (define (tack-on-instruction-sequence seq body-seq)
+     (make-instruction-sequence
+      (registers-needed seq)
+      (registers-modified seq)
+      (append (statements seq)
+              (statements body-seq))))
+    #+END_SRC
+
+    compile-if and compile-procedure-call use a special combiner
+    called parallel-instruction-sequences to append the two
+    alternative branches that follow a test. The two branches will
+    never be executed sequentially; for any particular evaluation of
+    the test, one branch or the other will be entered. Because of
+    this, the registers needed by the second branch are still needed
+    by the combined sequence, even if these are modified by the first
+    branch.
+
+    #+BEGIN_SRC scheme
+    (define (parallel-instruction-sequences seq1 seq2)
+     (make-instruction-sequence
+      (list-union (registers-needed seq1)
+                  (registers-needed seq2))
+      (list-union (registers-modified seq1)
+                  (registers-modified seq2))
+      (append (statements seq1) (statements seq2))))
+    #+END_SRC
+
+*** 5.5.5 An Example of Compiled Code
+
+    Now that we have seen all the elements of the compiler, let us
+    examine an example of compiled code to see how things fit
+    together. We will compile the definition of a recursive factorial
+    procedure by calling compile:
+
+    #+BEGIN_SRC scheme
+    (compile
+     '(define (factorial n)
+       (if (= n 1)
+           1 (* (factorial (- n 1)) n)))
+      'val
+      'next)
+    #+END_SRC
+
+    We have specified that the value of the define expression should
+    be placed into the val register. We don't care what the compiled
+    code does after executing the define, so our chose of next as the
+    linkage descriptoris arbitrary.
+
+    compile determines that the expression is a definition, so it
+    calls compile-definition to compile code to compute the value to
+    be assigned (targeted to val), followed by code to install the
+    definition, followed by code to put the value of the define (which
+    is the symbol ok) into the target register, followed finally by
+    the linkage code. env is preserved around the computation of the
+    value, because it is needed in order to install the
+    definition. Because the linkage is next, there is no linkage code
+    in this case. The skeleton of the compiled code is thus
+
+    #+BEGIN_SRC scheme
+    <save env if modified by code to compute value>
+    <compilation of definition value, target val, linkage next>
+    <restore env if saved above>
+    (perform (op define-variable!)
+             (const factorial)
+             (reg val)
+             (reg env))
+    (assign val (const ok))
+    #+END_SRC
+
+    A procedure body is always compiled (by compile-lambda-body) as a
+    sequence with target val and linkage return. The sequence in this
+    case consists of a single if expression:
+
+    #+BEGIN_SRC scheme
+    (if (= n 1)
+        1
+        (* (factorial (- n 1)) n))
+    #+END_SRC
+    
+    compile-if generates code that first computes the predicate
+    (targeted to val), then checks the result and branches around the
+    true branch if the predicate is false. env and continue are
+    preserved around the predicate code, since they may be needed for
+    the rest of the if expression. Since the if expression is the
+    final expression (and only expression) in the sequence making up
+    the procedure body, its target is val and its linkage is return,
+    so the true and false branches are both compiled with target val
+    and linkage return. (That is, the value of the conditional, which
+    is the value computed by either of its branches, is the value of
+    the procedure.)
+
+    #+BEGIN_SRC scheme
+    <save continue, env if modified by predicate and needed by branches>
+    <compilation of predicate, target val, linkage next>
+    <restore continue, env if saved above>
+    (test (op false?) (reg val))
+    (branch (label false-branch4))
+    true-branch5
+    <compilation of true branch, target val, linkage return>
+    false-branch4
+    <compilation of false branch, target val, linkage return>
+    after-if3
+    #+END_SRC
+
+    The predicate (= n 1) is a procedure call. This looks up the
+    operator (the symbol =) and places this value in proc. It then
+    assembles the arguments 1 and the value of n into argl. Then it
+    tests whether proc contains a primitive or a compound procedure,
+    and dispatches to a primitive branch or a compound branch
+    accordingly. Both branches resume at the after-call label. The
+    requirements to preserve registers around the evaluation of the
+    operator and operands don't result in any saving of registers,
+    because in this case those evaluations don't modify the registers
+    in question.
+
+    #+BEGIN_SRC scheme
+    (assign proc (op lookup-variable-value) (const =) (reg env))
+    (assign val (const 1))
+    (assign argl (op list) (reg val))
+    (assign val (op lookup-variable-value) (const n) (reg env))
+    (assign argl (op cons) (reg val) (reg argl))
+    (test (op primitive-procedure?) (reg proc))
+    (branch (label primitive-branch17))
+    compiled-branch16
+    (assign continue (label after-call15))
+    (assign val (op compiled-procedure-entry) (reg proc))
+    (goto (reg val))
+    primitive-branch17
+    (assign val (op apply-primitive-procedure)
+                (reg proc)
+                (reg argl))
+    after-call15
+    #+END_SRC
+
+    The true branch, which is the constant 1, compiled (with target
+    val and linkage return) to 
+
+    #+BEGIN_SRC scheme
+    (assign val (const 1))
+    (goto (reg continue))
+    #+END_SRC
+
+    The code for the false branch is another procedure call, where the
+    procedure is the value of the symbol *, and the arguments are n
+    and the result of another procedure all (a call to
+    factorial). Each of these calls sets up proc and argl and its own
+    primitive and compound branches. Figure 5.17 shows the complete
+    compilation of the definition of the factorial procedure. Notice
+    that the possible save and restore of continue and env around the
+    predicate, shown above, are in fact generated, because these
+    registers are modified by the procedure call in the predicate and
+    needed for the procedure call and the return linkage in the
+    branches.
+
+    - Exercise 5.33: Consider the following definition of a factorial
+      procedure, which is slightly different from the one given above:
+
+      #+BEGIN_SRC scheme
+      (define (factorial-alt n)
+       (if (= n 1)
+           1
+           (* n (factorial-alt (- n 1)))))
+      #+END_SRC
+
+      Compile this procedure and compare the resulting code with that
+      produced for factorial. Explain any differences you find. Does
+      either program execute more efficiently than the other?
+
+      The difference is in the false branch, which looks like this in
+      alt:
+
+      #+BEGIN_SRC scheme
+	false-branch38
+	(assign proc (op lookup-variable-value) (const *) (reg env))
+	(save continue)
+	(save proc)
+	(assign proc (op lookup-variable-value) (const factorial-alt) (reg env))
+	(save proc)
+	(assign proc (op lookup-variable-value) (const -) (reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch42))
+	compiled-branch41
+	(assign continue (label after-call40))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch42
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call40
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch45))
+	compiled-branch44
+	(assign continue (label after-call43))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch45
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call43
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch48))
+	compiled-branch47
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch48
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(goto (reg continue))
+      #+END_SRC
+
+      And this in the earlier version:
+
+      #+begin_src scheme
+	false-branch21
+	(assign proc (op lookup-variable-value) (const *) (reg env))
+	(save continue)
+	(save proc)
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op list) (reg val))
+	(save argl)
+	(assign proc (op lookup-variable-value) (const factorial) (reg env))
+	(save proc)
+	(assign proc (op lookup-variable-value) (const -) (reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch25))
+	compiled-branch24
+	(assign continue (label after-call23))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch25
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call23
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch28))
+	compiled-branch27
+	(assign continue (label after-call26))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch28
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call26
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch31))
+	compiled-branch30
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch31
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(goto (reg continue))
+      #+end_src 
+
+      In the earlier version, we had to save the argument list as we
+      were building it to go and call the factorial function, where in
+      the second version, we just build up the argument list for
+      factorial-alt, call it, and go on, no saving is needed, and also
+      no restoration. In the earlier version we have:
+      #+BEGIN_SRC scheme
+      (assign val (op lookup-variable-value) (const n) (reg env))
+      (assign argl (op list) (reg val))
+      (save argl)
+      #+END_SRC
+
+      And later:
+
+      #+BEGIN_SRC scheme
+      after-call26
+      (restore argl)
+      (assign argl (op cons) (reg val) (reg argl))
+      (restore proc)
+      (restore continue)
+      #+END_SRC
+
+      But the new version has:
+
+      #+BEGIN_SRC scheme
+      ;; nothing in the top but the preparations for factorial-alt
+      #+END_SRC
+
+      And later:
+
+      #+BEGIN_SRC scheme
+      after-call43
+      (assign argl (op list) (reg val))
+      (assign val (op lookup-variable-value) (const n) (reg env))
+      (assign argl (op cons) (reg val) (reg argl))
+      (restore proc)
+      (restore continue)
+      #+END_SRC
+
+      Although the later bit in the new version has one extra
+      instruction compared to the old one, the total number of
+      instructions is two less -- minus a push and save.
+
+    - Exercise 5.34: Compile the iterative factorial procedure
+
+      #+BEGIN_SRC scheme
+      (define (factorial n)
+       (define (iter product counter)
+        (if (> counter n)
+            product
+            (iter (* counter product)
+                  (+ counter 1)))
+       (iter 1 1))
+      #+END_SRC
+      Annotate the resulting code, showing the essential difference
+      between the code for iterative and recursive versions of
+      factorial that makes one process build up stack space and the
+      other run on constant stack space. 
+
+      #+BEGIN_SRC scheme
+	(assign val (op make-compiled-procedure) (label entry2) (reg env))			;; create the procedure.
+	(goto (label after-lambda1))								;; skip around procedure code.
+	entry2											;; actual entry of the main procedure.
+	(assign env (op compiled-procedure-env) (reg proc)) 
+	(assign env (op extend-environment) (const (n)) (reg argl) (reg env))
+	(assign val (op make-compiled-procedure) (label entry7) (reg env))
+	(goto (label after-lambda6))
+	entry7											;; Procedure body of the iterative procedure.
+	(assign env (op compiled-procedure-env) (reg proc))					;; Set up procedure.
+	(assign env (op extend-environment) (const (product counter)) (reg argl) (reg env))	;; set up arguments.
+	(save continue)
+	(assign proc (op lookup-variable-value) (const >) (reg env))				;; Test is the counter greater than N...
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const counter) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))						;; actually call (> counter n).
+	(branch (label primitive-branch22)) 
+	compiled-branch21
+	(assign continue (label after-call20))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch22
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call20
+	(restore continue)
+	(test (op false?) (reg val))							 ;; Test the predicate in (if (> counter n) ...).
+	(branch (label false-branch9))
+	true-branch10
+	(assign val (op lookup-variable-value) (const product) (reg env))		 ;; counter was greater, so just return the value of product in the val register.
+	(goto (reg continue))
+	false-branch9
+	(assign proc (op lookup-variable-value) (const iter) (reg env))			 ;; Since counter was greater, we will call iter again.
+	;;; Note that a large amount of overhead is in the below compared to
+	;;; the 'normal' recursive version because we have two variables we
+	;;; are modifying instead of none...before we just passed the
+	;;; accumulating value in the val register but now we have to
+	;;; explicitly take it out and put it back into the environment.
+	(save continue)
+	(save proc)									 ;; below we will first compute the new values of product and counter, and then call the procedure.
+	(assign proc (op lookup-variable-value) (const +) (reg env))			 ;; Start the counter increment, find +
+	(assign val (const 1))								 ;; add the constant one...
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const counter) (reg env))		 ;; to the value of counter.
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))					 ;; call (+ counter 1).
+	(branch (label primitive-branch16))
+	compiled-branch15
+	(assign continue (label after-call14))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch16
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call14
+	(assign argl (op list) (reg val))						 ;; After (+ counter 1) we continue the argument list for iter, which now will include product.
+	(save argl)
+	(assign proc (op lookup-variable-value) (const *) (reg env))			 ;; compute (* product counter).
+	(assign val (op lookup-variable-value) (const product) (reg env))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const counter) (reg env))		 ;; lookup counter again.
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch13))
+	compiled-branch12
+	(assign continue (label after-call11))
+	(assign val (op compiled-procedure-entry) (reg proc)) 
+	(goto (reg val))
+	primitive-branch13
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call11
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(restore proc)									 ;; restore the iter value to proc, and call it.
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	;;; call proc. At this point we have nothing extra on the
+	;;; stack...where in normal fibo, we would be essentially evaluating
+	;;; the arguments to * when we make a recursive call, thus keeping the
+	;;; proc and argl values on the stack, here we have no need of stack
+	;;; because everything is in the variables. 
+	(branch (label primitive-branch19))
+	compiled-branch18
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch19
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(goto (reg continue))
+	after-call17
+	after-if8
+	after-lambda6
+	(perform (op define-variable!) (const iter) (reg val) (reg env))		 ;; The actual setting of the definition, remember we jumped around the above code in defining iter.
+	(assign val (const ok))								 ;; return ok from define
+	(assign proc (op lookup-variable-value) (const iter) (reg env))			 ;; We are still in the actual body code of (define (fibo-iter...)..., so this is the call to (iter 1 1).
+	(assign val (const 1))								 ;; set up argument list for (iter 1 1).
+	(assign argl (op list) (reg val))
+	(assign val (const 1))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))					 ;; call iter.
+	(branch (label primitive-branch5))
+	compiled-branch4
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch5
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(goto (reg continue))
+	after-call3
+	after-lambda1
+	(perform (op define-variable!) (const factorial-iter) (reg val) (reg env))	 ;; now we actually define fibo itself in the environment.
+	(assign next (const ok))
+      #+END_SRC
+
+      #+BEGIN_SRC scheme
+	(assign val (op make-compiled-procedure) (label entry24) (reg env))
+	(goto (label after-lambda23))
+	entry24
+	(assign env (op compiled-procedure-env) (reg proc))
+	(assign env (op extend-environment) (const (n)) (reg argl) (reg env))
+	(save continue)
+	(assign proc (op lookup-variable-value) (const =) (reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch39))
+	compiled-branch38
+	(assign continue (label after-call37))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch39
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call37
+	(restore continue)
+	(test (op false?) (reg val))
+	(branch (label false-branch26))
+	true-branch27
+	(assign val (const 1))
+	(goto (reg continue))
+	false-branch26
+	;;; Here, we call (* n (factorial (- n 1))). This is where it differs
+	;;; from the iterative procedure with respect to stack. Because we
+	;;; want to call * on the result of the factorial function, each call
+	;;; to factorial must necessarily use stack space to save proc and
+	;;; argl, even if we don't save the continue register. But we do
+	;;; always need to save continue because we ourselves alter it. Tail
+	;;; recursion cannot help us here because the factorial sub-call is
+	;;; not returning to where the whole procedure would be returning for
+	;;; its outer invocation, so we have to alter the continue register.
+	(assign proc (op lookup-variable-value) (const *) (reg env))
+	(save continue)
+	(save proc)
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op list) (reg val))
+	(save argl)
+	(assign proc (op lookup-variable-value) (const factorial) (reg env))
+	(save proc)
+	(assign proc (op lookup-variable-value) (const -) (reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val (op lookup-variable-value) (const n) (reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch30))
+	compiled-branch29
+	(assign continue (label after-call28))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch30
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call28
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch33))
+	compiled-branch32
+	(assign continue (label after-call31))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch33
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call31
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch36))
+	compiled-branch35
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch36
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(goto (reg continue))
+	after-call34
+	after-if25
+	after-lambda23
+	(perform (op define-variable!) (const factorial) (reg val) (reg env))
+	(assign val (const ok)))
+      #+END_SRC
+
+    - Exercise 5.35: What expression was compiled to produce the code
+      shown in Figure 5.18?
+
+      #+BEGIN_SRC scheme
+	(assign val
+		(op make-compiled-procedure)
+		(label entry16)
+		(reg env))
+	(goto (label after-lambda15))			;; Create a procedure object, and skip to after its code.
+	entry16						;; Entry to the procedure.
+	(assign env (op compiled-procedure-env) (reg proc))
+	(assign env
+		(op extend-environment)
+		(const (x))				;; Assign (x) to the  argument list, the function has one variable parameter, x.
+		(reg argl)
+		(reg env))
+	(assign proc
+		(op lookup-variable-value)
+		(const +)
+		(reg env))				;; Find +, set up for a call.
+	(save continue)					;; save + and set up for another call 
+	(save proc)
+	(save env)
+	(assign proc
+		(op lookup-variable-value)
+		(const g)
+		(reg env))				;; the call is to the function g, but save that, and set up for another...
+	(save proc)
+	(assign proc
+		(op lookup-variable-value)
+		(const +)
+		(reg env))				;; Set up for a call to +.
+	(assign val (const 2))
+	(assign argl (op list) (reg val))		;; Start building the argument list, (2) at first.
+	(assign val
+		(op lookup-variable-value)
+		(const x)
+		(reg env))
+	(assign argl (op cons) (reg val) (reg argl))	;; Prepend x to the list -- (x 2).
+	(test (op primitive-procedure?) (reg proc))	;; call (+ x 2).
+	(branch (label primitive-branch19))
+	compiled-branch18
+	(assign continue (label after-call17))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch19
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	after-call17					;; finish calling (+ x 2).
+	(assign argl (op list) (reg val))		;; The argument list for g is now first (+ x 2).
+	(restore proc)					;; Restore g from the stack and call it.
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch22))
+	compiled-branch21
+	(assign continue (label after-call20))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch22
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	after-call20					;; We now have (g (+ x 2)) on the stack. 
+	(assign argl (op list) (reg val))		;; argl has as its first/last element (g (+ x 2)).
+	(restore env)
+	(assign val
+		(op lookup-variable-value)
+		(const x)
+		(reg env))
+	(assign argl (op cons) (reg val) (reg argl))	;; Add x -- argl is (x (g (+ x 2))).
+	(restore proc)					;; restore the procedure call to +.
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))	;; call it -- we are computing (+ x (g (+ x 2))).
+	(branch (label primitive-branch25))
+	compiled-branch24
+	(assign val
+		(op compiled-procedure-entry)
+		(reg proc))
+	(goto (reg val))
+	primitive-branch25
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	(goto (reg continue))
+	after-call23					;; Finish the call to +.
+	after-lambda15
+	(perform (op define-variable!)
+		 (const f)				;; Define the procedure f in the environment.
+		 (reg val)
+		 (reg env))
+	(assign val (const ok))				;; Return ok to val.
+	;; The value was (define (f x) (+ x (g (+ x 2)))).
+      #+END_SRC
+
+    - Exercise 5.36: What order of evaluation does our compiler
+      produce for operands of a combination? Is it left-to-right,
+      right-to-left, or some other order? Where in the compiler is
+      this order determined? Modify the compiler so that it produces
+      some other order of evaluation. (See the discussion of order of
+      evaluation for the explicit-control evaluator in Section 5.4.1.)
+      How does changing the order of operand evaluation affect the
+      efficiency of the code that constructs the argument list?
+
+      The order of evaluation is right to left. We evaluate the last
+      arguments first, in other words. This behavior is in
+      'construct-arglist':
+
+      #+BEGIN_SRC scheme
+	(define (construct-arglist operand-codes)
+	  (let ((operand-codes (reverse operand-codes)))
+	    (if (null? operand-codes)
+		(make-instruction-sequence
+		 '() '(argl)
+		 '((assign argl (const ()))))
+		(let ((code-to-get-last-arg
+		       (append-instruction-sequences
+			(car operand-codes)
+			(make-instruction-sequence
+			 '(val) '(argl)
+			 '((assign argl (op list) (reg val)))))))
+		  (if (null? (cdr operand-codes))
+		      code-to-get-last-arg
+		      (preserving
+		       '(env)
+		       code-to-get-last-arg
+		       (code-to-get-rest-args
+			(cdr operand-codes))))))))
+	(define (code-to-get-rest-args operand-codes)
+	  (let ((code-for-next-arg
+		 (preserving
+		  '(argl)
+		  (car operand-codes)
+		  (make-instruction-sequence
+		   '(val argl) '(argl)
+		   '((assign argl (op cons) (reg val) (reg argl)))))))
+	    (if (null? (cdr operand-codes))
+		code-for-next-arg
+		(preserving
+		 '(env)
+		 code-for-next-arg
+		 (code-for-rest-args (cdr operand-codes))))))
+      #+END_SRC
+
+      You put the code in to evaluate the last argument first in this
+      case, which means that we go right to left. If we want different
+      behavior we can do:
+
+      #+BEGIN_SRC scheme
+	(define (construct-arglist operand-codes)
+	  (if (null? operand-codes)
+	      (make-instruction-sequence '() '(argl)
+					 '((assign argl (const ()))))
+	      (if (null? (cdr operand-codes))
+		  (append-instruction-sequences
+		   (car operand-codes)
+		   (make-instruction-sequence
+		    '(val) '(argl)
+		    '((assign argl (op list) (reg val)))))
+		  (append-instruction-sequences
+		   (car operand-codes)
+		   (make-instruction-sequence
+		    '(val) '(argl)
+		    '((assign argl (op list) (reg val))))
+		   (code-for-rest-args (cdr operand-codes))
+		   (make-instruction-sequence
+		    '(val argl) '(argl)
+		    '((assign argl (op reverse) (reg argl))))))))
+
+	(define (code-for-rest-args operand-codes)
+	  (let ((code-for-next-arg
+		 (preserving '(argl)
+			     (car operand-codes)
+			     (make-instruction-sequence
+			      '(val argl) '(argl)
+			      '((assign argl (op cons) (reg val) (reg argl)))))))
+	    (if (null? (cdr operand-codes))
+		code-for-next-arg
+		(preserving
+		 '(env)
+		 code-for-next-arg
+		 (code-for-rest-args (cdr operand-codes))))))
+      #+END_SRC
+
+      Here I just introduced a new operation for reversing the list
+      contents, other than that the code is the same. There is no way
+      to do this otherwise unless we actually put in a bunch of
+      instructions to reverse it, or use append instead which would
+      have about the same consequence (it is more expensive than
+      cons). This makes the code less efficient, in this case by one
+      instruction. We could also alter the extend-environment
+      operation to just expect a reversed argument list in which case
+      there would be no efficiency slowdown in terms of actual
+      instructions, although extend-environment would still need to do
+      an extra O(n) reversal step.
+
+    - Exercise 5.37: One way to understand the compiler's preserving
+      mechanism for optimizing stack usage is to see what extra
+      operations would be generated if we did not use this
+      idea. Modify preserving so that it always generates the save and
+      restore operations. Compile some simple expressions and identify
+      the unnecessary stack operations that are generated. Compare the
+      code to that generated with the preserving mechanism intact. 
+
+      #+BEGIN_SRC scheme
+	;; earlier: 
+	(define (preserving regs seq1 seq2)
+	  (if (null? regs)
+	      (append-instruction-sequences
+	       seq1 seq2)
+	      (let ((first-reg (car regs)))
+		(if (and (needs-register? seq2 first-reg)
+			 (modifies-register? seq1 first-reg))
+		    (preserving
+		     (cdr regs)
+		     (make-instruction-sequence
+		      (list-union (list first-reg) (registers-needed seq1))
+		      (list-difference (registers-modified seq1) (list first-reg))
+		      (append `((save ,first-reg))
+			      (statements seq1)
+			      `((restore ,first-reg))))
+		      seq2)
+		     (preserving (cdr regs) seq1 seq2)))))
+
+	;; New:
+	(define (preserving regs seq1 seq2)
+	  (if (null? regs)
+	      (append-instruction-sequences seq1 seq2)
+	      (let ((first-reg (car regs)))
+		(preserving
+		 (cdr regs)
+		 (make-instruction-sequence
+		  (list-union (list first-reg) (registers-needed seq1))
+		  (list-difference (registers-modified seq1) (list first-reg))
+		  (append
+		   `((save ,first-reg))
+		   (statements seq1)
+		   `((restore ,first-reg))))
+		 seq2))))
+      #+END_SRC
+
+      There are a lot of extra  instructions, for this sequence:
+
+      #+BEGIN_SRC scheme
+     (begin
+       (define (fact x) (if (= x 0) 1 (* x (fact (- x 1)))))
+       (fact 5))
+      #+END_SRC
       
+      Not being 'smart' about registers and unconditionally saving all
+      preserved registers results in 176 instructions as opposed to 96
+      with the 'smart' version, almost doubling the length of the
+      compiled program.
 
+      #+BEGIN_SRC scheme
+	;; Note we redundantly push continue onto the stack a bunch of
+	;; times.
+	(save continue)
+	(save env)
+	(save continue)
+	(save env)
+	(save continue)
+	(assign val (op make-compiled-procedure) (label entry145) (reg env))
+	(restore continue)
+	(goto (label after-lambda144))
+	entry145
+	(assign env (op compiled-procedure-env) (reg proc))
+	(assign env (op extend-environment) (const (x)) (reg argl) (reg env))
+	(save continue)
+	(save env)
+	(save continue)
+	(save env)
+	(save continue)
+	(assign proc (op lookup-variable-value) (const =) (reg env))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save proc)
+	(save continue)
+	(assign val (op lookup-variable-value) (const x) (reg env))
+	(restore continue)
+	(assign argl (op list) (reg val))
+	(save argl)
+	(save continue)
+	(assign val (const 0))
+	(restore continue)
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(assign argl (op reverse) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch160))
+	compiled-branch159
+	(assign continue (label after-call158))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch160
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	after-call158
+	(restore env)
+	(restore continue)
+	(test (op false?) (reg val))
+	(branch (label false-branch147))
+	true-branch148
+	(save continue)
+	(assign val (const 1))
+	(restore continue)
+	(goto (reg continue))
+	false-branch147
+	(save continue)
+	(save env)
+	(save continue)
+	(assign proc (op lookup-variable-value) (const *) (reg env))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save proc)
+	(save continue)
+	(assign val (op lookup-variable-value) (const x) (reg env))
+	(restore continue)
+	(assign argl (op list) (reg val))
+	(save argl)
+	(save continue)
+	(save env)
+	(save continue)
+	(assign proc (op lookup-variable-value) (const fact) (reg env))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save proc)
+	(save continue)
+	(save env)
+	(save continue)
+	(assign proc (op lookup-variable-value) (const -) (reg env))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save proc)
+	(save continue)
+	(assign val (op lookup-variable-value) (const x) (reg env))
+	(restore continue)
+	(assign argl (op list) (reg val))
+	(save argl)
+	(save continue)
+	(assign val (const 1))
+	(restore continue)
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(assign argl (op reverse) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch151))
+	compiled-branch150
+	(assign continue (label after-call149))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch151
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	after-call149
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch154))
+	compiled-branch153
+	(assign continue (label after-call152))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch154
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	after-call152
+	(restore argl)
+	(assign argl (op cons) (reg val) (reg argl))
+	(assign argl (op reverse) (reg argl))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch157))
+	compiled-branch156
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch157
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	(goto (reg continue))
+	after-call155
+	after-if146
+	after-lambda144
+	(restore env)
+	(perform (op define-variable!) (const fact) (reg val) (reg env))
+	(assign val (const ok))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save env)
+	(save continue)
+	(assign proc (op lookup-variable-value) (const fact) (reg env))
+	(restore continue)
+	(restore env)
+	(restore continue)
+	(save continue)
+	(save proc)
+	(save continue)
+	(assign val (const 5))
+	(restore continue)
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch143))
+	compiled-branch142
+	(assign continue (label after-call141))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch143
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	after-call141
+      #+END_SRC
+      
+      A simpler call to (g 5) looks like this:
 
-     
-     
+      #+BEGIN_SRC scheme
+	(save continue) (save env)
+	(save continue) ;; all unnecessary with a linkage of next.
+	(assign proc (op lookup-variable-value) (const g) (reg env))
+	(restore continue) ;; not needed because save is not needed.
+	(restore env)
+	(restore continue)
+	(save continue) ;; not needed, we restore it after only an assignment.
+	(save proc)
+	(save continue)
+	(assign val (const 5))
+	(restore continue)
+	(assign argl (op list) (reg val))
+	(restore proc)
+	(restore continue)
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch163))
+	compiled-branch162
+	(assign continue (label after-call161))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch163
+	(save continue)
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	(restore continue)
+	after-call161
+      #+END_SRC
 
-     
-                              
+      Where before:
 
-	   
-	   
+      #+BEGIN_SRC scheme
+	(assign proc (op lookup-variable-value) (const g) (reg env))
+	(assign val (const 5))
+	(assign argl (op list) (reg val))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch172))
+	compiled-branch171
+	(assign continue (label after-call170))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch172
+	(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call170
+      #+end_src
 
+      The big thing here is env and continue. Practically everyone
+      _might_ use or modify continue, but they may not also, so we end
+      up generating too may instructions.
 
-     
+      Any procedure application has to preserve env and continue for
+      the evalution of the procedure and all the arguments. However, a
+      lot of the time we will just be using variables or constants for
+      these. Since our dumb version doesn't know or care, it saves env
+      and continue each time it evaluates a procedure or argument,
+      meaning each of these has at a minimum five instructions, rather
+      than maybe one.
 
-   
-     
-       
+    - Exercise 5.38: Our compiler is clever about avoiding unnecessary
+      stack operations, but it is not clever at all when it comes to
+      compiling calls to the primitive operations supplied by the
+      machine. For example, consider how much code is compiled to
+      compute (+ a 1): The code sets up an argument list in argl, puts
+      the primitive addition procedure (which it finds by looking up
+      the symbol + in the environment) into proc, and tests whether
+      the procedure is primitive or compound. The compiler always
+      generates code to perform the test, as well as code for
+      primitive and compound branches (only one of which will be
+      executed). We have not shown the part of the controller that
+      implements primitives, but we presume that these instructions
+      make use of primitive arithmetic operations in the machine's
+      data paths. Consider how much less code would be generated if
+      the compiler could _open-code_ primitives -- that is, if it
+      could generate code to directly use these primitive machine
+      operations. The expression (+ a 1) might be compiled into
+      something as simple as
+
+      #+BEGIN_SRC scheme
+      (assign val (op lookup-variable-value) (const a) (reg env))
+      (assign val (op +) (reg val) (const 1))
+      #+END_SRC
+
+      In this exercise we will extend our compiler to support open
+      coding of selected primitives. Special-purpose code will be
+      generated for calls to these primitive procedures instead of the
+      general procedure-application code. In order to support this, we
+      will augment our machine with special argument registers arg1
+      and arg2. The primitive arithmetic operations of the machine
+      will take their inputs from arg1 and arg2. The results may be
+      put into val, arg1, or arg2. 
+
+      The compiler must be able to recognize the application of an
+      open-coded primitive in the source program. We will augment the
+      dispatch in the compile procedure to recognize the names of
+      these primitives in addition to be reserved words (the special
+      forms) it currently recognizes. For each special form our
+      compiler has a code generator. In this exercise we will
+      construct a family of code generators for the open-coded
+      primitives.
+
+      a. The open-coded primitives, unlike the special forms, all need
+      their operands evaluated. Write a code generator
+      spread-arguments for use by all the open-coding code
+      generators. spread-arguments should take an operand list and
+      compile the given operands targeted to successive argument
+      registers. Note that an operand may contain a call to an
+      open-coded primitive, so argument registers will have to be
+      preserved during operand evaluation.
+
+      b. For each of the primitive procedures =, *, -, and +, write a
+      code generator that takes a combination with that operator,
+      together with a target and a linkage descriptor, and produces
+      code to spread the arguments into the registers and then perform
+      the operation targeted to the given target with the given
+      linkage. You need only handle expressions with two
+      operands. Make compile dispatch to these code generators.
+
+      c. Try your new compiler on the factorial example. Compare the
+      resulting code with the result produced without open coding.
+
+      d. Extend your code generators for + and * so that they can
+      handle expressions with arbitrary numbers of operands. An
+      expression with more than two operands will have to be compiled
+      into a sequence of operations, each with only two inputs.
+      
+      #+BEGIN_SRC scheme
+	(assign val (op make-compiled-procedure) (label entry20) (reg env))
+	(goto (label after-lambda19))
+	entry20
+	(assign env (op compiled-procedure-env) (reg proc))
+	(assign env (op extend-environment) (const (n)) (reg argl) (reg env))
+	(assign arg1 (op lookup-variable-value) (const n) (reg env))
+	(assign arg2 (const 0))
+	(assign val (op =) (reg arg1) (reg arg2))
+	(test (op false?) (reg val))
+	(branch (label false-branch22))
+	true-branch23
+	(assign val (const 1))
+	(goto (reg continue))
+	false-branch22
+	(save continue)
+	(assign proc (op lookup-variable-value) (const factorial) (reg env))
+	(assign arg1 (op lookup-variable-value) (const n) (reg env))
+	(assign arg2 (const 1))
+	(assign val (op -) (reg arg1) (reg arg2))
+	(assign argl (op list) (reg val))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch26))
+	compiled-branch25
+	(assign continue (label proc-return27))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	proc-return27
+	(assign arg1 (reg val))
+	(goto (label after-call24))
+	primitive-branch26
+	(assign arg1 (op apply-primitive-procedure) (reg proc) (reg argl))
+	after-call24
+	(assign arg2 (op lookup-variable-value) (const n) (reg env))
+	(assign val (op *) (reg arg1) (reg arg2))
+	(restore continue)
+	(goto (reg continue))
+	after-if21
+	after-lambda19
+	(perform (op define-variable!) (const factorial) (reg val) (reg env))
+	(assign val (const ok))
+      #+END_SRC
+      
+      This is the new version with open-coded primitives and registers
+      arg1 and arg2. The previous was:
+
+      #+BEGIN_SRC scheme
+	;; construct the procedure and skip over code for the procedure body
+	(assign val
+		(op make-compiled-procedure)
+		(label entry2)
+		(reg env))
+	(goto (label after-lambda1))
+	entry2 ; calls to factorial will enter here
+	(assign env (op compiled-procedure-env) (reg proc))
+	(assign env
+		(op extend-environment)
+		(const (n))
+		(reg argl)
+		(reg env))
+	;; begin actual procedure body
+	(save continue)
+	(save env)
+	;; compute (= n 1)
+	(assign proc
+		(op lookup-variable-value)
+		(const =)
+		(reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val
+		(op lookup-variable-value)
+		(const n)
+		(reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch17))
+	compiled-branch16
+	(assign continue (label after-call15))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch17
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	after-call15 ; val now contains result of (= n 1)
+	(restore env)
+	(restore continue)
+	(test (op false?) (reg val))
+	(branch (label false-branch4))
+	true-branch5 ; return 1
+	(assign val (const 1))
+	(goto (reg continue))
+	false-branch4
+	;; compute and return (* (factorial (- n 1)) n)
+	(assign proc
+		(op lookup-variable-value)
+		(const *)
+		(reg env))
+	(save continue)
+	(save proc) ; save * procedure
+	(assign val
+		(op lookup-variable-value)
+		(const n)
+		(reg env))
+	(assign argl (op list) (reg val))
+	(save argl) ; save partial argument list for *
+	;; compute (factorial (- n 1)), which is the other argument for *
+	(assign proc
+		(op lookup-variable-value)
+		(const factorial)
+		(reg env))
+	(save proc) ; save factorial procedure
+	;; compute (- n 1), which is the argument for factorial
+	(assign proc
+		(op lookup-variable-value)
+		(const -)
+		(reg env))
+	(assign val (const 1))
+	(assign argl (op list) (reg val))
+	(assign val
+		(op lookup-variable-value)
+		(const n)
+		(reg env))
+	(assign argl (op cons) (reg val) (reg argl))
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch8))
+	compiled-branch7
+	(assign continue (label after-call6))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch8
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	after-call6 ; val now contains result of (- n 1)
+	(assign argl (op list) (reg val))
+	(restore proc) ; restore factorial
+	;; apply factorial
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch11))
+	compiled-branch10
+	(assign continue (label after-call9))
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch11
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	after-call9 ; val now contains result of (factorial (- n 1))
+	(restore argl) ; restore partial argument list for *
+	(assign argl (op cons) (reg val) (reg argl))
+	(restore proc) ; restore *
+	(restore continue)
+	;; apply * and return its value
+	(test (op primitive-procedure?) (reg proc))
+	(branch (label primitive-branch14))
+	compiled-branch13
+	;; note that a compound procedure here is called tail-recursively
+	(assign val (op compiled-procedure-entry) (reg proc))
+	(goto (reg val))
+	primitive-branch14
+	(assign val
+		(op apply-primitive-procedure)
+		(reg proc)
+		(reg argl))
+	(goto (reg continue))
+	after-call12
+	after-if3
+	after-lambda1
+	;; assign the procedure to the variable factorial
+	(perform (op define-variable!)
+		 (const factorial)
+		 (reg val)
+		 (reg env))
+	(assign val (const ok))
+      #+END_SRC
+      The new version has only one compiled/primitive branch, the old
+      one has three.
+
+*** 5.5.6 Lexical Addressing
+
+    One of the most common optimizations performed by compilers is the
+    optimization of variable lookup. Our compiler, as we have
+    implemented it so far, generates code that uses the
+    lookup-variable-valu operation of the evaluator machine. This
+    searches for a variable by comparing it with each variable that is
+    currently bound, working frame by frame outward through the
+    run-time environment. This search can be expensive if the frames
+    are deeply nested or if there are many variables. For example,
+    consider the problem of looking up the value of x while evaluating
+    the expression (* x y z) in an application of the procedure that
+    is returned by
+
+    #+BEGIN_SRC scheme
+    (let ((x 3) (y 4))
+     (lambda (a b c d e)
+      (let ((y (* a b x)) (z (+ c d x)))
+       (* x y z))))
+    #+END_SRC
+
+    Since a let expression is just syntactic sugar for a lambda
+    combination, this expression is equivalent to
+
+    #+BEGIN_SRC scheme
+    ((lambda (x y)
+      (lambda (a b c d e)
+       ((lambda (y z) (* x y z))
+        (* a b x)
+        (+ c d x))))
+     3 4)
+    #+END_SRC
+
+    Each time lookup-variable-value searches for x, it must determine
+    that the symbol x is not eq? to y or z (in the first frame), nor
+    a, b, c, d, or e (in the second frame). We will assume, for the
+    moment, that our programs do not use define -- that variables are
+    bound only with lambda. Because our language is lexically scoped,
+    the run-time environment for any expression will have a structure
+    that parallels the lexical structure of the program in which the
+    expression appears. Thus, the compiler can know, when it analyzes
+    the above expression, that each time the procedure is applied
+    the variable x in (* x y z) will be found two frames out from the
+    current frame and will be the first variable in that frame. 
+
+    We can exploit this fact by inventing a new kind of
+    variable-lookup operation, lexical-address-lookup, that takes as
+    arguments an environment and a _lexical address_ that consists of
+    two numbers: a _frame number_, which specifies how may frames to
+    pass over, and a _displacement number_, which specifies how many
+    variables to pass over in that frame. lexical-address-lookup will
+    produce the value of the variable stored at that lexical address
+    relative to the current environment. If we add the
+    lexical-address-lookup operation to our machine, we can make the
+    compiler generate code that references variables using this
+    operation, rather than lookup-variable-value. Similarly, our
+    compiled code can use a new lexical-address-set! operation instead
+    of set-variable-value!.
+
+    In order to generate such code, the compiler must be able to
+    determine the lexical address of a variable it is about to compile
+    a reference to. The lexical address of a variable in a program
+    depends on where one is in the code. For example, in the following
+    program, the address of x in expression <e1> is (2, 0) -- two
+    frames back and the first variable in the frame. At this point y
+    is at address (0, 0) and c is at address (1, 2). In expression
+    <e2>, x is at (1, 0) y is at (1, 1), and c is at (0, 2).
+
+    #+BEGIN_SRC scheme
+    ((lambda (x y)
+      (lambda (a b c d e)
+       ((lambda (y z) <e1>)
+        <e2>
+        (+ c d x))))
+    3 4)
+    #+END_SRC
+
+    One way for the compiler to produce code that uses lexical
+    addressing is to maintain a data structure called a compile-time
+    environment. This keeps track of which variables will be at which
+    positions in which frames in the run-time environment when a
+    particular variable-access operation is executed. The compile-time
+    environment is a list of frames, each containing a list of
+    variables. (There will of course be no values bound to the
+    variables, since values are not computed at compile time.) The
+    compile-time environment becomes an additional argument to compile
+    and is passed along to each code generator. The top-level call to
+    compile uses an empty compile-time environment. When a lambda body
+    is compiled, compile-lambda-body extends the compile-time
+    environment by a frame containing the procedure's parameters, so
+    that the sequence making up the body is compiled with that
+    extended environment. At each point in the compilation,
+    compile-variable and compile-assignment use the compile-time
+    environment in order to generate the appropriate lexical
+    addresses. 
+
+    Exercise 5.39 through Exercise 5.43 describe how to complete this
+    sketch of the lexical-addressing strategy in order to incorporate
+    lexical lookup into the compiler. Exercise 5.44 describes another
+    use for the compile-time environment.
+
+    (all answers implemented in compiler-lexical folder).
+
+    - Exercise 5.39: Write a procedure lexical-address-lookup that
+      implements the new lookup operation. It should take two
+      arguments -- a lexical address and a run-time environment -- and
+      return the value of the variable stored at the specified lexical
+      address. lexical-address-lookup should signal an error if the
+      value of the variable is the symbol *unassigned*. Also write a
+      procedure lexical-address-set! that implements the operation
+      that changes the value of the variable at a specified lexical
+      address.
+
+    - Modify the compiler to maintain the compile-time environment as
+      described above 
 
     
+    
 
+     
+    
 

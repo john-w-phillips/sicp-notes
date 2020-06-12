@@ -61,8 +61,6 @@
 	(list 'assignment-value assignment-value)
 	(list 'no-operands? no-operands?)
 	(list 'define-variable! define-variable!)))
-	      
-
 (define controller-text
   '(read-eval-print-loop
     (perform (op initialize-stack))
@@ -325,4 +323,4 @@
    controller-text))
 
 (define the-global-environment (setup-environment))
-(start eceval)
+;; (start eceval)

@@ -1,4 +1,4 @@
-(load "syntax.scm")
+;; (load "syntax.scm")
 (define (assemble controller-text machine)
   (extract-labels
    (get-all-labels controller-text)
@@ -214,9 +214,10 @@
 			 operations))
 	(aprocs
 	 (map (lambda (e)
-		(if (label-exp? e)
-		    (error "Cannot do machine operations on labels MAKE-OPERATION-EXP" e)
-		    (make-primitive-exp e machine labels)))
+		;; (if (label-exp? e)
+		;;     (error "Cannot do machine operations on labels MAKE-OPERATION-EXP" e)
+		;;     (make-primitive-exp e machine labels)))
+		(make-primitive-exp e machine labels))
 	      (operation-exp-operands exp))))
     (lambda ()
       (apply op (map (lambda (p) (p)) aprocs)))))

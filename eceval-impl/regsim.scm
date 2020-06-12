@@ -1,4 +1,4 @@
-(load "assembler.scm")
+;; (load "assembler.scm")
 
 (define ERROR-TAG "error")
 
