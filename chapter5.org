@@ -6947,12 +6947,823 @@ operations of the evaluator register machine.
       that changes the value of the variable at a specified lexical
       address.
 
-    - Modify the compiler to maintain the compile-time environment as
-      described above 
+    - Exercise 5.40: Modify the compiler to maintain the compile-time environment as
+      described above. That is, add a compile-time environment
+      argument to compile and the various code generators, and extend
+      it in compile-lambda-body.
 
-    
-    
+    - Exercise 5.41: Write a procedure find-variable that takes as
+      arguments a variable and a compile-time environment and returns
+      the lexical address of the variable with respect to that
+      environment. For example, in the program fragment that is shown
+      above, the compile-time environment during the compilation of
+      expression <e1> is ((y z) (a b c d e) (x y)). find-variable
+      should produce
 
+      #+BEGIN_SRC scheme
+      (find-variable 'c '((y z) (a b c d e) (x y)))
+      (1 2)
+      (find-variable 'x '((y z) (a b c d e) (x y)))
+      (2 0)
+      (find-variable 'w '((y z) (a b c d e) (x y)))
+      not-found
+      #+END_SRC
+
+    - Exercise 5.42: Using find-variable from Exercise 5.41, rewrite
+      compile-variable and compile-assignment to output
+      lexical-address instructions. In cases where find-variable
+      returns not-found (that is, where the variable is not in the
+      compile-time environment), you should have the code generators
+      use the evaluator operations, as before, to search for the
+      binding. (The only place a variable that is not found at compile
+      time can be is in the global environment, which is part of the
+      run-time environment but is not part of the compile-time
+      environment. Thus, if you wish, you may have the evaluator
+      operations look directly in the global environment, which can be
+      obtained with the operation (op get-global-environment), instead
+      of having them search the whole run-time environment found in
+      env.) Test the modified compiler on a few simple cases, such as
+      the nested lambda construction at the beginning of this section.
+
+    - Exercise 5.43: We argued in Section 4.1.6 that internal
+      definitions for block structure should not be considered "real"
+      defines. Rather, a procedure body should be interpreted as if
+      the internal variables being defined were installed as ordinary
+      lambda variables initialized to their correct values using
+      set!. Section 4.1.6 and Exercise 4.16 showed how to modify the
+      metacircular interpreter to accomplish this by scanning out
+      internal definitions. Modify the compiler to perform the same
+      transformation before it compiles a procedure body.
+
+    - Exercise 5.44: In this section we have focused on the use of the
+      compile-time environment to produce lexical addresses. But there
+      are other uses for compile-time environments. For instance, in
+      Exercise 5.38 we increased the efficiency of compiled-code by
+      open-coding primitive procedures. Our implementation treated the
+      names of open-coded procedures as reserved words. If a program
+      were to rebind such a name, the mechanism described in Exercise
+      5.38 would still open-code it as a primitive, ignoring the new
+      binding. For example, consider the procedure
+
+      #+BEGIN_SRC scheme
+      (lambda (+ * a b x y)
+       (+ (* a x) (* b y)))
+      #+END_SRC
+
+      which computes a linear combination of x and y. We might call it
+      with the arguments +matrix,*matrix, and four matricies, but the
+      open-coding compiler would still open-code the + and the * in (+
+      (* a x) (* b y)) as a primitive + and *. Modify the open-coding
+      compiler to consult the compile-time environment in order to
+      compile the correct code for expressions involving the names of
+      primitive procedures. (The code will work correctly as long as
+      the program does not define or set! these names.)
+
+*** 5.5.7 Interfacing Compiled Code to the Evaluator      
+    
+    We have not yet explained how to load compiled code into the
+    evaluator machine or how to run it. We will assume that the
+    explicit-control-evaluator machine has been defined as in Section
+    5.4.4, with the additional operations specified in Footnote 38. We
+    will implement a procedure compile-and-go that compiles a Scheme
+    expression, loads the resulting object code into the evaluator
+    machine, and causes the machine to run the code in the evaluator
+    global environment, print the result, and enter the evaluator's
+    driver loop. We will also modify the evaluator so that interpreted
+    expressions can call compiled procedures as well as interpreted
+    ones. We can then put a compiled procedure into the machine and
+    use the evaluator to call it:
+
+    #+BEGIN_SRC scheme
+    (compile-and-go
+     '(define (factorial n)
+       (if (= n 1) 1 (* (factorial (- n 1)) n))))
+    ;;; EC-Eval value:
+    ok
+    ;;; EC-Eval input:
+    (factorial 5)
+    ;;; EC-Eval value:
+    120
+    #+END_SRC
+
+    To allow the evaluator to handle compiled procedures (for example,
+    to evaluate the call to factorial above), we need to change the
+    code at apply-dispatch (Section 5.4.1) so that it recognizes
+    compiled procedures (as distinct from compound or primtive
+    procedures) and transfers control directly to the entry point of
+    the compiled code:
+
+    #+BEGIN_SRC scheme
+    apply-dispatch
+    (test (op primitive-procedure?) (reg proc))
+    (branch (label primitive-apply))
+    (test (op compound-procedure?) (reg proc))
+    (branch (label compound-apply))
+    (test (op compiled-procedure?) (reg proc))
+    (branch (label compiled-apply))
+    (goto (label unknown-procedure-type))
+    compiled-apply
+    (restore continue)
+    (assign val (op compiled-procedure-entry) (reg proc))
+    (goto (reg val))
+    #+END_SRC
+
+    Note the restore of continue at compiled-apply. Recall that the
+    evaluator was arranged so that at apply-dispatch, the continuation
+    would be at the top of the stack. The compiled code entry point,
+    on the other hand, expects the continuation to be in continue, so
+    continue must be restored before the compiled code is executed.
+
+    To enable us to run some compiled code when we start the evaluator
+    machine, we add a branch instruction at the beginning of the
+    evaluator machine, which causes the machine to go to a new entry
+    point if the flag register is set.
+
+        
+    #+BEGIN_SRC scheme
+    (branch (label external-entry))
+    read-eval-print-loop
+    (perform (op initialize-stack))
+    #+END_SRC
+
+    external-entry assumes that the machine is started with val
+    containing the location of an instruction sequence that puts a
+    result into val and ends with (goto (reg continue)). Starting at
+    this entry point jumps to the location designated by val, but
+    first assigns continue so that execution will return to
+    print-result, which prints the value in val and then goes to the
+    beginning of the evaluator's read-eval-print loop.
+
+    #+BEGIN_SRC scheme
+    external-entry
+      (perform (op initialize-stack))
+      (assign env (op get-global-environment))
+      (assign continue (label print-result))
+      (goto (reg val))
+    #+END_SRC
+
+    Now we can use the following procedure to compile a procedure
+    definition, execute the compiled code, and run the read-eval-print
+    loop so we can try the procedure. Because we want the compiled
+    code to return to the location in continue with its result in val,
+    we compile the expression with a target of val and a linkage of
+    return. In order to transform the object code produced by the
+    compiler into executable instructions for the evaluator register
+    machine, we use the procedure assemble from the register-machine
+    simulator (Section 5.2.2). We then initialize the val register to
+    point to the list of instructions, set the flag so that the
+    evaluator will go to external-entry, and start the evaluator.
+
+    #+BEGIN_SRC scheme
+    (define (compile-and-go expression)
+     (let ((instructions 
+            (assemble (statements (compile expression 'val 'return)))))
+      (set! the-global-environment (setup-environment))
+      (set-register-contents! eceval 'val instructions)
+      (set-register-contents! eceval 'flag true)
+      (start eceval)))
+    #+END_SRC
+
+    If we have set up stack monitoring, as at the end of Section
+    5.4.4, we can examine the stack usage of compiled code:
+
+    #+BEGIN_SRC scheme
+    (compile-and-go
+     '(define (factorial n)
+       (if (= n 1)
+           1
+           (* (factorial (- n 1)) n))))
+    (total-pushes = 0 maximum-depth = 0)
+    ;;; EC-Eval value:
+    ok
+    ;;; EC-Eval input:
+    (factorial 5)
+    (total-pushes = 31 maximum-depth = 14)
+    ;;; EC-Eval value:
+    120
+    #+END_SRC
+
+    Compare this example with the evaluation of (factorial 5) using
+    the interpreted version of the same procedure, shown at the end of
+    Section 5.4.4. The interpreted version required 144 pushes and a
+    maximum stack depth of 28. This illustrates the optimization that
+    results from our compilation strategy.
+
+**** Interpretation and compilation    
      
-    
+     With the programs in this section, we can now experiment with the
+     alternative execution strategies of interpretation and
+     compilation. An interpreter raises the machine to the level of
+     the user program; a compiler lowers the user program to the level
+     of the machine language. We can regard the Scheme language (or
+     any programming language) as a coherent family of abstractions
+     erected on the machine language. Interpreters are good for
+     interactive program development and debugging because the
+     steps of program execution are organized in terms of these
+     abstractions, and are therefore more intelligible to the
+     programmer. Compiled code can execute faster, because the steps
+     of program execution are organized in terms of the machine
+     language, and the compiler is free to make optimizations that cut
+     across the higher-level abstractions.
+
+     The alternatives of interpretation and compilation also lead to
+     different strategies for porting languages to new
+     computers. Suppose that we wish to implement Lisp for a new
+     machine. One strategy is to begin with the explicit-control
+     evaluator of Section 5.4 and translate its instructions to
+     instructions for the new machine. A different strategy is to
+     begin with the compiler and change the code generators so that
+     they generate code for the new machine. The second strategy
+     allows us to run any Lisp program on a new machine by first
+     compiling it with the compiler running on our original Lisp
+     system, and linking it with a compiled version of the run-time
+     library. Better yet, we can compile the compiler itself, and run
+     this on the new machine to compile other Lisp programs. Or we can
+     compile one of the interpreters of Section 4.1 to produce an
+     interpreter that runs on the new machine.
+
+     - 5.45: By comparing the stack operations used by compiled code
+       to the stack operations used by the evaluator for the same
+       computation, we can determine the extent to which the compiler
+       optimizes use of the stack, both in speed (reducing the total
+       number of stack operations) and in space (reducing the maximum
+       stack depth). Comparing this optimized stack use to the
+       performance of a special-purpose machine for the same
+       computation gives us some indication of the quality of the
+       compiler.
+
+       a. Exercise 5.27 asked you to determine, as a function of n,
+       the number of pushes and the maximum stack depth needed by the
+       evaluator to compute n! using the recursive factorial procedure
+       given above. Exercise 5.14 asked you to do the same
+       measurements for the special-purpose factorial machine shown in
+       Figure 5.11. Now perform the same analysis using the compiled
+       factorial procedure.
+
+       Take the ratio of the number of pushes in the compiled version
+       to the number of pushes in the interpreted version, and do the
+       same for the maximum stack depth. Since the number of
+       operations and the stack depth used to compute n! are linear in
+       n, these ratios should approach constants as n becomes
+       large. What are these constants? Similarly, find the ratios of
+       the stack usage in the special-purpose machine to the usage in
+       the interpreted version.
+
+       Compare the ratios for special-purpose versus interpreted code
+       to the ratios for compiled versus interpreted code. You should
+       find that the special-purpose machine does much better than the
+       compiled code, since the hand-tailored controller code should
+       be much better than what is produced by our rudimentary
+       general-purpose compiler.
+
+       b. Can you suggest improvements to the compiler that would help
+       it generate code that would come closer in performance to the
+       hand-tailored version?
+
+       #+BEGIN_SRC scheme
+	 ;; EC-Eval input: 
+	 (define (facto-alt n) (if (= n 1) n (* n (facto-alt (- n 1)))))
+
+	 (total-pushes = 3 maximum-depth = 3)
+	 ;; EC-Eval value:
+	 ok
+
+	 ;; EC-Eval input: 
+	 (facto-alt 5)
+
+	 (total-pushes = 108 maximum-depth = 20)
+	 ;; EC-Eval value:
+	 120
+
+	 ;; EC-Eval input: 
+	 (facto-alt 6)
+
+	 (total-pushes = 132 maximum-depth = 23)
+	 ;; EC-Eval value:
+	 720
+
+	 ;; EC-Eval input: 
+	 (facto-alt 7)
+
+	 (total-pushes = 156 maximum-depth = 26)
+	 ;; EC-Eval value:
+	 5040
+
+	 ;; EC-Eval input: 
+	 (facto-alt 8)
+
+	 (total-pushes = 180 maximum-depth = 29)
+	 ;; EC-Eval value:
+	 40320
+	 ;; 
+       #+END_SRC
+
+       For interpreted in eceval:
+       N  pushes   max depth
+       1  12       8
+       5  108      20
+       6  132      23
+       7  156      26
+       8  180      29
+       9  204      32
+       10 228      35
+
+       It grows by 24 each time for pushes, 3 for max depth.
+
+       For compiled in eceval:
+
+       N  pushes  max depth
+       1  3       8
+       5  11      10
+       6  13      12
+       7  15      14
+       8  17      15
+       9  19      16
+       10 21      17
+       
+       It grows by 2 for pushes, 2 for max depth.
+
+       So the ratio is about 12:1 for pushes. (the actual graphs would
+       be 2 * N + 3, 24 * N + 12, as N becomes large the constants 3
+       and 12 cease to become factors). Similarly max depth is about
+       3/2.
+  
+       Technically the special-purpose machine can have no stack
+       operations at all, if you just have a counter and product
+       register. 
+  
+       #+BEGIN_SRC scheme
+       (assign prod (const 1))
+       main-loop
+       (test (op =) (reg counter) (const 1))
+       (branch (label done))
+       (assign prod (op *) (reg counter) (reg prod))
+       (assign counter (op -) (reg counter) (const 1))
+       (goto (label loop))
+       #+END_SRC
+       
+       For this machine you would simply assign the counter register the
+       value of N. However assuming we want an apples-to-apples
+       comparison, the overly-complicated version would be:
+  
+       #+BEGIN_SRC scheme
+       (assign continue (label end-loop))
+       (assign val (const 1))
+       main-loop
+       (test (op =) (reg n) (const 1))
+       (branch (label end-calc))
+       multiply
+       (save continue)
+       (assign continue (label after-recursion))
+       (save n)
+       (assign n (op -) (reg n) (const 1))
+       (goto (label main-loop))
+       after-recursion
+       (restore n)
+       (restore continue)
+       (assign val (op *) (reg n) (reg val))
+       (goto (reg continue))
+       end-calc
+       (assign val (const 1))
+       (goto (reg continue))
+       end-loop
+       #+END_SRC
+  
+       #+BEGIN_SRC scheme
+       (define (run-machine-times n)
+	(if (= n 0) 'ok
+	    (begin
+	      (let ((machine (make-machine '(val continue n) `((* ,*) (- ,-) (= ,=))
+					   '((assign continue (label end-loop))
+					     (assign val (const 1))
+					     main-loop
+					     (test (op =) (reg n) (const 1))
+					     (branch (label end-calc))
+					     multiply
+					     (save continue)
+					     (assign continue (label after-recursion))
+					     (save n)
+					     (assign n (op -) (reg n) (const 1))
+					     (goto (label main-loop))
+					     after-recursion
+					     (restore n)
+					     (restore continue)
+					     (assign val (op *) (reg n) (reg val))
+					     (goto (reg continue))
+					     end-calc
+					     (assign val (const 1))
+					     (goto (reg continue))
+					     end-loop))))
+		(((get-register machine 'n) 'set) n)
+		(start machine)
+		((machine 'stack) 'print-statistics)
+		(run-machine-times (- n 1))))))
+       #+END_SRC
+
+       (total-pushes = 18 maximum-depth = 18)
+       (total-pushes = 16 maximum-depth = 16)
+       (total-pushes = 14 maximum-depth = 14)
+       (total-pushes = 12 maximum-depth = 12)
+       (total-pushes = 10 maximum-depth = 10)
+       (total-pushes = 8 maximum-depth = 8)
+       (total-pushes = 6 maximum-depth = 6)
+       (total-pushes = 4 maximum-depth = 4)
+       (total-pushes = 2 maximum-depth = 2)
+       (total-pushes = 0 maximum-depth = 0)
+  
+       So this is reversed but the pushes _and_ maximum stack depth go
+       up by 2 each time. This is actually no better than the compiled
+       version, it will differ by a factor of one or two constantly but
+       other than that is about the same in terms of number of
+       pushes. (this version of the compiler open-codes the
+       primitives, and uses lexical referencing). There are more
+       instructions but the number of pushes is the same, where we would
+       normally save and restore just the environment and the continue
+       register, here we save and restore n.
+  
+       For (b) since the stack performance is basically the same, the
+       only thing to do is reduce the number of instructions and
+       operations. One thing we could do is use registers for normal
+       function calls like we do open-coding. For the first two
+       arguments to any function, use arg1 and arg2 registers, avoiding
+       even lexical lookups. This would actually decrease stack
+       performance in terms of total-pushes and max depth however,
+       because instead of just pushing and popping env we might be
+       pushing or popping three items, (arg1, arg2, env). but it would
+       eliminiate looking up variables all the time.
+
+     - Exercise 5.46: Carry out an analysis like the one in Exercise
+       5.45 to determine the effectiveness of compiling the
+       tree-recursive Fibonacci procedure
+
+       #+BEGIN_SRC scheme
+       (define (fib n)
+        (if (< n 2)
+            n
+            (+ (fib (- n 1))
+               (fib (- n 2))))))
+       #+END_SRC
+
+       compared to the effectiveness of using the special-purpose
+       Fibonacci machine of Figure 5.12. (For measurement of the
+       interpreted performance, see Exercise 5.29.) For Fibonacci, the
+       time resource used is not linear in n; hence the ratios of
+       stack operations will not approach a limiting value that is
+       independent of n.
+
+       Raw data:
+
+       COmpiled code:
+
+       #+BEGIN_SRC scheme
+	 ((assign val (op make-compiled-procedure) (label entry80) (reg env))
+	  (goto (label after-lambda79))
+	  entry80
+	  (assign env (op compiled-procedure-env) (reg proc))
+	  (assign env (op extend-environment) (const (n)) (reg argl) (reg env))
+	  (save continue)
+	  (save env)
+	  (assign proc (op lookup-variable-value) (const <) (reg env))
+	  (assign val (const 2))
+	  (assign argl (op list) (reg val))
+	  (assign val (op lexical-address-lookup) (const (0 0)) (reg env))
+	  (assign argl (op cons) (reg val) (reg argl))
+	  (test (op primitive-procedure?) (reg proc))
+	  (branch (label primitive-branch94))
+	  compiled-branch93
+	  (assign continue (label after-call92))
+	  (assign val (op compiled-procedure-entry) (reg proc))
+	  (goto (reg val))
+	  primitive-branch94
+	  (assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+	  after-call92
+	  (restore env)
+	  (restore continue)
+	  (test (op false?) (reg val))
+	  (branch (label false-branch82))
+	  true-branch83
+	  (assign val (op lexical-address-lookup) (const (0 0)) (reg env))
+	  (goto (reg continue))
+	  false-branch82
+	  (save continue)
+	  (save env)
+	  (assign proc (op lookup-variable-value) (const fibo) (reg env))
+	  (assign arg1 (op lexical-address-lookup) (const (0 0)) (reg env))
+	  (assign arg2 (const 1))
+	  (assign val (op -) (reg arg1) (reg arg2))
+	  (assign argl (op list) (reg val))
+	  (test (op primitive-procedure?) (reg proc))
+	  (branch (label primitive-branch90))
+	  compiled-branch89
+	  (assign continue (label proc-return91))
+	  (assign val (op compiled-procedure-entry) (reg proc))
+	  (goto (reg val))
+	  proc-return91
+	  (assign arg1 (reg val))
+	  (goto (label after-call88))
+	  primitive-branch90
+	  (assign arg1 (op apply-primitive-procedure) (reg proc) (reg argl))
+	  after-call88
+	  (restore env)
+	  (save arg1)
+	  (assign proc (op lookup-variable-value) (const fibo) (reg env))
+	  (assign arg1 (op lexical-address-lookup) (const (0 0)) (reg env))
+	  (assign arg2 (const 2))
+	  (assign val (op -) (reg arg1) (reg arg2))
+	  (assign argl (op list) (reg val))
+	  (test (op primitive-procedure?) (reg proc))
+	  (branch (label primitive-branch86))
+	  compiled-branch85
+	  (assign continue (label proc-return87))
+	  (assign val (op compiled-procedure-entry) (reg proc))
+	  (goto (reg val))
+	  proc-return87
+	  (assign arg2 (reg val))
+	  (goto (label after-call84))
+	  primitive-branch86
+	  (assign arg2 (op apply-primitive-procedure) (reg proc) (reg argl))
+	  after-call84
+	  (restore arg1)
+	  (assign val (op +) (reg arg1) (reg arg2))
+	  (restore continue)
+	  (goto (reg continue))
+	  after-if81
+	  after-lambda79
+	  (perform (op define-variable!) (const fibo) (reg val) (reg env))
+	  (assign val (const ok))))
+       #+END_SRC
+
+       #+BEGIN_SRC scheme
+	 (compile-and-go '(define (fibo n) (if (< n 2) n (+ (fibo (- n 1)) (fibo (- n 2))))))
+
+	 (total-pushes = 0 maximum-depth = 0)
+	 ;; EC-Eval value:
+	 ok
+
+	 ;; EC-Eval input: 
+	 (fibo 1)
+
+	 (total-pushes = 5 maximum-depth = 3)
+	 ;; EC-Eval value:
+	 1
+
+	 ;; EC-Eval input: 
+	 (fibo 2)
+
+	 (total-pushes = 12 maximum-depth = 4)
+	 ;; EC-Eval value:
+	 1
+
+	 ;; EC-Eval input: 
+	 (fibo 3)
+
+	 (total-pushes = 19 maximum-depth = 6)
+	 ;; EC-Eval value:
+	 2
+
+	 ;; EC-Eval input: 
+	 (fibo 4)
+
+	 (total-pushes = 33 maximum-depth = 8)
+	 ;; EC-Eval value:
+	 3
+
+	 ;; EC-Eval input: 
+	 (fibo 5)
+
+	 (total-pushes = 54 maximum-depth = 10)
+	 ;; EC-Eval value:
+	 5
+
+	 ;; EC-Eval input: 
+	 (fibo 6)
+
+	 (total-pushes = 89 maximum-depth = 12)
+	 ;; EC-Eval value:
+	 8
+
+	 ;; EC-Eval input: 
+	 (fibo 7)
+
+	 (total-pushes = 145 maximum-depth = 14)
+	 ;; EC-Eval value:
+	 13
+
+	 ;; EC-Eval input: 
+	 (fibo 8)
+
+	 (total-pushes = 236 maximum-depth = 16)
+	 ;; EC-Eval value:
+	 21
+
+	 ;; EC-Eval input: 
+	 (fibo 9)
+
+	 (total-pushes = 383 maximum-depth = 18)
+	 ;; EC-Eval value:
+	 34
+
+	 ;; EC-Eval input: 
+	 (fibo 10)
+
+	 (total-pushes = 621 maximum-depth = 20)
+	 ;; EC-Eval value:
+	 55
+
+	 ;; EC-Eval input: 
+	 (fibo 11)
+
+	 (total-pushes = 1006 maximum-depth = 22)
+	 ;; EC-Eval value:
+	 89
+
+	 ;; EC-Eval input: 
+	 (fibo 12)
+
+	 (total-pushes = 1629 maximum-depth = 24)
+	 ;; EC-Eval value:
+	 144
+
+	 ;; EC-Eval input: 
+       #+END_SRC
+
+       For the raw assembly:
+
+       #+BEGIN_SRC scheme
+	 (define (run-fibo-times n)
+	   (let ((m-controller
+		  '(controller
+		    (assign continue (label fib-done))
+		    fib-loop
+		    (test (op <) (reg n) (const 2))
+		    (branch (label immediate-answer))
+		    ;; set up to compute Fib(n − 1)
+		    (save continue)
+		    (assign continue (label afterfib-n-1))
+		    (save n) ; save old value of n
+		    (assign n (op -) (reg n) (const 1)) ; clobber n to n-1
+		    (goto (label fib-loop)) ; perform recursive call
+		    afterfib-n-1 ; upon return, val contains Fib(n − 1)
+		    (restore n)
+		    (restore continue)
+		    ;; set up to compute Fib(n − 2)
+		    (assign n (op -) (reg n) (const 2))
+		    (save continue)
+		    (assign continue (label afterfib-n-2))
+		    (save val) ; save Fib(n − 1)
+		    (goto (label fib-loop))
+		    afterfib-n-2 ; upon return, val contains Fib(n − 2)
+		    (assign n (reg val)) ; n now contains Fib(n − 2)
+		    (restore val) ; val now contains Fib(n − 1)
+		    (restore continue)
+		    (assign val ; Fib(n − 1) + Fib(n − 2)
+			    (op +) (reg val) (reg n))
+		    (goto (reg continue)) ; return to caller, answer is in
+		    val
+		    immediate-answer
+		    (assign val (reg n)) ; base case: Fib(n) = n
+		    (goto (reg continue))
+		    fib-done)))
+	     (if (= n 0) 'ok
+		 (begin
+		   (run-fibo-times (- n 1))
+		   (let ((machine
+			  (make-machine '(val continue n) `((* ,*) (+ ,+) (- ,-) (< ,<))
+					m-controller)))
+		     (((get-register machine 'n) 'set) n)
+		     (start machine)
+		     ((machine 'stack) 'print-statistics))))))
+       #+END_SRC
+     
+       #+BEGIN_SRC scheme
+	 1 (total-pushes = 0 maximum-depth = 0)
+	 2 (total-pushes = 4 maximum-depth = 2)
+	 3 (total-pushes = 8 maximum-depth = 4)
+	 4 (total-pushes = 16 maximum-depth = 6)
+	 5 (total-pushes = 28 maximum-depth = 8)
+	 6 (total-pushes = 48 maximum-depth = 10)
+	 7 (total-pushes = 80 maximum-depth = 12)
+	 8 (total-pushes = 132 maximum-depth = 14)
+	 9 (total-pushes = 216 maximum-depth = 16)
+	 10 (total-pushes = 352 maximum-depth = 18)
+	 11 (total-pushes = 572 maximum-depth = 20)
+	 12 (total-pushes = 928 maximum-depth = 22)
+       #+END_SRC
+      
+       The equations for the usages are
+
+       SM_n = SM_(n-1) + SM_(n-2) + 4
+       SC_n = SC_(n-1) + SC_(n-2) + 2
+
+       Where SM is the machine code we manually made and SC is the
+       compiled code.  In the controller version, we have three
+       registers we save and restore -- n, continue, and val. In the
+       compiled code we also restore three, continue, env, and arg1
+       (we use the open-coding modifiaction).
+
+       If we just look at the compiled code we have five saves and
+       five restores. The controller code has four -- so why does the
+       controller appear to have a higher 'constant' -- the 4 --
+       compared to the cmpiled code? It doesn't seem like it
+       should. In the compiled code we push the environment and
+       continue registers right at the beginning, and also push the
+       save and continue branches when we enter the false branch. The
+       reason is the actual instructions in the evaluator, which mask
+       the true number of pushes. The evaluator does a fixed number of
+       pushes each time it evaluates anything, as it evaluates the
+       operator. So although our true compiled code adds more than
+       just two each time, it looks like it does because we also
+       remove the number of stack operations for the last ones. The
+       way around this could be to re-initialize the stack right
+       before jumping to the entry point in the evaluator of a
+       compiled procedure. By looking at the code we see that there
+       are 3 stack pushes to just set up (fibo x) to jump to the
+       compiled procedure entry (set up argl and proc), So each call
+       has this overhead. We then see that if we subtract three from
+       each the true equation for the compiled procedure is:
+
+       SC_n = SC_n(n-1) + SC_(n-2) + 5
+       
+       Whereas the machine is:
+       
+       SM_n = SM_(n-1) + SM_(n-2) + 4
+
+       We can use generating functions to discover the number of
+       pushes as a function of F_n:
+
+       SC_n = 7 * F_(n+1) - 5
+       SM_n = 4 * F_(n+1) - 4
+
+       As n gets larger, the constants will matter less, and the
+       ratio is about 7/4, compiled to custom, nearly twice as many
+       pushes for compiled as custom.
+
+     - Exercise 5.47: This section described how to modify the
+       explicit-control evaluator so that interpreted code can call
+       compiled procedures. Show how to modify the compiler so that
+       compiled procedures can call not only primitive procedures and
+       compiled procedures, but interpreted procedures as well. This
+       requires modifying compile-procedure-call to handle the case of
+       compound (interpreted) procedures. Be sure to handle all the
+       same target and linkage combinations as in
+       compile-proc-appl. To do the actual procedure application, the
+       code needs to jump to the evaluator's compound-apply entry
+       point. This label cannot be directly referenced in object code
+       (since the assembler requires that all labels referenced by the
+       code it is assembling be defined there), so we will add a
+       register called compapp to the evaluator machine to hold this
+       entry point, and add an instruction to initialize it:
+
+       #+BEGIN_SRC scheme
+       (assign compapp (label compound-apply))
+       (branch (label external-entry))
+       read-eval-print-loop
+       #+END_SRC
+
+       To test your code, start by defining a procedure f that calls a
+       procedure g. Use compile-and-go to compile the definition of f
+       and start the evaluator. Now, typing at the evaluator, define g
+       and try to call f.
+
+     - Exercise 5.48: The compile-and-go interface implemented in this
+       section is awkward, since the compiler can be called only once
+       (when the evaluator machine is started). Augment the
+       compiler-interpreter interface by providing a compile-and-run
+       primitive that can be called from within the explicit control
+       evaluator as follows:
+
+       #+BEGIN_SRC scheme
+       ;;; EC-Eval input:
+       (compile-and-run
+        '(define (factorial n)
+          (if (= n 1) 1 (* (factorial (- n 1)) n))))
+       ;;; EC-Eval value:
+       ok
+       ;;; EC-Eval input:
+       (factorial 5)
+       ;;; EC-Eval value:
+       120
+       #+END_SRC
+
+     - Exercise 5.49: As an alternative to using the explicit-control 
+
+       
+
+       
+
+
+
+       
+
+       
+
+
+
+
+
+
+
+
+
+
 

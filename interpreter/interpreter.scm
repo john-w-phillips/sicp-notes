@@ -1,5 +1,6 @@
 (define language-apply apply)
-;; (load "eval-apply.scm")
+(load "prims.scm")
+(load "eval-apply.scm")
 (load "analyze.scm")
 
 (define input-prompt ";;; M-Eval input:")
@@ -9,6 +10,7 @@
   (newline)
   (display string)
   (newline))
+
 (define (announce-output string)
   (newline)
   (display string)
@@ -31,4 +33,3 @@
       (display object)))
 
 (driver-loop)
-	  

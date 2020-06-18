@@ -1,4 +1,4 @@
-(define UNDEFINED-VARIABLE '*undefined*)
+(define UNDEFINED-VARIABLE '*undefined-interp2*)
 
 (define (remove-bindings-from-frame var frame)
   (filter (lambda (binding) (not (eq? (car binding) var)))
@@ -38,6 +38,9 @@
 (define (enclosing-environment env) (cdr env))
 
 (define (find-cell-in-frame var frame)
+  (if (not (and (pair? frame)
+		(eq? (car frame) 'frame)))
+      (error "Not a frame: " frame))
   (filter (lambda (x) (eq? (car x) var))
 	  (frame-variable-value-pairs frame)))
 

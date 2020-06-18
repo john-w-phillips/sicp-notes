@@ -1,0 +1,13 @@
+(define (f alist)
+  (cons (car alist) (car alist)))
+(f (list 1 2 3))
+(define (map aproc alist)
+  (if (null? alist)
+      '()
+      (cons (aproc (car alist))
+	    (map aproc (cdr alist)))))
+(define (id x) x)
+(map id (list 1 2 3))
+;;(map f (list (list 1) (list 2) (list 3) (list 4)))
+
+(apply map (list id (list 1 2 3 4)))

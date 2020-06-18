@@ -1,28 +1,31 @@
-(load "../interpreter/syntax.scm")
+(load "eceval-syntax.scm")
 ;;(load "../eceval-impl/environment.scm")
-(load "./lexical-addresses.scm")
-(load "../eceval-impl/primitive-apply.scm")
-(load "../eceval-impl/assembler.scm")
-(load "../eceval-impl/regsim.scm")
-(load "../eceval-impl/eceval-ops.scm")
-(load "../eceval-impl/syntax.scm")
+(load "lexical-addresses.scm")
+;;(load "primitive-apply.scm")
+;;(load "assembler.scm")
+;;(load "../eceval-impl/regsim.scm")
+;; (load "../eceval-impl/eceval-ops.scm")
+;; (load "../eceval-impl/syntax.scm")
 
-(define (get-global-environment)
-  the-global-environment)
+;; (define (get-global-environment)
+;;   the-global-environment)
 
-(define the-global-environment (setup-environment))
+;; (define the-global-environment (setup-environment))
 
 (define (make-compiled-procedure entry-label env)
-  (list entry-label env))
+  (list 'compiled-procedure entry-label env))
+
+(define (compiled-procedure? proc)
+  (and (pair? proc) (eq? (car proc) 'compiled-procedure)))
 
 (define (compiled-procedure-entry proc)
-  (car proc))
-
-(define (compiled-procedure-env proc)
   (cadr proc))
 
+(define (compiled-procedure-env proc)
+  (caddr proc))
+
 (define *label-num* 1)
-(define all-regs '(val exp proc continue))
+(define all-regs '(val exp proc continue env))
 
 (define (make-label name)
   (let ((labelstring (symbol->string name))
@@ -46,6 +49,10 @@
 	 (compile-definition exp compenv target linkage))
 	((if? exp) (compile-if exp compenv target linkage))
 	((lambda? exp) (compile-lambda exp compenv target linkage))
+	((let? exp) (compile (let->combination exp)
+			     compenv
+			     target
+			     linkage))
 	((begin? exp)
 	 (compile-sequence
 	  (begin-actions exp)
@@ -55,6 +62,8 @@
 	 (compile (cond->if exp) compenv target linkage))
 	((open-coded? exp compenv)
 	 (compile-open-coded exp compenv target linkage))
+	((compiled-boolean? exp)
+	 (compile-boolean-expr exp compenv target linkage))
 	((application? exp)
 	 (compile-application exp compenv target linkage))
 	(else
@@ -167,11 +176,11 @@
 	(after-if (make-label 'after-if)))
     (let ((consequent-linkage
 	   (if (eq? linkage 'next) after-if linkage)))
-      (let ((p-code (compile (if-predicate exp) 'val 'next))
+      (let ((p-code (compile (if-predicate exp) compenv 'val 'next))
 	    (c-code
 	     (compile
-	      (if-consequent exp) target consequent-linkage))
-	    (a-code (compile (if-alternative exp) target linkage)))
+	      (if-consequent exp) compenv target consequent-linkage))
+	    (a-code (compile (if-alternative exp) compenv target linkage)))
 	(preserving
 	 '(env continue)
 	 p-code
@@ -184,6 +193,42 @@
 	   (append-instruction-sequences t-branch c-code)
 	   (append-instruction-sequences f-branch a-code))
 	  after-if))))))
+
+
+(define (compile-bool testop-symb name)
+  (lambda (exp compenv target linkage)
+    (let ((return-label (make-label (string->symbol (string-append name "-return"))))
+	  (codes (map (lambda (expr) (compile expr compenv target 'next))
+		      (cdr exp))))
+      (define (iter-ops op-codes)
+	(if (null? op-codes)
+	    (empty-instruction-sequence)
+	    
+	    (append-instruction-sequences
+	     (car op-codes)
+	     
+	     (make-instruction-sequence
+	      (list target)
+	      '()
+	      `((test (op ,testop-symb) (reg ,target))
+		(branch (label ,return-label))))
+
+	     (iter-ops (cdr op-codes)))))
+      (end-with-linkage
+       linkage
+       (append-instruction-sequences
+	(iter-ops codes)
+	return-label)))))
+
+(define boolean-table
+  `((and ,(compile-bool 'false? "and"))
+    (or ,(compile-bool 'true? "or"))))
+
+(define (compiled-boolean? exp)
+  (memq (car exp) (map car boolean-table)))
+(define (compile-boolean-expr exp compile-env target linkage)
+  (let ((proc-entry (assq (car exp) boolean-table)))
+    ((cadr proc-entry) exp compile-env target linkage)))
 
 (define (compile-lambda-body exp compenv proc-entry)
   (let ((formals (lambda-parameters exp)))
@@ -314,6 +359,7 @@
 (define (compile-procedure-call target linkage)
   (let ((primitive-branch (make-label 'primitive-branch))
 	(compiled-branch (make-label 'compiled-branch))
+	(compound-branch (make-label 'compound-branch))
 	(after-call (make-label 'after-call)))
     (let ((compiled-linkage
 	   (if (eq? linkage 'next) after-call linkage)))
@@ -321,11 +367,25 @@
        (make-instruction-sequence
 	'(proc) '()
 	`((test (op primitive-procedure?) (reg proc))
-	  (branch (label ,primitive-branch))))
+	  (branch (label ,primitive-branch))
+	  (test (op compound-procedure?) (reg proc))
+	  (branch (label ,compound-branch))))
+
        (parallel-instruction-sequences
+
 	(append-instruction-sequences
 	 compiled-branch
-	 (compile-proc-appl target compiled-linkage))
+	  (compile-proc-appl target compiled-linkage))
+
+	(append-instruction-sequences
+	 compound-branch
+	 (end-with-linkage
+	  compiled-linkage
+	  (make-instruction-sequence
+	   '(proc argl)
+	   all-regs
+	   `((goto (reg compapp))))))
+
 	(append-instruction-sequences
 	 primitive-branch
 	 (end-with-linkage
@@ -428,10 +488,10 @@
 		       '(arg1 arg2)
 		       (make-instruction-sequence
 			'(arg1 arg2)
-			'(val)
+			(list target)
 			`((assign ,target (op ,opsym) (reg arg1) (reg arg2))))))))
   
-
+  
 (define (open-code-+ expr compenv target link)
   (end-with-linkage
    link
@@ -449,7 +509,7 @@
       (if (null? ops)
 	  prim-insts
 	  (preserving
-	   (append (cdr regs) old-regs)
+	   (append (cdr regs) old-regs (list 'env 'continue))
 	   (compile (car ops) compenv (car regs) 'next)
 	   (spread-inner
 	    (cdr ops)
@@ -540,93 +600,33 @@
    (append (statements seq)
 	   (statements body-seq))))
 
-(define (parallel-instruction-sequences seq1 seq2)
+;; (define (parallel-instruction-sequences seq1 seq2)
+;;   (make-instruction-sequence
+;;    (list-union (registers-needed seq1)
+;; 	       (registers-needed seq2))
+;;    (list-union (registers-modified seq1)
+;; 	       (registers-modified seq2))
+;;    (append (statements seq1) (statements seq2))))
+
+(define (parallel-instruction-sequences . seqs)
+  (define (union-all . lists)
+    (if (null? lists) '()
+	(list-union (car lists)
+		    (apply union-all (cdr lists)))))
   (make-instruction-sequence
-   (list-union (registers-needed seq1)
-	       (registers-needed seq2))
-   (list-union (registers-modified seq1)
-	       (registers-modified seq2))
-   (append (statements seq1) (statements seq2))))
+   (apply union-all (map registers-needed seqs))
+   (apply union-all (map registers-modified seqs))
+   (apply append (map statements seqs))))
 
-;;; Stuff for running in a register simulator.
-(define compiler-operations
-  (list (list 'empty-arglist empty-arglist)
-	(list 'read read)
-	(list '+ +)
-	(list '- -)
-	(list '= =)
-	(list '* *)
-	(list 'lexical-address-lookup lexical-address-lookup)
-	(list 'lexical-address-set! lexical-address-set!)
-	(list 'make-compiled-procedure make-compiled-procedure)
-	(list 'compiled-procedure-env compiled-procedure-env)
-	(list 'compiled-procedure-entry compiled-procedure-entry)
-	(list 'adjoin-arg adjoin-arg)
-	(list 'last-operand? last-operand?)
-	(list 'prompt-for-input prompt-for-input)
-	(list 'announce-output announce-output)
-	(list 'clear-output clear-output)
-	(list 'user-print user-print)
-	(list 'quoted? quoted?)
-	(list 'extract-error-description extract-error-description)
-	(list 'null? null?)
-	(list 'variable? variable?)
-	(list 'assignment? assignment?)
-	(list 'definition? definition?)
-	(list 'if? if?)
-	(list 'symbol? symbol?)
-	(list 'lambda? lambda?)
-	(list 'begin? begin?)
-	(list 'list list)
-	(list 'car car)
-	(list 'cons cons)
-	(list 'cdr cdr)
-	(list 'reverse reverse)
-	(list 'application? application?)
-	(list 'lookup-variable-value lookup-variable-value)
-	(list 'text-of-quotation text-of-quotation)
-	(list 'lambda-parameters lambda-parameters)
-	(list 'lambda-body lambda-body)
-	(list 'make-procedure make-procedure)
-	(list 'get-global-environment get-global-environment)
-	(list 'set-variable-value! set-variable-value!)
-	(list 'definition-variable definition-variable)
-	(list 'definition-value definition-value)
-	(list 'self-evaluating? self-evaluating?)
-	(list 'operands operands)
-	(list 'first-operand first-operand)
-	(list 'rest-operands rest-operands)
-	(list 'primitive-procedure? primitive-procedure?)
-	(list 'compound-procedure? compound-procedure?)
-	(list 'apply-primitive-procedure apply-primitive-procedure)
-	(list 'operator operator)
-	(list 'procedure-parameters procedure-parameters)
-	(list 'procedure-environment procedure-environment)
-	(list 'procedure-body procedure-body)
-	(list 'extend-environment extend-environment)
-	(list 'begin-actions begin-actions)
-	(list 'first-exp first-exp)
-	(list 'rest-exps rest-exps)
-	(list 'last-exp? last-exp?)
-	(list 'if-predicate if-predicate)
-	(list 'if-consequent if-consequent)
-	(list 'if-alternative if-alternative)
-	(list 'true? true?)
-	(list 'false? false?)
-	(list 'assignment-variable assignment-variable)
-	(list 'assignment-value assignment-value)
-	(list 'no-operands? no-operands?)
-	(list 'define-variable! define-variable!)))
+;; (define the-global-environment (setup-environment))
 
-(define the-global-environment (setup-environment))
-
-(define (machine-for-compiled expr)
-  (let ((code (compile expr the-empty-compile-time-env 'val 'next)))
-    (let ((code-with-env
-	   (cons
-	    '(assign env (op get-global-environment))
-	    (caddr code))))
-    (make-machine
-     '(env val proc argl arg1 arg2 continue)
-     compiler-operations
-     code-with-env))))
+;; (define (machine-for-compiled expr)
+;;   (let ((code (compile expr the-empty-compile-time-env 'val 'next)))
+;;     (let ((code-with-env
+;; 	   (cons
+;; 	    '(assign env (op get-global-environment))
+;; 	    (caddr code))))
+;;     (make-machine
+;;      '(env val proc argl arg1 arg2 continue)
+;;      compiler-operations
+;;      code-with-env))))
