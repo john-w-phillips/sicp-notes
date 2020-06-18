@@ -857,7 +857,9 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
       exit (1);
       return NULL;
     }
+  push_form (rval);
   gc (NULL, 0);
+  pop_form ();
   pop_form ();
   pop_form ();
   return rval;
@@ -923,6 +925,10 @@ gc_set_copied_flag (struct lisp_type *item)
 
 
 void
+copy_procedure_cells (struct lisp_type *proc,
+		      struct cons_cells *newcells);
+
+void
 copy_cons_cells(struct lisp_type *pair,
 		struct cons_cells *newcells)
 {
@@ -944,6 +950,11 @@ copy_cons_cells(struct lisp_type *pair,
     {
       copy_cons_cells (carpair, newcells);
     }
+  else if (scheme_procedurep (carpair))
+    {
+      copy_procedure_cells (carpair,
+			    newcells);
+    }
   else
       gc_set_copied_flag (carpair);
 
@@ -951,22 +962,16 @@ copy_cons_cells(struct lisp_type *pair,
     {
       copy_cons_cells (cdrpair, newcells);
     }
+  else if (scheme_procedurep (cdrpair))
+    {
+      copy_procedure_cells (cdrpair,
+			    newcells);
+    }
   else
-      gc_set_copied_flag (cdrpair);
+    gc_set_copied_flag (cdrpair);
 
-  if (scheme_procedurep (carpair))
-    {
-      copy_procedure_cells (carpair);
-    }
-  if (scheme_procedurep (cdrpair))
-    {
-      copy_cons_cells (cdrpair->scheme_proc.scheme_proc_body,
-		       newcells);
-      copy_cons_cells (cdrpair->scheme_proc.scheme_proc_env,
-		       newcells);
-      copy_cons_cells (cdrpair->scheme_proc.scheme_proc_formals,
-		       newcells);
-    }
+
+
 }
 
 void
@@ -982,10 +987,7 @@ copy_procedure_cells (struct lisp_type *proc,
   copy_cons_cells (scheme_proc_environ (proc),
 		   newcells);
   copy_cons_cells (scheme_proc_formals (proc),
-		   newcells);
-  
-  
-		   
+		   newcells);		   
 }
 
 
@@ -1025,6 +1027,30 @@ free_old_cells (struct lisp_type **cells,
     }
 }
 
+static void
+copy_root_array (struct lisp_type **roots,
+		 struct cons_cells *cells,
+		 unsigned nroots)
+{
+  for (int i = 0; i < nroots; ++i)
+    {
+      if (consp (roots[i]))
+	{
+	  copy_cons_cells (roots[i], cells);
+	}
+      else if (scheme_procedurep (roots[i]))
+	{
+	  copy_procedure_cells (roots[i],
+				cells);
+	}
+      else if (!is_immutable (roots[i]))
+	{
+	  gc_set_copied_flag (roots[i]);
+	}
+	       
+    }
+}
+
 void
 gc (struct lisp_type **roots, unsigned nroots)
 {
@@ -1042,21 +1068,9 @@ gc (struct lisp_type **roots, unsigned nroots)
   bzero (cells.cars, sizeof (cells.cars));
   bzero (cells.cdrs, sizeof (cells.cdrs));
   cells.next = 0;
-  for (int i = 0; i < nroots; ++i)
-    {
-      if (consp (roots[i]))
-	{
-	  assert (!roots[i]->copied);
-	  copy_cons_cells (roots[i], &cells);
-	}
-    }
-  for (int i = 0; i < formstack_idx; ++i)
-    {
-      if (consp (formstack[i]))
-	{
-	  copy_cons_cells (formstack[i], &cells);
-	}
-    }
+  copy_root_array (roots, &cells, nroots);
+  copy_root_array (formstack, &cells, formstack_idx);
+
 
   free_old_cells (cars, cdrs, NPAIRS);
   free_old_cells (cdrs, NULL, NPAIRS);
