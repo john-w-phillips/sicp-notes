@@ -43,6 +43,16 @@ int no_gc = 0;
 struct lisp_type *cars[NPAIRS];
 struct lisp_type *cdrs[NPAIRS];
 struct lisp_type *formstack[NPAIRS];
+struct lisp_type *conses[NPAIRS];
+unsigned conses_idx = 0;
+
+#define push_cons(x) do {			\
+    assert (consp (x));				\
+    assert (conses_idx < NPAIRS);		\
+    conses[conses_idx++] = x;			\
+  } while (0)					\
+
+
 unsigned formstack_idx = 0;
 #define push_form(x)				\
   do {						\
@@ -183,6 +193,7 @@ make_cons(struct lisp_type *car,
   cars[max_cons_idx] = car;
   cdrs[max_cons_idx] = cdr;
   rval->pair_index = max_cons_idx++;
+  push_cons (rval);
   return rval;
 }
 
@@ -457,10 +468,8 @@ add (struct lisp_type *argl)
     return 0;
   else
     {
-      push_form (argl);
       assert (consp (argl));
       int result = add_inner(argl);
-      pop_form ();
       return make_number (result);
     }
 }
@@ -750,8 +759,9 @@ struct lisp_type *eval_conditional (struct lisp_type *form,
 				    struct lisp_type *environ)
 {
   struct lisp_type *pred_val = eval (if_pred (form), environ);
-
-  if (truep (pred_val))
+  bool istrue = truep (pred_val);
+  //free (pred_val);
+  if (istrue)
     {
       return eval (if_consequent (form), environ);
     }
@@ -862,6 +872,7 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
   pop_form ();
   pop_form ();
   pop_form ();
+
   return rval;
 }
 
@@ -895,6 +906,7 @@ init_environ (struct lisp_type *base)
 void
 init_pairs (void)
 {
+  bzero (conses, sizeof (conses));
   bzero (cars, sizeof (cars));
   bzero (cdrs, sizeof (cdrs));
 }
@@ -903,6 +915,8 @@ struct cons_cells
 {
   struct lisp_type *cars[NPAIRS];
   struct lisp_type *cdrs[NPAIRS];
+  struct lisp_type *to_free[NPAIRS];
+  unsigned free_index;
   unsigned next;
 };
 
@@ -973,7 +987,12 @@ copy_cons_cells(struct lisp_type *pair,
 
 
 }
-
+/*
+  Procedure values are special in that they have inside them cons
+  cells (the text, environment, and formal args) that may not be
+  referenced anywhere else except internal to the structure of the
+  procedure, so we need to have a special method for them.
+ */
 void
 copy_procedure_cells (struct lisp_type *proc,
 		      struct cons_cells *newcells)
@@ -990,40 +1009,47 @@ copy_procedure_cells (struct lisp_type *proc,
 		   newcells);		   
 }
 
-
 void
-free_old_cells (struct lisp_type **cells,
-		struct lisp_type **cells_check,
+free_old_cells (struct cons_cells *cells)
+{
+  for (int i = 0; i < cells->free_index; ++i)
+    {
+      free (cells->to_free[i]);
+    }
+}
+
+#define should_delete(x) ((x)->copied == false)
+void
+find_old_cells (struct lisp_type **cells,
+		struct cons_cells *cells_out,
 		int ncells)
 {
   for (int i = 0; i < ncells;  ++i)
     {
       if (cells[i] != NULL
-	  && cells[i] != TRUE_VALUE
-	  && cells[i] != FALSE_VALUE
-	  && cells[i] != NIL_VALUE
-	  && !cells[i]->copied)
+	  && !is_immutable (cells[i])
+	  && should_delete (cells[i]))
 	{
 	  bzero (cells[i], sizeof (*cells[i]));
-	  if (cells_check)
+	  bool found = false;
+	  for (int j = 0; j < cells_out->free_index; ++j)
 	    {
-	      for (int j = 0; j < ncells; ++j)
-		{
-		  if (cells_check[j] == cells[i])
-		    cells_check[j] = NULL;
-		}
+		  /*
+		    we already have this cell so go to the next loop.
+		   */
+		  if (cells_out->to_free[j] == cells[i])
+		    {
+		      found = true;
+		      break;
+		    }
 	    }
-	  for (int j = i + 1; j < ncells; ++j)
+	  if (!found)
 	    {
-	      if (cells[i] == cells[j])
-		cells[j] = NULL;
+	      cells_out->to_free[cells_out->free_index++] = cells[i];
 	    }
-	  printf ("Free\n");
-	  free (cells[i]);
 	  cells[i] = NULL;
 	}
-      else
-	cells[i] = NULL;
+
     }
 }
 
@@ -1052,6 +1078,39 @@ copy_root_array (struct lisp_type **roots,
 }
 
 void
+gc_unset_copy_flag (struct lisp_type *item)
+{
+  if (item && !is_immutable (item))
+    {
+      item->copied = false;
+    }
+  if (item && scheme_procedurep (item))
+    {
+      scheme_proc_body (item)->copied = false;
+      scheme_proc_formals (item)->copied = false;
+      scheme_proc_environ (item)->copied = false;
+    }
+}
+
+void
+compact_conses (unsigned cur_idx)
+{
+  conses_idx = 0;
+  for (int i = 0; i < cur_idx; ++i)
+    {
+      assert (conses_idx <= i);
+      if (conses[i])
+	{
+	  struct lisp_type *holder = conses[i];
+	  conses[i] = NULL;
+	  gc_unset_copy_flag (holder);
+	  push_cons (holder);
+	}
+
+    }
+}
+
+void
 gc (struct lisp_type **roots, unsigned nroots)
 {
   if (((double)max_cons_idx) / (double)NPAIRS
@@ -1064,47 +1123,40 @@ gc (struct lisp_type **roots, unsigned nroots)
     {
       printf ("GC: %d\n", max_cons_idx);
     }
+
   struct cons_cells cells;
   bzero (cells.cars, sizeof (cells.cars));
   bzero (cells.cdrs, sizeof (cells.cdrs));
   cells.next = 0;
+  cells.free_index = 0;
   copy_root_array (roots, &cells, nroots);
   copy_root_array (formstack, &cells, formstack_idx);
 
-
-  free_old_cells (cars, cdrs, NPAIRS);
-  free_old_cells (cdrs, NULL, NPAIRS);
+  find_old_cells (cars, &cells, NPAIRS);
+  find_old_cells (cdrs, &cells, NPAIRS);
+  find_old_cells (formstack + (formstack_idx),
+		  &cells,
+		  (NPAIRS - formstack_idx));
+  find_old_cells (conses,
+		  &cells,
+		  conses_idx);
+  free_old_cells (&cells);
+  compact_conses (conses_idx);
   for (int i = 0; i < NPAIRS; ++i)
     {
-      if (cells.cars[i] && !is_immutable (cells.cars[i]))
-	cells.cars[i]->copied = false;
-      if (cells.cdrs[i] && !is_immutable (cells.cdrs[i]))
-	cells.cdrs[i]->copied = false;
-
-      if (cells.cars[i] && scheme_procedurep (cells.cars[i]))
-	{
-	  cells.cars[i]->scheme_proc.scheme_proc_body->copied = false;
-	  cells.cars[i]->scheme_proc.scheme_proc_formals->copied = false;
-	  cells.cars[i]->scheme_proc.scheme_proc_env->copied = false;
-	}
-      if (cells.cdrs[i] && scheme_procedurep (cells.cdrs[i]))
-	{
-	  cells.cdrs[i]->scheme_proc.scheme_proc_body->copied = false;
-	  cells.cdrs[i]->scheme_proc.scheme_proc_formals->copied = false;
-	  cells.cdrs[i]->scheme_proc.scheme_proc_env->copied = false;
-	}
+      gc_unset_copy_flag (cells.cars[i]);
+      gc_unset_copy_flag (cells.cdrs[i]);
     }
 
   for (int i = 0; i < nroots; ++i)
-    if (!is_immutable (roots[i]))
-      roots[i]->copied = false;
-  for (int i = 0; i < formstack_idx; ++i)
-    if (!is_immutable (formstack[i]))
-      formstack[i]->copied = false;
+    gc_unset_copy_flag (roots[i]);
+      
+  for (int i = 0; i < NPAIRS; ++i)
+    gc_unset_copy_flag (formstack[i]);
+     
   memcpy (cdrs, cells.cdrs, sizeof (cdrs));
   memcpy (cars, cells.cars, sizeof (cars));
   max_cons_idx = cells.next;
-  printf("return\n");
 }
 
 int
