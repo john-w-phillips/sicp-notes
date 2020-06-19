@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
+#include <setjmp.h>
 #define NPAIRS 2048
 
 enum lisp_types {
@@ -16,20 +17,31 @@ enum lisp_types {
   PRIMITIVE_PROC,
   SCHEME_PROC,
 };
-
-struct scheme_proc {
+jmp_buf jmpbuffer;
+struct scheme_proc
+{
     struct lisp_type *scheme_proc_body;
     struct lisp_type *scheme_proc_formals;
     struct lisp_type *scheme_proc_env;
 };
 
+struct scheme_string
+{
+  bool free;
+  char *str;
+};
+
+#define READER_EOF 2
+#define READER_INVALID_SYNTAX 3
+#define ASSERTION_FAILURE 4
 struct lisp_type
 {
   enum lisp_types type;
   int copied;
   union
   {
-    char *strval;
+    /* char *strval; */
+    struct scheme_string string;
     int intval;
     unsigned pair_index;
     struct scheme_proc scheme_proc;
@@ -66,6 +78,7 @@ struct lisp_item_stack {
     stack->index = 0;				\
   } while (0)
 
+#define CLEAR_STACK(stack) stack->index = 0; 
 struct lisp_type *cars[NPAIRS];
 struct lisp_type *cdrs[NPAIRS];
 
@@ -89,6 +102,7 @@ struct lisp_type *cdrs[NPAIRS];
 
 DECLARE_LISP_STACK (formstack, NPAIRS);
 
+DECLARE_LISP_STACK (eval_rval_stack, NPAIRS * 5);
 
 DECLARE_LISP_STACK (conses, NPAIRS);
 /* unsigned formstack_idx = 0; */
@@ -134,7 +148,7 @@ is_immutable (struct lisp_type *it)
 #define stringp(x) ((x)->type == STRING)
 #define numberp(x) ((x)->type == NUMBER)
 #define variablep(x) ((x)->type == SYMBOL)
-#define symbol_string_value(x) ((x)->strval)
+#define symbol_string_value(x) ((x)->string.str)
 #define number_value(x) ((x)->intval)
 #define consp(x) ((x)->type == PAIR)
 #define primitive_procedurep(x) ((x)->type == PRIMITIVE_PROC)
@@ -147,6 +161,7 @@ is_immutable (struct lisp_type *it)
 #define scheme_proc_formals(x) ((x)->scheme_proc.scheme_proc_formals)
 #define scheme_proc_body(x) ((x)->scheme_proc.scheme_proc_body)
 #define scheme_procedurep(x) ((x)->type == SCHEME_PROC)
+#define string_c_string symbol_string_value
 #define definitionp(x) (consp (x) &&					\
 			symbolp (car (x)) &&				\
 			symbol_string_value_equals (car (x), "define"))
@@ -155,13 +170,14 @@ is_immutable (struct lisp_type *it)
 #define enclosing_environ cdr
 #define lambdap(x) \
   (consp (x) && symbol_string_value_equals (car (x), "lambda"))
-#define symbol_string_value_equals(sym, string)			\
-  (symbolp (sym) && (strcmp (string, sym->strval) == 0))
+#define symbol_string_value_equals(sym, c_string)			\
+  (symbolp (sym) && (strcmp (c_string, sym->string.str) == 0))
 #define conditionalp(x) (consp (x) &&					\
 			 symbolp (car (x)) &&				\
 			 symbol_string_value_equals (car (x), "if"))
+
 #define symbol_equalp(x, y) \
-  (strcmp (x->strval, y->strval) == 0)
+  (strcmp (x->string.str, y->string.str) == 0)
 
 #define nilp(x) ((x) == &NIL)
 
@@ -172,21 +188,25 @@ free_lisp_type (struct lisp_type *t)
   assert (!is_immutable (t));
   if (stringp (t) || symbolp (t))
     {
-      free (t->strval);
+      if (t->string.free)
+	free (t->string.str);
+      bzero (t, sizeof *t);
       free (t);
     }
   else
     {
+      bzero (t, sizeof *t);
       free (t);
     }
 }
 
 struct lisp_type *
-make_symbol(char *str)
+make_symbol(char *str, bool shouldfree)
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
   rval->type = SYMBOL;
-  rval->strval = str;
+  rval->string.str = str;
+  rval->string.free = shouldfree;
   return rval;
 }
 
@@ -214,11 +234,12 @@ make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *))
 }
 
 struct lisp_type *
-make_string (char *str)
+make_string (char *str, bool shouldfree)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
   rval->type = STRING;
-  rval->strval = str;
+  rval->string.str = str;
+  rval->string.free = shouldfree;
   return rval;
 }
 
@@ -262,7 +283,7 @@ make_cons(struct lisp_type *car,
 struct lisp_type *
 make_env_frame (void)
 {
-  return make_cons (make_symbol ("env-frame"),
+  return make_cons (make_symbol ("env-frame", false),
 		    (struct lisp_type *)&NIL);
 }
 
@@ -376,16 +397,16 @@ env_set_var (struct lisp_type *environ,
 
 	    
 struct lisp_type *
-read0 (void);
+read0 (FILE *fp);
 
 struct lisp_type *
-read_list ()
+read_list (FILE *fp)
 {
   //int c = getc (stdin);
-  struct lisp_type *h = read0 ();
+  struct lisp_type *h = read0 (fp);
   if (h)
     {
-      return make_cons (h, read_list ());
+      return make_cons (h, read_list (fp));
     }
   else
     {
@@ -396,15 +417,15 @@ read_list ()
 #define NUMSIZ 128
 
 struct lisp_type *
-read_num (int c)
+read_num (int c, FILE *fp)
 {
   char numbuf[NUMSIZ] = {c}, *endptr = NULL;;
   int idx = 1;
-  while ( isdigit (c = getc (stdin)) )
+  while ( isdigit (c = getc (fp)) )
     {
       numbuf[idx++] = c;
     }
-  ungetc (c, stdin);
+  ungetc (c, fp);
   numbuf[idx] = '\0';
   int rval = strtol (numbuf, &endptr, 10);
   if (*endptr == '\0')
@@ -424,62 +445,66 @@ isspecial (int c)
 }
 
 struct lisp_type *
-read_symbol (int c)
+read_symbol (int c, FILE *fp)
 {
   char symbuf[SYMBSIZE] = {c};
   int index = 1;
 
-  while ( !isspecial (c = getc (stdin)) )
+  while ( !isspecial (c = getc (fp)) )
     {
       symbuf[index++] = c;
     }
   symbuf[index] = '\0';
-  ungetc (c, stdin);
-  return make_symbol (strdup (symbuf));
+  ungetc (c, fp);
+  return make_symbol (strdup (symbuf), true);
 }
 
 struct lisp_type *
-read_string (int c)
+read_string (int c, FILE *fp)
 {
   char strbuf[SYMBSIZE] = {};
   int index = 0;
 
-  while ( (c = getc (stdin)) != '"')
+  while ( (c = getc (fp)) != '"')
     strbuf[index++] = c;
 
   strbuf[index] = '\0';
-  return make_string (strdup (strbuf));
+  return make_string (strdup (strbuf), true);
     
 }
 
 struct lisp_type *
-read0 (void)
+read0 (FILE *fp)
 {
-  int c = getc (stdin);
+  int c = getc (fp);
   if (c == '(')
-    return read_list ();
+    return read_list (fp);
   else if (isdigit (c))
-    return read_num (c);
+    return read_num (c, fp);
   else if (c == '"')
-    return read_string (c);
+    return read_string (c, fp);
   else if (isspace (c))
-    return read0 ();
+    return read0 (fp);
   else if ((isalpha (c) || isgraph (c)) && !isspecial(c))
-    return read_symbol (c);
+    return read_symbol (c, fp);
   else if (c == ')')
     return NULL;
+  else if (c == EOF)
+    {
+      longjmp (jmpbuffer, READER_EOF);
+    }
   else
     {
-      fprintf(stderr, "Can't read\n");
+      fprintf(stderr, "Unspecified reader error!\n");
       exit(1);
     }
   return NULL;
 }
 
 struct lisp_type *
-read (void)
+read (FILE *fp)
 {
-  struct lisp_type *rval = read0 ();
+  struct lisp_type *rval = read0 (fp);
   if (! rval)
     {
       fprintf (stderr, "Illegal list term\n");
@@ -488,6 +513,7 @@ read (void)
   else
     return rval;
 }
+
 static int
 add_inner(struct lisp_type *argl)
 {
@@ -522,6 +548,18 @@ sub (struct lisp_type *argl)
   return make_number (sub_inner (argl));
 }
 
+
+struct lisp_type *
+lisp_assert (struct lisp_type *argl)
+{
+  
+  if (truep (car (argl)))
+    return TRUE_VALUE;
+  else
+    {
+      longjmp(jmpbuffer, ASSERTION_FAILURE);
+    }
+}
 struct lisp_type *
 add (struct lisp_type *argl)
 {
@@ -579,20 +617,20 @@ write0 (struct lisp_type *t)
       printf ("nil");
       break;
     case SYMBOL:
-      printf ("%s", t->strval);
+      printf ("%s", symbol_string_value (t));
       break;
     case PAIR:
       printf ("(");
       write_list (t, false);
       break;
     case STRING:
-      printf("\"%s\"", t->strval);
+      printf("\"%s\"", string_c_string (t));
       break;
     case SCHEME_PROC:
-      printf("[scheme procedure]");
+      printf("#[scheme procedure]");
       break;
     case PRIMITIVE_PROC:
-      printf("[primitive procedure]");
+      printf("#[primitive procedure]");
       break;
     case BOOLEAN:
       if (t == FALSE_VALUE)
@@ -775,6 +813,7 @@ syntax_cdr (struct lisp_type *form, char *errorstr)
   else
     return cdr (form);
 }
+
 struct lisp_type *
 list_seq_manip (struct lisp_type *form_orig,
 		struct lisp_type *form_now,
@@ -809,8 +848,26 @@ list_seq_manip (struct lisp_type *form_orig,
   fprintf (stderr, "Invalid syntax: %s. Form: \n",
 	   errorstr);
   write (form_orig);
-  exit (1);
+  longjmp (jmpbuffer, READER_INVALID_SYNTAX);
   return NULL;
+}
+
+struct lisp_type *
+lisp_int_equal (struct lisp_type *argl)
+{
+  struct lisp_type *arg1 = list_seq_manip (argl, argl, "a",
+					   0, "= takes two arguments");
+  struct lisp_type *arg2 = list_seq_manip (argl, argl, "da",
+					   0,
+					   "= takes two arguments");
+  if (number_value (arg1) == number_value (arg2))
+    {
+      return TRUE_VALUE;
+    }
+  else
+    {
+      return FALSE_VALUE;
+    }
 }
 
 #define if_pred(x) \
@@ -828,7 +885,9 @@ struct lisp_type *eval_conditional (struct lisp_type *form,
 {
   struct lisp_type *pred_val = eval (if_pred (form), environ);
   bool istrue = truep (pred_val);
-  //free (pred_val);
+  if (!is_immutable (pred_val))
+    PUSH_STACK (eval_rval_stack, pred_val);
+
   if (istrue)
     {
       return eval (if_consequent (form), environ);
@@ -908,7 +967,7 @@ struct lisp_type *eval_definition (struct lisp_type *form,
   return val;
 }
 
-void gc (struct lisp_type **, unsigned);
+void gc (bool force);
 struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 {
   PUSH_STACK (formstack, form);
@@ -935,37 +994,51 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
     }
 
   PUSH_STACK (formstack, rval);
-  gc (NULL, 0);
+  gc (false);
   POP_STACK (formstack);
   POP_STACK (formstack);
   POP_STACK (formstack);
-
   return rval;
 }
 
 struct lisp_type *
 init_environ (struct lisp_type *base)
 {
-#define add_env_proc(str, sym) \
-  env_frame_set_var_value (frame, make_symbol (str), make_primitive_procedure (sym))
-#define add_env_val(str, expr) \
-  env_frame_set_var_value (frame, make_symbol (str), expr)
+  
+#define add_env_proc(str, sym)					\
+  do {									\
+    struct lisp_type *strval = make_symbol (str, false);		\
+    struct lisp_type *prim = make_primitive_procedure (sym);		\
+    PUSH_STACK (eval_rval_stack, prim);					\
+    PUSH_STACK (eval_rval_stack, strval);				\
+    env_frame_set_var_value (frame, strval, prim);			\
+  } while (0)
+
+
+#define add_env_val(str, expr)				\
+  do {								\
+    struct lisp_type *strval = make_symbol (str, false);	\
+    env_frame_set_var_value (frame, strval, expr);		\
+    PUSH_STACK (eval_rval_stack, strval);			\
+  } while (0)
+
+
   struct lisp_type *frame
     = make_env_frame ();
   struct lisp_type *env_cur
     = make_cons (frame, base);
-  env_frame_set_var_value (frame,
-			   make_symbol ("x"),
-			   make_number (1));
   
   add_env_proc ("+", add);
   add_env_proc ("-", sub);
+  add_env_proc ("assert", lisp_assert);
+  add_env_proc ("=", lisp_int_equal);
   add_env_proc ("<", less_than);
 
   add_env_val ("true", TRUE_VALUE);
   add_env_val ("false", FALSE_VALUE);
   return env_cur;
 }
+
 
 void
 init_pairs (void)
@@ -1085,7 +1158,7 @@ find_old_cells (struct lisp_type **cells,
 	  && !is_immutable (cells[i])
 	  && should_delete (cells[i]))
 	{
-	  bzero (cells[i], sizeof (*cells[i]));
+	  //bzero (cells[i], sizeof (*cells[i]));
 	  bool found = false;
 	  for (int j = 0; j < cells_out->free_index; ++j)
 	    {
@@ -1165,11 +1238,25 @@ compact_conses (struct lisp_item_stack *conses_stack)
     }
 }
 
-void
-gc (struct lisp_type **roots, unsigned nroots)
+static bool
+is_stack_not_full (struct lisp_item_stack *stack)
 {
-  if (((double)max_cons_idx) / (double)NPAIRS
-      < GC_THRESH)
+  return ((double)stack->index / (double)stack->size) < GC_THRESH;
+}
+
+static bool
+is_cons_not_full (void)
+{
+  return (((double)max_cons_idx) / ((double)NPAIRS)) < GC_THRESH;
+}
+
+void
+gc (bool force)
+{
+  if (is_cons_not_full () &&
+      is_stack_not_full (eval_rval_stack) &&
+      is_stack_not_full (conses) &&
+      !force)
     {
       return;
     }
@@ -1179,7 +1266,7 @@ gc (struct lisp_type **roots, unsigned nroots)
   bzero (cells.cdrs, sizeof (cells.cdrs));
   cells.next = 0;
   cells.free_index = 0;
-  copy_root_array (roots, &cells, nroots);
+  /* copy_root_array (roots, &cells, nroots); */
   copy_root_array (formstack->items, &cells, formstack->index);
 
   find_old_cells (cars, &cells, NPAIRS);
@@ -1190,16 +1277,20 @@ gc (struct lisp_type **roots, unsigned nroots)
   find_old_cells (conses->items,
 		  &cells,
 		  conses->index);
+  find_old_cells (eval_rval_stack->items,
+		  &cells,
+		  eval_rval_stack->index);
   free_old_cells (&cells);
   compact_conses (conses);
+  compact_conses (eval_rval_stack);
   for (int i = 0; i < NPAIRS; ++i)
     {
       gc_unset_copy_flag (cells.cars[i]);
       gc_unset_copy_flag (cells.cdrs[i]);
     }
 
-  for (int i = 0; i < nroots; ++i)
-    gc_unset_copy_flag (roots[i]);
+  /* for (int i = 0; i < nroots; ++i) */
+  /*   gc_unset_copy_flag (roots[i]); */
       
   for (int i = 0; i < formstack->size; ++i)
     gc_unset_copy_flag (formstack->items[i]);
@@ -1214,19 +1305,65 @@ init_stacks ()
 {
   INIT_STACK (formstack);
   INIT_STACK (conses);
+  INIT_STACK (eval_rval_stack);
 }
 
+
+
 int
-main ()
+main (int argc, char **argv)
 {
   init_stacks ();
   init_pairs ();
+  FILE *inp;
+  int rval = 0;
+  if (argc == 2)
+    {
+      inp = fopen (argv[1], "r");
+    }
+  else if (argc == 1)
+    {
+      inp = stdin;
+    }
+  else
+    {
+      fprintf (stderr, "Invalid arguments!");
+      rval = 1;
+      goto exit_normal;
+    }
 
   struct lisp_type *environ = NIL_VALUE;
   environ = init_environ (environ);
   struct lisp_type *form = NULL;
-  while ((form = read ()))
+  PUSH_STACK (formstack, environ);
+  int unwind_stack_idx = formstack->index;
+  if ((rval = setjmp (jmpbuffer)) != 0)
     {
-      write (eval (form, environ));
+      if (rval == READER_EOF)
+	goto exit_eof;
+      else if (rval == ASSERTION_FAILURE)
+	goto exit_assert;
+      else
+	{
+	  formstack->index = unwind_stack_idx;
+	  fprintf(stderr, "recovering..\n");
+	}
     }
+  while ((form = read (inp)))
+    {
+      struct lisp_type *rval = eval (form, environ);
+      PUSH_STACK (eval_rval_stack, rval);
+      write (rval);
+    }
+ exit_assert:
+  rval = 2;
+  printf ("Assertion failure\n");
+  goto exit_normal;
+ exit_eof:
+  printf("EOF\n");
+ exit_normal:
+  if (inp != stdin) fclose (inp);
+  CLEAR_STACK (formstack);
+  gc (true);
+  return rval;
 }
