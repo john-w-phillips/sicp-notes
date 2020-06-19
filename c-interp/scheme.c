@@ -78,18 +78,19 @@ struct lisp_type *cdrs[NPAIRS];
   lists are not on the actual cars/cdrs arrays but must be kept track
   of separately so we don't leak memory.
  */
-struct lisp_type *conses[NPAIRS];
-unsigned conses_idx = 0;
+/* struct lisp_type *conses[NPAIRS]; */
+/* unsigned conses_idx = 0; */
 
-#define push_cons(x) do {			\
-    assert (consp (x));				\
-    assert (conses_idx < NPAIRS);		\
-    conses[conses_idx++] = x;			\
-  } while (0)					\
+/* #define push_cons(x) do {			\ */
+/*     assert (consp (x));				\ */
+/*     assert (conses_idx < NPAIRS);		\ */
+/*     conses[conses_idx++] = x;			\ */
+/*   } while (0)					\ */
 
 DECLARE_LISP_STACK (formstack, NPAIRS);
 
 
+DECLARE_LISP_STACK (conses, NPAIRS);
 /* unsigned formstack_idx = 0; */
 /* #define push_form(x)				\ */
 /*   do {						\ */
@@ -254,7 +255,7 @@ make_cons(struct lisp_type *car,
   cars[max_cons_idx] = car;
   cdrs[max_cons_idx] = cdr;
   rval->pair_index = max_cons_idx++;
-  push_cons (rval);
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -910,10 +911,6 @@ struct lisp_type *eval_definition (struct lisp_type *form,
 void gc (struct lisp_type **, unsigned);
 struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 {
-  //struct lisp_type *roots[] = {form, environ};
-  //gc (roots, 2);
-  /* push_form (form); */
-  /* push_form (environ); */
   PUSH_STACK (formstack, form);
   PUSH_STACK (formstack, environ);
   struct lisp_type *rval = NULL;
@@ -936,15 +933,12 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
       exit (1);
       return NULL;
     }
-  /* push_form (rval); */
+
   PUSH_STACK (formstack, rval);
   gc (NULL, 0);
-  /* pop_form (); */
   POP_STACK (formstack);
   POP_STACK (formstack);
   POP_STACK (formstack);
-  /* pop_form (); */
-  /* pop_form (); */
 
   return rval;
 }
@@ -976,8 +970,8 @@ init_environ (struct lisp_type *base)
 void
 init_pairs (void)
 {
-  bzero (conses, sizeof (conses));
-  conses_idx = 0;
+  /* bzero (conses, sizeof (conses)); */
+  /* conses_idx = 0; */
   bzero (cars, sizeof (cars));
   bzero (cdrs, sizeof (cdrs));
 }
@@ -1154,20 +1148,20 @@ gc_unset_copy_flag (struct lisp_type *item)
 }
 
 void
-compact_conses (unsigned cur_idx)
+compact_conses (struct lisp_item_stack *conses_stack)
 {
-  conses_idx = 0;
-  for (int i = 0; i < cur_idx; ++i)
+  int old_index = conses_stack->index;
+  conses_stack->index = 0;
+  for (int i = 0; i < old_index; ++i)
     {
-      assert (conses_idx <= i);
-      if (conses[i])
+      assert (conses_stack->index <= i);
+      if (conses_stack->items[i])
 	{
-	  struct lisp_type *holder = conses[i];
-	  conses[i] = NULL;
+	  struct lisp_type *holder = conses_stack->items[i];
+	  conses_stack->items[i] = NULL;
 	  gc_unset_copy_flag (holder);
-	  push_cons (holder);
+	  conses_stack->items[conses_stack->index++] = holder;
 	}
-
     }
 }
 
@@ -1193,11 +1187,11 @@ gc (struct lisp_type **roots, unsigned nroots)
   find_old_cells (formstack->items + (formstack->index),
 		  &cells,
 		  (formstack->size - formstack->index));
-  find_old_cells (conses,
+  find_old_cells (conses->items,
 		  &cells,
-		  conses_idx);
+		  conses->index);
   free_old_cells (&cells);
-  compact_conses (conses_idx);
+  compact_conses (conses);
   for (int i = 0; i < NPAIRS; ++i)
     {
       gc_unset_copy_flag (cells.cars[i]);
@@ -1219,6 +1213,7 @@ void
 init_stacks ()
 {
   INIT_STACK (formstack);
+  INIT_STACK (conses);
 }
 
 int
