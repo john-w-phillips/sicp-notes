@@ -37,12 +37,47 @@ struct lisp_type
   };
 };
 
-int no_gc = 0;
+struct lisp_item_stack {
+  unsigned index;
+  unsigned size;
+  struct lisp_type *items[];
+};
 
+#define DECLARE_LISP_STACK(name, nitems)				\
+  char name##_storage[(sizeof(struct lisp_item_stack) / sizeof(char)) +	\
+		      nitems * (sizeof(struct lisp_item *) / sizeof(char))] = {0}; \
+  struct lisp_item_stack *name = (struct lisp_item_stack *)name##_storage; \
+  const int name##_size = nitems;
+
+#define PUSH_STACK(stack, item)			\
+  do {						\
+    assert (stack->index + 1 <= stack->size);	\
+    stack->items[stack->index++] = item;	\
+  } while (0)
+
+#define POP_STACK(stack)			\
+  do {						\
+    assert (stack->index > 0);			\
+    stack->index--;				\
+  } while (0)
+
+#define INIT_STACK(stack) do {			\
+    stack->size = stack##_size;			\
+    stack->index = 0;				\
+  } while (0)
 
 struct lisp_type *cars[NPAIRS];
 struct lisp_type *cdrs[NPAIRS];
-struct lisp_type *formstack[NPAIRS];
+
+/* struct lisp_type *formstack[NPAIRS]; */
+
+
+
+/*
+  The (stupid) way we allocate types means that the heads of conses
+  lists are not on the actual cars/cdrs arrays but must be kept track
+  of separately so we don't leak memory.
+ */
 struct lisp_type *conses[NPAIRS];
 unsigned conses_idx = 0;
 
@@ -52,16 +87,18 @@ unsigned conses_idx = 0;
     conses[conses_idx++] = x;			\
   } while (0)					\
 
+DECLARE_LISP_STACK (formstack, NPAIRS);
 
-unsigned formstack_idx = 0;
-#define push_form(x)				\
-  do {						\
-    assert(formstack_idx < NPAIRS);		\
-    formstack[formstack_idx++] = x;		\
-  } while (0);
 
-#define pop_form() \
-  formstack_idx--
+/* unsigned formstack_idx = 0; */
+/* #define push_form(x)				\ */
+/*   do {						\ */
+/*     assert(formstack_idx < NPAIRS);		\ */
+/*     formstack[formstack_idx++] = x;		\ */
+/*   } while (0); */
+
+/* #define pop_form() \ */
+/*   formstack_idx-- */
 
 unsigned max_cons_idx = 0;
 #define GC_THRESH 0.75
@@ -79,9 +116,18 @@ const struct lisp_type FALSE = {
   .type = BOOLEAN,
   .intval = 0
 };
+
 #define NIL_VALUE (struct lisp_type *)&NIL
 #define TRUE_VALUE  (struct lisp_type *)&TRUE
 #define FALSE_VALUE (struct lisp_type *)&FALSE
+
+bool
+is_immutable (struct lisp_type *it)
+{
+  return (it == NIL_VALUE
+	  || it == TRUE_VALUE
+	  || it == FALSE_VALUE);
+}
 
 #define symbolp(x) ((x)->type == SYMBOL)
 #define stringp(x) ((x)->type == STRING)
@@ -118,6 +164,21 @@ const struct lisp_type FALSE = {
 
 #define nilp(x) ((x) == &NIL)
 
+void
+free_lisp_type (struct lisp_type *t)
+{
+  assert (t);
+  assert (!is_immutable (t));
+  if (stringp (t) || symbolp (t))
+    {
+      free (t->strval);
+      free (t);
+    }
+  else
+    {
+      free (t);
+    }
+}
 
 struct lisp_type *
 make_symbol(char *str)
@@ -581,10 +642,12 @@ struct lisp_type *eval_arglist (struct lisp_type *form,
   else
     {
       struct lisp_type *carvalue = eval (car (form), environ);
-      push_form (carvalue);
+      /* push_form (carvalue); */
+      PUSH_STACK (formstack, carvalue);
       struct lisp_type *rest_value = eval_arglist (cdr (form),
 						   environ);
-      pop_form ();
+      /* pop_form (); */
+      POP_STACK (formstack);
       return make_cons (carvalue,
 			rest_value);		   
     }
@@ -639,7 +702,8 @@ struct lisp_type *eval_application (struct lisp_type *form,
   assert (scheme_procedurep (proc)
 	  || primitive_procedurep (proc));
 
-  push_form (proc);
+  /* push_form (proc); */
+  PUSH_STACK (formstack, proc);
 
   struct lisp_type *argl = cdr (form);
   /* push_form (argl); */
@@ -654,7 +718,8 @@ struct lisp_type *eval_application (struct lisp_type *form,
     }
   else if (scheme_procedurep (proc))
     {
-      push_form(eval_argl);
+      /* push_form(eval_argl); */
+      PUSH_STACK (formstack, eval_argl);
       struct lisp_type *lambda_env =
 	scheme_proc_environ (proc);
       struct lisp_type *lambda_formals =
@@ -665,7 +730,8 @@ struct lisp_type *eval_application (struct lisp_type *form,
 			      eval_argl);
       lisp_rval =  eval_sequence (scheme_proc_body (proc),
 				  new_environ);
-      pop_form ();
+      /* pop_form (); */
+      POP_STACK (formstack);
     }
   else
     {
@@ -673,7 +739,8 @@ struct lisp_type *eval_application (struct lisp_type *form,
       //exit (1);
       abort();
     }
-  pop_form ();
+  /* pop_form (); */
+  POP_STACK (formstack);
   //printf ("return v\n");
   return lisp_rval;
 }
@@ -845,8 +912,10 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 {
   //struct lisp_type *roots[] = {form, environ};
   //gc (roots, 2);
-  push_form (form);
-  push_form (environ);
+  /* push_form (form); */
+  /* push_form (environ); */
+  PUSH_STACK (formstack, form);
+  PUSH_STACK (formstack, environ);
   struct lisp_type *rval = NULL;
   if (self_evaluatingp (form))
     rval = form;
@@ -867,11 +936,15 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
       exit (1);
       return NULL;
     }
-  push_form (rval);
+  /* push_form (rval); */
+  PUSH_STACK (formstack, rval);
   gc (NULL, 0);
-  pop_form ();
-  pop_form ();
-  pop_form ();
+  /* pop_form (); */
+  POP_STACK (formstack);
+  POP_STACK (formstack);
+  POP_STACK (formstack);
+  /* pop_form (); */
+  /* pop_form (); */
 
   return rval;
 }
@@ -897,9 +970,6 @@ init_environ (struct lisp_type *base)
 
   add_env_val ("true", TRUE_VALUE);
   add_env_val ("false", FALSE_VALUE);
-  /* env_frame_set_var_value (frame, */
-			   /* make_symbol ("+"), */
-			   /* make_primitive_procedure (add)); */
   return env_cur;
 }
 
@@ -907,6 +977,7 @@ void
 init_pairs (void)
 {
   bzero (conses, sizeof (conses));
+  conses_idx = 0;
   bzero (cars, sizeof (cars));
   bzero (cdrs, sizeof (cdrs));
 }
@@ -920,13 +991,6 @@ struct cons_cells
   unsigned next;
 };
 
-bool
-is_immutable (struct lisp_type *it)
-{
-  return (it == NIL_VALUE
-	  || it == TRUE_VALUE
-	  || it == FALSE_VALUE);
-}
 
 void
 gc_set_copied_flag (struct lisp_type *item)
@@ -952,11 +1016,8 @@ copy_cons_cells(struct lisp_type *pair,
   struct lisp_type *cdrpair = cdr (pair);
   assert (carpair != NULL);
   assert (cdrpair != NULL);
-  /* assert (!cdrpair->copied && !carpair->copied); */
   newcells->cars[newcells->next] = carpair;
   newcells->cdrs[newcells->next] = cdrpair;
-  /* cars[pair->pair_index] = NULL; */
-  /* cdrs[pair->pair_index] = NULL; */
   pair->pair_index = newcells->next++;
   pair->copied = true;
 
@@ -1014,7 +1075,7 @@ free_old_cells (struct cons_cells *cells)
 {
   for (int i = 0; i < cells->free_index; ++i)
     {
-      free (cells->to_free[i]);
+      free_lisp_type (cells->to_free[i]);
     }
 }
 
@@ -1114,14 +1175,9 @@ void
 gc (struct lisp_type **roots, unsigned nroots)
 {
   if (((double)max_cons_idx) / (double)NPAIRS
-      < GC_THRESH
-      || no_gc)
+      < GC_THRESH)
     {
       return;
-    }
-  else
-    {
-      printf ("GC: %d\n", max_cons_idx);
     }
 
   struct cons_cells cells;
@@ -1130,13 +1186,13 @@ gc (struct lisp_type **roots, unsigned nroots)
   cells.next = 0;
   cells.free_index = 0;
   copy_root_array (roots, &cells, nroots);
-  copy_root_array (formstack, &cells, formstack_idx);
+  copy_root_array (formstack->items, &cells, formstack->index);
 
   find_old_cells (cars, &cells, NPAIRS);
   find_old_cells (cdrs, &cells, NPAIRS);
-  find_old_cells (formstack + (formstack_idx),
+  find_old_cells (formstack->items + (formstack->index),
 		  &cells,
-		  (NPAIRS - formstack_idx));
+		  (formstack->size - formstack->index));
   find_old_cells (conses,
 		  &cells,
 		  conses_idx);
@@ -1151,18 +1207,26 @@ gc (struct lisp_type **roots, unsigned nroots)
   for (int i = 0; i < nroots; ++i)
     gc_unset_copy_flag (roots[i]);
       
-  for (int i = 0; i < NPAIRS; ++i)
-    gc_unset_copy_flag (formstack[i]);
-     
+  for (int i = 0; i < formstack->size; ++i)
+    gc_unset_copy_flag (formstack->items[i]);
+
   memcpy (cdrs, cells.cdrs, sizeof (cdrs));
   memcpy (cars, cells.cars, sizeof (cars));
   max_cons_idx = cells.next;
 }
 
+void
+init_stacks ()
+{
+  INIT_STACK (formstack);
+}
+
 int
 main ()
 {
+  init_stacks ();
   init_pairs ();
+
   struct lisp_type *environ = NIL_VALUE;
   environ = init_environ (environ);
   struct lisp_type *form = NULL;
