@@ -25,7 +25,10 @@ jmp_buf *jmpbuffer;
 struct lisp_type *the_global_environment = NULL;
 
 void
-scheme_signal_eval_error (char *msg);
+scheme_signal_eval_error (char *msg,
+			  struct lisp_type *form,
+			  struct lisp_type *environ);
+
 struct scheme_proc
 {
   struct lisp_type *scheme_proc_body;
@@ -195,12 +198,16 @@ is_immutable (struct lisp_type *it)
 #define stringp(x) ((x)->type == STRING)
 #define numberp(x) ((x)->type == NUMBER)
 #define variablep(x) ((x)->type == SYMBOL)
+#define booleanp(x) ((x)->type == BOOLEAN)
 #define symbol_string_value(x) ((x)->string.str)
 #define number_value(x) ((x)->intval)
 #define consp(x) ((x)->type == PAIR)
 #define primitive_procedurep(x) ((x)->type == PRIMITIVE_PROC)
 #define primitive_procedure_proc(x) ((x)->proc_value)
-#define self_evaluatingp(x) (numberp (x) || stringp (x))
+#define self_evaluatingp(x) (numberp (x) \
+			     || stringp (x) \
+			     || booleanp (x) \
+			     || nilp (x))
 #define applicationp(x) (consp (x))
 #define falsep(x) ((x)->type == BOOLEAN && x->intval == 0)
 #define truep(x) (!falsep (x) && !nilp (x))
@@ -734,7 +741,7 @@ lisp_cons (struct lisp_type *argl)
 {
   if (!nilp (list_seq_manip (argl, argl, "dd", 0, "CONS takes two arguments")))
     {
-      scheme_signal_eval_error ("CONS takes only two arguments");
+      scheme_signal_eval_error ("CONS takes only two arguments", NULL, NULL);
       return NULL;
     }
   else
@@ -747,7 +754,7 @@ lisp_car (struct lisp_type *argl)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "CAR takes one argument")))
     {
-      scheme_signal_eval_error ("CAR requires only one argument");
+      scheme_signal_eval_error ("CAR requires only one argument", NULL, NULL);
       return NULL;
     }
   else
@@ -759,7 +766,7 @@ lisp_cdr (struct lisp_type *argl)
 {
     if (!nilp (list_seq_manip (argl, argl, "d", 0, "CDR takes one argument")))
     {
-      scheme_signal_eval_error ("CDR requires only one argument");
+      scheme_signal_eval_error ("CDR requires only one argument", NULL, NULL);
       return NULL;
     }
   else
@@ -934,6 +941,8 @@ environment_extend (struct lisp_type *environ,
 struct lisp_type *eval_sequence (struct lisp_type *forms,
 				 struct lisp_type *environ)
 {
+  assert (forms);
+  assert (environ);
   assert (consp (forms));
   if (nilp (cdr (forms)))
       return eval (car (forms), environ);
@@ -991,9 +1000,9 @@ __bind_args (struct lisp_type *formals,
     }
   else
     {
-      abort();
+      scheme_signal_eval_error ("Bad argument list.");
     }
-    scheme_signal_eval_error ("Unspecified eval error!");
+
 }
 
 struct lisp_type *eval_application (struct lisp_type *form,
@@ -1047,8 +1056,10 @@ struct lisp_type *eval_application (struct lisp_type *form,
 	lisp_rval =  eval_sequence (scheme_proc_body (proc),
 				    new_environ);
 	/* pop_form (); */
+	
 	if (scheme_macrop (proc))
 	  {
+	    assert (lisp_rval);
 	    lisp_rval = eval (lisp_rval, environ);
 	  }
 	POP_STACK (formstack);
@@ -1375,9 +1386,13 @@ eval_quoted (struct lisp_type *form, struct lisp_type *environ)
     return car (cdr (form));
 }
 
+struct lisp_type *form_global = NULL;
+struct lisp_type *environ_global = NULL;
 void gc (bool force);
 struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 {
+  form_global = form;
+  environ_global = environ;
   PUSH_STACK (formstack, form);
   PUSH_STACK (formstack, environ);
   struct lisp_type *rval = NULL;
@@ -1400,6 +1415,8 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
   else if (quotedp (form))
     rval = eval_quoted (form, environ);
   else if (applicationp (form))
+
+
     rval = eval_application (form, environ);
   else
     {
@@ -1416,6 +1433,9 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
   POP_STACK (formstack);
   return rval;
 }
+void
+debugger (struct lisp_type *environ,
+	  struct lisp_type *form);
 
 struct lisp_type *
 scheme_consp (struct lisp_type *argl)
@@ -1427,9 +1447,13 @@ scheme_consp (struct lisp_type *argl)
 }
 
 void
-scheme_signal_eval_error (char *msg)
+scheme_signal_eval_error (char *msg,
+			  struct lisp_type *form,
+			  struct lisp_type *environ)
 {
   fprintf (stderr, "%s\n", msg);
+  if (environ && form)
+    debugger (environ, form);
   longjmp (*jmpbuffer, EVAL_ERROR);
 }
 
@@ -1438,9 +1462,6 @@ scheme_signal_eval_error (char *msg)
 struct lisp_type *
 __lisp_load (char *file, struct lisp_type *environ)
 {
-  jmp_buf *saveptr = jmpbuffer;
-  jmp_buf jmpbuffer_load;
-  jmpbuffer = &jmpbuffer_load;
   int rval = 0;
   FILE *inp = fopen (file, "r");
   struct lisp_type *lisp_rval = NIL_VALUE, *form = NULL;
@@ -1457,6 +1478,7 @@ __lisp_load (char *file, struct lisp_type *environ)
   return lisp_rval;
   
 }
+
 struct lisp_type *
 lisp_load (struct lisp_type *argl)
 {
@@ -1527,6 +1549,10 @@ scheme_eq (struct lisp_type *argl)
   return NULL;
 }
 
+struct lisp_type *
+repl (struct lisp_type *environ,
+      char *prompt,
+      FILE *inp);
 struct lisp_type *
 init_environ (struct lisp_type *base)
 {
@@ -1742,6 +1768,19 @@ copy_root_array (struct lisp_type **roots,
     }
 }
 
+
+void
+debugger (struct lisp_type *environ,
+	  struct lisp_type *form)
+{
+  printf (";; Error evaluating: \n");
+  if (form)
+    {
+      write (form);
+    }
+  repl (environ, "Debug", stdin);
+}
+
 void
 gc_unset_copy_flag (struct lisp_type *item)
 {
@@ -1845,7 +1884,38 @@ init_stacks ()
   INIT_STACK (eval_rval_stack);
 }
 
+struct lisp_type *
+user_prompt (FILE *inp, char *prompt)
+{
+  printf (";; %s Eval Input =>\n", prompt);
+  fflush (stdout);
+  return read (inp);
+}
 
+void
+user_print (struct lisp_type *in)
+{
+  printf (";; Value =>\n");
+  fflush (stdout);
+  write (in);
+}
+
+struct lisp_type *
+repl (struct lisp_type *environ,
+      char *prompt,
+      FILE *inp)
+{
+  struct lisp_type *form = NULL;
+  while ((form = user_prompt (inp, prompt)))
+    {
+      if (form == EOF_VALUE)
+	return EOF_VALUE;
+      struct lisp_type *rval = eval (form, environ);
+      PUSH_STACK (eval_rval_stack, rval);
+      user_print (rval);
+    }
+  return NULL;
+}
 
 int
 main (int argc, char **argv)
@@ -1854,10 +1924,12 @@ main (int argc, char **argv)
   init_pairs ();
   jmp_buf jumpbuffer_main;
   FILE *inp;
+  char *toload = NULL;
   int rval = 0;
   if (argc == 2)
     {
-      inp = fopen (argv[1], "r");
+      toload = argv[1];
+      inp = stdin;
     }
   else if (argc == 1)
     {
@@ -1894,14 +1966,13 @@ main (int argc, char **argv)
 	  fprintf(stderr, "recovering..\n ");
 	}
     }
-  while ((form = read (inp)))
+  if (toload)
     {
-      if (form == EOF_VALUE)
-	goto exit_eof;
-      struct lisp_type *rval = eval (form, environ);
-      PUSH_STACK (eval_rval_stack, rval);
-      write (rval);
+      write (__lisp_load (toload, the_global_environment));
+      printf(";; loaded %s\n", toload);
     }
+  repl (environ, "Toplevel", inp);
+  goto exit_normal;
  exit_assert:
   fprintf (stderr, "Assertion failure\n");
   fflush (stdout);
