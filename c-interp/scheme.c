@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <setjmp.h>
+#include <stdarg.h>
 #define NPAIRS 2048
 
 enum lisp_types {
@@ -23,12 +24,12 @@ enum lisp_types {
 
 jmp_buf *jmpbuffer;
 struct lisp_type *the_global_environment = NULL;
+struct lisp_type *form_global = NULL;
+struct lisp_type *environ_global = NULL;
 
 void
-scheme_signal_eval_error (char *msg,
-			  struct lisp_type *form,
-			  struct lisp_type *environ);
-
+scheme_signal_eval_error (char *msg, ...);
+#define eval_assert(x, msg) do { if (!(x)) {scheme_signal_eval_error(msg);} } while (0)
 struct scheme_proc
 {
   struct lisp_type *scheme_proc_body;
@@ -46,6 +47,7 @@ struct scheme_string
 #define READER_INVALID_SYNTAX 3
 #define ASSERTION_FAILURE 4
 #define EVAL_ERROR 5
+#define DEBUG_RESTART 6
 
 #define EXITCODE_BAD_ARGS 1
 #define EXITCODE_SUCCESS 2
@@ -113,8 +115,11 @@ DECLARE_LISP_STACK (eval_rval_stack, NPAIRS * 5);
 
 DECLARE_LISP_STACK (conses, NPAIRS);
 
+DECLARE_LISP_STACK (backtrace, NPAIRS);
+
 unsigned max_cons_idx = 0;
 #define GC_THRESH 0.75
+
 
 struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ);
 const struct lisp_type NIL = {
@@ -179,7 +184,8 @@ const struct lisp_type SCHEME_DOT = {
 #define TRUE_VALUE		((struct lisp_type *)&TRUE)
 #define FALSE_VALUE		((struct lisp_type *)&FALSE)
 #define UNQUOTE_SPLICE_VALUE    ((struct lisp_type *)&UNQUOTE_SPLICE)
-
+void
+write0 (struct lisp_type *t);
 bool
 is_immutable (struct lisp_type *it)
 {
@@ -342,14 +348,17 @@ make_number(int num)
 struct lisp_type *
 car (struct lisp_type *pair)
 {
-  assert(pair->type == PAIR);
+  //assert(pair->type == PAIR);
+  eval_assert((pair->type == PAIR),
+	      "CAR of a non-pair!");
   return cars[pair->pair_index];
 }
 
 struct lisp_type *
 cdr (struct lisp_type *pair)
 {
-  assert (pair->type == PAIR);
+  eval_assert ((pair->type == PAIR),
+	       "CDR of a non-pair!");
   return cdrs[pair->pair_index];
 }
 
@@ -440,6 +449,11 @@ env_frame_find_var (struct lisp_type *frame,
     return valuecel;
 }
 
+struct lisp_type *
+make_bt_entry (struct lisp_type *form,
+	       struct lisp_type *formals,
+	       struct lisp_type *args,
+	       struct lisp_type *new_environ);
 
 struct lisp_type *
 env_frame_set_var_value (struct lisp_type *frame,
@@ -741,7 +755,7 @@ lisp_cons (struct lisp_type *argl)
 {
   if (!nilp (list_seq_manip (argl, argl, "dd", 0, "CONS takes two arguments")))
     {
-      scheme_signal_eval_error ("CONS takes only two arguments", NULL, NULL);
+      scheme_signal_eval_error ("CONS takes only two arguments");
       return NULL;
     }
   else
@@ -754,7 +768,7 @@ lisp_car (struct lisp_type *argl)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "CAR takes one argument")))
     {
-      scheme_signal_eval_error ("CAR requires only one argument", NULL, NULL);
+      scheme_signal_eval_error ("CAR requires only one argument");
       return NULL;
     }
   else
@@ -766,7 +780,7 @@ lisp_cdr (struct lisp_type *argl)
 {
     if (!nilp (list_seq_manip (argl, argl, "d", 0, "CDR takes one argument")))
     {
-      scheme_signal_eval_error ("CDR requires only one argument", NULL, NULL);
+      scheme_signal_eval_error ("CDR requires only one argument");
       return NULL;
     }
   else
@@ -786,7 +800,8 @@ add (struct lisp_type *argl)
 struct lisp_type *
 less_than (struct lisp_type *argl)
 {
-  assert (consp (argl));
+  //assert (consp (argl));
+  eval_assert (consp (argl), "Argl must not a list! <.");
   if (number_value (car (argl))
       < number_value (car (cdr (argl))))
     {
@@ -796,8 +811,7 @@ less_than (struct lisp_type *argl)
 }
 
 
-void
-write0 (struct lisp_type *t);
+
 
 void
 write_list (struct lisp_type *t, bool space)
@@ -852,7 +866,10 @@ write0 (struct lisp_type *t)
     case DOT:
       printf("|.|");
       break;
-    case BOOLEAN:
+    case SCHEME_EOF:
+      printf("#eof");
+      break;
+    case BOOLEAN: {
       if (t == FALSE_VALUE)
 	printf("#f");
       else if (t == TRUE_VALUE)
@@ -863,9 +880,10 @@ write0 (struct lisp_type *t)
 	  exit (1);
 	}
       break;
+    }
     default:
-      fprintf (stderr, "can't write this type\n");
-      exit (1);
+      fprintf (stderr, "can't write this type: %d!\n", t->type);
+      //exit (1);
     }
 }
 
@@ -894,8 +912,11 @@ eval_var (struct lisp_type *form,
 struct lisp_type *eval_arglist (struct lisp_type *form,
 				struct lisp_type *environ)
 {
-  assert (form);
-  assert (consp (form) || nilp (form));
+  /* assert (form); */
+  /* assert (consp (form) || nilp (form)); */
+  eval_assert (form, "Evaluator error -- form was NULL, zero pointer.."); 
+  eval_assert (consp (form) || nilp (form),
+	       "Evaluator error -- arglist not a list or nil.");
   if (nilp (form))
     return NIL_VALUE;
   else
@@ -943,7 +964,7 @@ struct lisp_type *eval_sequence (struct lisp_type *forms,
 {
   assert (forms);
   assert (environ);
-  assert (consp (forms));
+  eval_assert (consp (forms), "Forms must be a list.");
   if (nilp (cdr (forms)))
       return eval (car (forms), environ);
   else
@@ -1008,12 +1029,14 @@ __bind_args (struct lisp_type *formals,
 struct lisp_type *eval_application (struct lisp_type *form,
 				    struct lisp_type *environ)
 {
-  assert (cdr (form));
+  //assert (cdr (form));
+  eval_assert (cdr (form), "Form is malformed, must be a nil terminated list!");
   struct lisp_type *proc = eval (car (form), environ);
-  assert (proc);
-  assert (scheme_procedurep (proc)
-	  || primitive_procedurep (proc)
-	  || scheme_macrop (proc));
+  eval_assert (proc, "PROC is null in C, evaluator bug.");
+  eval_assert ((scheme_procedurep (proc)
+		|| primitive_procedurep (proc)
+		|| scheme_macrop (proc)),
+	       "Form is not a procedure");
 
   /* push_form (proc); */
   PUSH_STACK (formstack, proc);
@@ -1030,7 +1053,13 @@ struct lisp_type *eval_application (struct lisp_type *form,
   struct lisp_type *lisp_rval = NULL;
   if (primitive_procedurep (proc))
     {
+      PUSH_STACK (backtrace,
+		  make_bt_entry (form,
+				 NIL_VALUE,
+				 eval_argl,
+				 environ));
       lisp_rval = primitive_procedure_proc (proc)(eval_argl);
+      POP_STACK (backtrace);
     }
   else if (scheme_procedurep (proc) || scheme_macrop (proc))
     {
@@ -1047,14 +1076,23 @@ struct lisp_type *eval_application (struct lisp_type *form,
 		     &arguments);
 	assert (formals);
 	assert (arguments);
+
 	struct lisp_type *new_environ
 	  = environment_extend (lambda_env,
 				formals,
 				arguments);
+	struct lisp_type *btent = make_bt_entry(form,
+						formals,
+						arguments,
+						new_environ);
+	PUSH_STACK (backtrace,
+		    btent); 
+	PUSH_STACK (formstack, btent); //protect btent from GC.
 	PUSH_STACK (formstack, arguments);
 	PUSH_STACK (formstack, formals);
 	lisp_rval =  eval_sequence (scheme_proc_body (proc),
 				    new_environ);
+
 	/* pop_form (); */
 	
 	if (scheme_macrop (proc))
@@ -1062,9 +1100,11 @@ struct lisp_type *eval_application (struct lisp_type *form,
 	    assert (lisp_rval);
 	    lisp_rval = eval (lisp_rval, environ);
 	  }
-	POP_STACK (formstack);
-	POP_STACK (formstack);
-	POP_STACK (formstack);
+	POP_STACK (backtrace);
+	POP_STACK (formstack); //formals
+	POP_STACK (formstack); // arguments
+	POP_STACK (formstack); //btent 
+	POP_STACK (formstack); //eval_argl
     }
   else
     {
@@ -1073,7 +1113,7 @@ struct lisp_type *eval_application (struct lisp_type *form,
       abort();
     }
   /* pop_form (); */
-  POP_STACK (formstack);
+  POP_STACK (formstack); // proc
   //printf ("return v\n");
   return lisp_rval;
 }
@@ -1110,10 +1150,11 @@ list_seq_manip (struct lisp_type *form_orig,
 			       errorstr);
     }
  err:
-  fprintf (stderr, "Invalid syntax: %s. Form: \n",
-	   errorstr);
-  write (form_orig);
-  longjmp (*jmpbuffer, READER_INVALID_SYNTAX);
+  /* fprintf (stderr, "Invalid syntax: %s. Form: \n", */
+  /* 	   errorstr); */
+  /* write (form_orig); */
+  /* longjmp (*jmpbuffer, READER_INVALID_SYNTAX); */
+  scheme_signal_eval_error ("Invalid syntax: %s", errorstr);
   return NULL;
 }
 
@@ -1386,8 +1427,7 @@ eval_quoted (struct lisp_type *form, struct lisp_type *environ)
     return car (cdr (form));
 }
 
-struct lisp_type *form_global = NULL;
-struct lisp_type *environ_global = NULL;
+
 void gc (bool force);
 struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 {
@@ -1415,8 +1455,6 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
   else if (quotedp (form))
     rval = eval_quoted (form, environ);
   else if (applicationp (form))
-
-
     rval = eval_application (form, environ);
   else
     {
@@ -1425,6 +1463,9 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
       exit (1);
       return NULL;
     }
+
+  form_global = form;
+  environ_global = environ;
 
   PUSH_STACK (formstack, rval);
   gc (false);
@@ -1446,16 +1487,19 @@ scheme_consp (struct lisp_type *argl)
     return FALSE_VALUE;
 }
 
+#define MAX_ERRORLEN 1024
 void
-scheme_signal_eval_error (char *msg,
-			  struct lisp_type *form,
-			  struct lisp_type *environ)
+scheme_signal_eval_error (char *msg, ...)
 {
-  fprintf (stderr, "%s\n", msg);
-  if (environ && form)
-    debugger (environ, form);
-  longjmp (*jmpbuffer, EVAL_ERROR);
+  char str[MAX_ERRORLEN] = {0};
+  va_list args;
+  va_start(args, msg);
+  vsnprintf(str, MAX_ERRORLEN, msg, args);
+  fprintf (stderr, "%s\n", str);
+  va_end(args);
+  debugger (environ_global, form_global);
 }
+
 
 
 
@@ -1553,10 +1597,6 @@ struct lisp_type *
 repl (struct lisp_type *environ,
       char *prompt,
       FILE *inp);
-struct lisp_type *
-init_environ (struct lisp_type *base)
-{
-  
 #define add_env_proc(str, sym)						\
   do {									\
     struct lisp_type *strval = make_symbol (str, false);		\
@@ -1574,6 +1614,11 @@ init_environ (struct lisp_type *base)
     PUSH_STACK (eval_rval_stack, strval);				\
   } while (0)
 
+
+struct lisp_type *
+init_environ (struct lisp_type *base)
+{
+  
 
   struct lisp_type *frame
     = make_env_frame ();
@@ -1655,7 +1700,8 @@ copy_cons_cells(struct lisp_type *pair,
     {
       copy_cons_cells (carpair, newcells);
     }
-  else if (scheme_procedurep (carpair))
+  else if (scheme_procedurep (carpair)
+	   || scheme_macrop (carpair))
     {
       copy_procedure_cells (carpair,
 			    newcells);
@@ -1667,7 +1713,8 @@ copy_cons_cells(struct lisp_type *pair,
     {
       copy_cons_cells (cdrpair, newcells);
     }
-  else if (scheme_procedurep (cdrpair))
+  else if (scheme_procedurep (cdrpair)
+	   || scheme_macrop (cdrpair))
     {
       copy_procedure_cells (cdrpair,
 			    newcells);
@@ -1690,14 +1737,20 @@ copy_procedure_cells (struct lisp_type *proc,
 {
   if (proc->copied)
     return;
-  assert (scheme_procedurep (proc));
+  assert (scheme_procedurep (proc) || scheme_macrop (proc));
   proc->copied = true;
   copy_cons_cells (scheme_proc_body (proc),
 		   newcells);
   copy_cons_cells (scheme_proc_environ (proc),
 		   newcells);
-  copy_cons_cells (scheme_proc_formals (proc),
-		   newcells);		   
+  if (consp (scheme_proc_formals (proc)))
+    copy_cons_cells (scheme_proc_formals (proc),
+		     newcells);
+  else
+    {
+      assert (symbolp (scheme_proc_formals (proc)));
+      scheme_proc_formals (proc)->copied = true;
+    }
 }
 
 void
@@ -1725,14 +1778,14 @@ find_old_cells (struct lisp_type **cells,
 	  bool found = false;
 	  for (int j = 0; j < cells_out->free_index; ++j)
 	    {
-		  /*
-		    we already have this cell so go to the next loop.
-		   */
-		  if (cells_out->to_free[j] == cells[i])
-		    {
-		      found = true;
-		      break;
-		    }
+	      /*
+		we already have this cell so go to the next loop.
+	      */
+	      if (cells_out->to_free[j] == cells[i])
+		{
+		  found = true;
+		  break;
+		}
 	    }
 	  if (!found)
 	    {
@@ -1755,7 +1808,7 @@ copy_root_array (struct lisp_type **roots,
 	{
 	  copy_cons_cells (roots[i], cells);
 	}
-      else if (scheme_procedurep (roots[i]))
+      else if (scheme_procedurep (roots[i]) || scheme_macrop (roots[i]))
 	{
 	  copy_procedure_cells (roots[i],
 				cells);
@@ -1768,17 +1821,71 @@ copy_root_array (struct lisp_type **roots,
     }
 }
 
+struct lisp_type *
+make_bt_entry (struct lisp_type *form,
+	       struct lisp_type *formals,
+	       struct lisp_type *args,
+	       struct lisp_type *new_environ) {
+  return make_cons (form,
+		    make_cons (formals,
+			       make_cons (args,
+					  make_cons (new_environ,
+						     NIL_VALUE))));
+}
+
+void
+print_bt_entry (struct lisp_type *bt_ent) {
+  printf ("\nForm: ");
+  write0 (car (bt_ent));
+  printf ("\nFormals: ");
+  write0 (car (cdr (bt_ent)));
+  printf ("\nArgs: ");
+  write0 (car (cdr (cdr (bt_ent))));
+  printf("\n");
+}
+
+
+struct lisp_type *
+show_backtrace (struct lisp_type *argl)
+{
+  for (int i = backtrace->index-1; i >= 0; --i) {
+    print_bt_entry (backtrace->items[i]);
+  }
+
+  return NIL_VALUE;
+}
+
+struct lisp_type *
+leave_debug (struct lisp_type *argl)
+{
+  longjmp (*jmpbuffer, DEBUG_RESTART);
+}
+
+struct lisp_type *
+init_debug_environ (struct lisp_type *base)
+{
+  struct lisp_type *frame = make_env_frame ();
+  struct lisp_type *env = make_cons (frame, base);
+
+  add_env_proc ("backtrace", show_backtrace);
+  add_env_proc ("leave", leave_debug);
+  return env;
+}
 
 void
 debugger (struct lisp_type *environ,
 	  struct lisp_type *form)
 {
-  printf (";; Error evaluating: \n");
+  printf (";; Error evaluating: ");
   if (form)
     {
       write (form);
     }
-  repl (environ, "Debug", stdin);
+  else
+    printf (" (unknown)" );
+  struct lisp_type *env_dbg = init_debug_environ (environ);
+  repl (env_dbg, "(Debug)", stdin);
+  leave_debug (NIL_VALUE);
 }
 
 void
@@ -1788,7 +1895,8 @@ gc_unset_copy_flag (struct lisp_type *item)
     {
       item->copied = false;
     }
-  if (item && scheme_procedurep (item))
+  if (item && (scheme_procedurep (item)
+	       || scheme_macrop (item)))
     {
       scheme_proc_body (item)->copied = false;
       scheme_proc_formals (item)->copied = false;
@@ -1882,6 +1990,7 @@ init_stacks ()
   INIT_STACK (formstack);
   INIT_STACK (conses);
   INIT_STACK (eval_rval_stack);
+  INIT_STACK (backtrace);
 }
 
 struct lisp_type *
@@ -1960,10 +2069,18 @@ main (int argc, char **argv)
 	{
 	  goto exit_assert;
 	}
+      else if (rval == DEBUG_RESTART)
+	{
+	  formstack->index = unwind_stack_idx;
+	  backtrace->index = 0;
+	  fprintf (stderr, ";; Leaving debugger...\n");
+	  goto repl_enter;
+	}
       else
 	{
 	  formstack->index = unwind_stack_idx;
-	  fprintf(stderr, "recovering..\n ");
+	  fprintf(stderr, "Unknown error occured, recovering...\n ");
+	  goto repl_enter;
 	}
     }
   if (toload)
@@ -1971,6 +2088,7 @@ main (int argc, char **argv)
       write (__lisp_load (toload, the_global_environment));
       printf(";; loaded %s\n", toload);
     }
+ repl_enter:
   repl (environ, "Toplevel", inp);
   goto exit_normal;
  exit_assert:
