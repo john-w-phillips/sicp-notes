@@ -23,6 +23,11 @@ DECLARE_LISP_STACK (backtrace, NPAIRS);
 
 unsigned max_cons_idx = 0;
 
+struct port STDIN_CPORT_READER = {
+  .getbyte = (int (*)(void *))getc,
+  .ungetbyte = (void (*)(int, void *))ungetc,
+  .writebyte = (void (*)(void *, int))putc
+};
 
 
 #define self_evaluatingp(x) (numberp (x) \
@@ -311,6 +316,56 @@ __bind_args (struct lisp_type *formals,
     }
 
 }
+struct lisp_type *
+eval_inner_apply (struct lisp_type *proc,
+		  struct lisp_type *form,
+		  struct lisp_type *environ,
+		  struct lisp_type *eval_argl)
+{
+  struct lisp_type *lisp_rval = NULL;
+  /* push_form(eval_argl); */
+  
+  PUSH_STACK (formstack, eval_argl);
+  struct lisp_type *lambda_env =
+    scheme_proc_environ (proc);
+  struct lisp_type *lambda_formals =
+    scheme_proc_formals (proc);
+  struct lisp_type *arguments = NULL, *formals = NULL;
+  __bind_args (lambda_formals,
+	       eval_argl,
+	       &formals,
+	       &arguments);
+  assert (formals);
+  assert (arguments);
+
+  struct lisp_type *new_environ
+    = environment_extend (lambda_env,
+			  formals,
+			  arguments);
+  struct lisp_type *btent = make_bt_entry(form,
+					  formals,
+					  arguments,
+					  new_environ);
+  PUSH_STACK (backtrace,
+	      btent); 
+  PUSH_STACK (formstack, btent); //protect btent from GC.
+  PUSH_STACK (formstack, arguments);
+  PUSH_STACK (formstack, formals);
+  lisp_rval =  eval_sequence (scheme_proc_body (proc),
+			      new_environ);
+
+  if (scheme_macrop (proc))
+    {
+      assert (lisp_rval);
+      lisp_rval = eval (lisp_rval, environ);
+    }
+  POP_STACK (backtrace); // btent
+  POP_STACK (formstack); // formals
+  POP_STACK (formstack); // arguments
+  POP_STACK (formstack); // btent 
+  POP_STACK (formstack); // eval_argl
+  return lisp_rval;
+}
 
 struct lisp_type *eval_application (struct lisp_type *form,
 				    struct lisp_type *environ)
@@ -349,48 +404,10 @@ struct lisp_type *eval_application (struct lisp_type *form,
     }
   else if (scheme_procedurep (proc) || scheme_macrop (proc))
     {
-      /* push_form(eval_argl); */
-      PUSH_STACK (formstack, eval_argl);
-      struct lisp_type *lambda_env =
-	scheme_proc_environ (proc);
-      struct lisp_type *lambda_formals =
-	scheme_proc_formals (proc);
-      struct lisp_type *arguments = NULL, *formals = NULL;
-	__bind_args (lambda_formals,
-		     eval_argl,
-		     &formals,
-		     &arguments);
-	assert (formals);
-	assert (arguments);
-
-	struct lisp_type *new_environ
-	  = environment_extend (lambda_env,
-				formals,
-				arguments);
-	struct lisp_type *btent = make_bt_entry(form,
-						formals,
-						arguments,
-						new_environ);
-	PUSH_STACK (backtrace,
-		    btent); 
-	PUSH_STACK (formstack, btent); //protect btent from GC.
-	PUSH_STACK (formstack, arguments);
-	PUSH_STACK (formstack, formals);
-	lisp_rval =  eval_sequence (scheme_proc_body (proc),
-				    new_environ);
-
-	/* pop_form (); */
-	
-	if (scheme_macrop (proc))
-	  {
-	    assert (lisp_rval);
-	    lisp_rval = eval (lisp_rval, environ);
-	  }
-	POP_STACK (backtrace);
-	POP_STACK (formstack); //formals
-	POP_STACK (formstack); // arguments
-	POP_STACK (formstack); //btent 
-	POP_STACK (formstack); //eval_argl
+      lisp_rval =eval_inner_apply (proc,
+				   form,
+				   environ,
+				   eval_argl);
     }
   else
     {
@@ -618,7 +635,9 @@ __eval_quasiquote (struct lisp_type *form,
 	  struct lisp_type *total = lists_append (tosplice,
 						  __eval_quasiquote (cdr (cdr (form)),
 								     environ));
+	  PUSH_STACK (formstack, total);
 	  struct lisp_type *first_quoted = __eval_quasiquote (car (form), environ);
+	  POP_STACK (formstack);
 	  POP_STACK (formstack);
 	  return make_cons (first_quoted, total);
 	}
@@ -721,6 +740,8 @@ init_environ (struct lisp_type *base)
   add_env_proc ("make-vector", scheme_make_vector);
   add_env_proc ("vector-ref", scheme_vector_ref);
   add_env_proc ("vector-set!", scheme_vector_set);
+  add_env_proc ("read", scheme_read);
+  add_env_proc ("write", scheme_write);
   add_env_val ("true", TRUE_VALUE);
   add_env_val ("false", FALSE_VALUE);
 
@@ -748,7 +769,7 @@ init_stacks ()
 }
 
 struct lisp_type *
-user_prompt (FILE *inp, char *prompt)
+user_prompt (struct port *inp, char *prompt)
 {
   printf (";; %s Eval Input =>\n", prompt);
   fflush (stdout);
@@ -766,7 +787,7 @@ user_print (struct lisp_type *in)
 struct lisp_type *
 repl (struct lisp_type *environ,
       char *prompt,
-      FILE *inp)
+      struct port *inp)
 {
   struct lisp_type *form = NULL;
   while ((form = user_prompt (inp, prompt)))
@@ -780,11 +801,18 @@ repl (struct lisp_type *environ,
   return NULL;
 }
 
+void
+init_io (void)
+{
+  STDIN_CPORT_READER.state = stdin;
+}
+
 int
 main (int argc, char **argv)
 {
   init_stacks ();
   init_pairs ();
+  init_io ();
   jmp_buf jumpbuffer_main;
   FILE *inp;
   char *toload = NULL;
@@ -805,6 +833,7 @@ main (int argc, char **argv)
       goto exit_normal;
     }
 
+  STDIN_CPORT_READER.state = inp;
   struct lisp_type *environ = NIL_VALUE;
   environ = init_environ (environ);
   struct lisp_type *form = NULL;
@@ -843,7 +872,7 @@ main (int argc, char **argv)
       printf(";; loaded %s\n", toload);
     }
  repl_enter:
-  repl (environ, "Toplevel", inp);
+  repl (environ, "Toplevel", &STDIN_CPORT_READER);
   goto exit_normal;
  exit_assert:
   fprintf (stderr, "Assertion failure\n");

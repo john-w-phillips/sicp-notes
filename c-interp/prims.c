@@ -215,8 +215,10 @@ __lisp_load (char *file, struct lisp_type *environ)
 {
   int rval = 0;
   FILE *inp = fopen (file, "r");
+  struct port p = STDIN_CPORT_READER;
+  p.state = inp;
   struct lisp_type *lisp_rval = NIL_VALUE, *form = NULL;
-  while ((form = read1 (inp)))
+  while ((form = read1 (&p)))
     {
       if (form == EOF_VALUE)
 	break;
@@ -404,7 +406,94 @@ scheme_vector_ref (struct lisp_type *argl)
   struct lisp_type *clone = calloc (1, sizeof *clone);
   clone->type = v->v.vec.type;
   clone->v = v->v.vec.mem[n];
+  PUSH_STACK (conses, clone);
   return clone;
+}
+
+struct lisp_reader_state
+{
+  struct lisp_type *read_proc;
+  struct lisp_type *write_proc;
+  struct lisp_type *unget_proc;
+};
+
+static void
+__lisp_reader_ungetc (int c, void *argstate)
+{
+  struct lisp_reader_state *state = argstate;
+  struct lisp_type *args = make_cons (make_number (c), NIL_VALUE);
+  struct lisp_type *rval = eval_inner_apply (state->unget_proc,
+					     NIL_VALUE,
+					     the_global_environment,
+					     args);
+  PUSH_STACK (eval_rval_stack, rval);
+}
+
+static int
+__lisp_reader_getc (void *argstate)
+{
+  struct lisp_reader_state *state = argstate;
+  struct lisp_type *rval = eval_inner_apply (state->read_proc,
+					     NIL_VALUE,
+					     the_global_environment,
+					     NIL_VALUE);
+  if (!(numberp (rval) || charp (rval)))
+    {
+      scheme_signal_eval_error ("Lisp byte reader returned non-int");
+      return -1;
+    }
+  else
+    return number_value (rval);
+}
+
+void
+init_cport_reader_from_scheme_reader (struct lisp_type *scheme_reader,
+				      struct lisp_reader_state *rstate,
+				      struct port *p)
+{
+  struct lisp_type *read_proc = car (scheme_reader);
+  struct lisp_type *unget_proc = car (cdr (scheme_reader));
+  rstate->read_proc = read_proc;
+  rstate->unget_proc = unget_proc;
+  p->state = rstate;
+  p->getbyte = __lisp_reader_getc;
+  p->ungetbyte = __lisp_reader_ungetc;
+  p->writebyte = NULL;
+}
+
+struct lisp_type *
+scheme_read (struct lisp_type *argl)
+{
+  if (nilp (argl))
+    return read1 (&STDIN_CPORT_READER);
+  else if (nilp (cdr (argl)))
+    {
+      PUSH_STACK (formstack, argl);
+      struct port p = {0};
+      struct lisp_reader_state rstate = {0};
+      init_cport_reader_from_scheme_reader (car (argl),
+					    &rstate,
+					    &p);
+      struct lisp_type *rval = read1 (&p);
+      POP_STACK (formstack);
+      return rval;
+    }
+  else
+    scheme_signal_eval_error ("Support for non-stdin ports not implemented");
+  return NULL;
+}
+
+struct lisp_type *
+scheme_write (struct lisp_type *argl)
+{
+  if (nilp (argl))
+    {
+     write1 (argl);
+     return TRUE_VALUE;
+    }
+  else
+    scheme_signal_eval_error("Support for non-stdout ports not implemented");
+  return NULL;
 }
 
 struct lisp_type *

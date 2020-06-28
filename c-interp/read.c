@@ -1,13 +1,15 @@
 #include "scheme.h"
 
 struct lisp_type *
-read_list (FILE *fp)
+read_list (struct port *fp)
 {
-  //int c = getc (stdin);
+  //int c = cport_getbyte (stdin);
   struct lisp_type *h = read0 (fp);
+  PUSH_STACK (formstack, h);
   if (h == DOT_VALUE)
     {
       struct lisp_type *tail = read0 (fp);
+      PUSH_STACK (formstack, tail);
       struct lisp_type *end = read0 (fp);
       if (end)
 	{
@@ -15,14 +17,21 @@ read_list (FILE *fp)
 	  longjmp (*jmpbuffer, READER_INVALID_SYNTAX);
 	}
       else
-	return tail;
+	{
+	  POP_STACK (formstack);
+	  POP_STACK (formstack);
+	  return tail;
+	}
     }
   else if (h)
     {
-      return make_cons (h, read_list (fp));
+      struct lisp_type *rval = make_cons (h, read_list (fp));
+      POP_STACK (formstack);
+      return rval;
     }
   else
     {
+      POP_STACK (formstack);
       return (struct lisp_type *)&NIL;
     }
 }
@@ -30,15 +39,15 @@ read_list (FILE *fp)
 #define NUMSIZ 128
 
 struct lisp_type *
-read_num (int c, FILE *fp)
+read_num (int c, struct port *fp)
 {
   char numbuf[NUMSIZ] = {c}, *endptr = NULL;;
   int idx = 1;
-  while ( isdigit (c = getc (fp)) )
+  while ( isdigit (c = cport_getbyte (fp)) )
     {
       numbuf[idx++] = c;
     }
-  ungetc (c, fp);
+  cport_ungetbyte (c, fp);
   numbuf[idx] = '\0';
   int rval = strtol (numbuf, &endptr, 10);
   if (*endptr == '\0')
@@ -58,28 +67,27 @@ isspecial (int c)
 }
 
 struct lisp_type *
-read_symbol (int c, FILE *fp)
+read_symbol (int c, struct port *fp)
 {
   char symbuf[SYMBSIZE] = {c};
   int index = 1;
 
-  while ( !isspecial (c = getc (fp)) )
+  while ( !isspecial (c = cport_getbyte (fp)) )
     {
       symbuf[index++] = c;
     }
   symbuf[index] = '\0';
-  ungetc (c, fp);
+  cport_ungetbyte (c, fp);
   return make_symbol (strdup (symbuf), true);
 }
 
-#define MAX_STRING 1024
 
 struct lisp_type *
-read_string (int c, FILE *fp)
+read_string (int c, struct port *fp)
 {
   int index = 0;
   union scheme_value strbuf[MAX_STRING] = {0};
-  while ( ((c = getc (fp)) != '"') && (index < MAX_STRING))
+  while ( ((c = cport_getbyte (fp)) != '"') && (index < MAX_STRING))
     {
       strbuf[index++].intval = c;
     }
@@ -91,24 +99,24 @@ read_string (int c, FILE *fp)
 			       mem);
 }
 
-struct lisp_type *read_quoted (FILE *fp)
+struct lisp_type *read_quoted (struct port *fp)
 {
   return make_cons (QUOTE_VALUE,
 		    make_cons (read0 (fp), NIL_VALUE));
 }
 
-struct lisp_type *read_quasiquote (FILE *fp)
+struct lisp_type *read_quasiquote (struct port *fp)
 {
   return make_cons (QUASIQUOTE_VALUE,
 		    make_cons (read0 (fp), NIL_VALUE));
 	
 }
 
-struct lisp_type *read_comma (FILE *fp)
+struct lisp_type *read_comma (struct port *fp)
 {
   int c = 0;
 
-  if ((c = getc (fp)) == '@')
+  if ((c = cport_getbyte (fp)) == '@')
     {
       return make_cons (UNQUOTE_SPLICE_VALUE,
 			make_cons (read0 (fp),
@@ -116,29 +124,29 @@ struct lisp_type *read_comma (FILE *fp)
     }
   else
     {
-      ungetc (c, fp);
+      cport_ungetbyte (c, fp);
       return make_cons (UNQUOTE_VALUE,
 			make_cons (read0 (fp), NIL_VALUE));
     }
 }
 
 void
-read_comment (FILE *fp)
+read_comment (struct port *fp)
 {
   int c = 0;
-  while ( (c = getc (fp)) != '\n') {}
+  while ( (c = cport_getbyte (fp)) != '\n') {}
 }
 struct lisp_type *
-read_char (FILE *fp)
+read_char (struct port *fp)
 {
-  int c = getc (fp);
+  int c = cport_getbyte (fp);
   return make_char (c);
 }
 
 struct lisp_type *
-read0 (FILE *fp)
+read0 (struct port *fp)
 {
-  int c = getc (fp);
+  int c = cport_getbyte (fp);
   if (c == '(')
     return read_list (fp);
   else if (isdigit (c))
@@ -177,7 +185,7 @@ read0 (FILE *fp)
 }
 
 struct lisp_type *
-read1 (FILE *fp)
+read1 (struct port *fp)
 {
   struct lisp_type *rval = read0 (fp);
   if (! rval)

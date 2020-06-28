@@ -65,6 +65,7 @@ copy_cons_cells(struct lisp_type *pair,
   else
       gc_set_copied_flag (carpair);
 
+
   if (consp (cdrpair))
     {
       copy_cons_cells (cdrpair, newcells);
@@ -95,14 +96,23 @@ copy_procedure_cells (struct lisp_type *proc,
     return;
   assert (scheme_procedurep (proc) || scheme_macrop (proc));
   proc->copied = true;
-  copy_cons_cells (scheme_proc_body (proc),
-		   newcells);
+  if (consp (scheme_proc_body (proc)))
+    {
+      copy_cons_cells (scheme_proc_body (proc),
+		       newcells);
+    }
+  else
+    {
+      assert (is_immutable (scheme_proc_body (proc)));
+    }
+
+  assert (consp (scheme_proc_environ (proc)));
   copy_cons_cells (scheme_proc_environ (proc),
 		   newcells);
   if (consp (scheme_proc_formals (proc)))
     copy_cons_cells (scheme_proc_formals (proc),
 		     newcells);
-  else
+  else if (!nilp (scheme_proc_formals (proc)))
     {
       assert (symbolp (scheme_proc_formals (proc)));
       scheme_proc_formals (proc)->copied = true;
@@ -164,7 +174,7 @@ copy_root_array (struct lisp_type **roots,
 	{
 	  copy_cons_cells (roots[i], cells);
 	}
-      else if (scheme_procedurep (roots[i]) || scheme_macrop (roots[i]))
+      else if ((scheme_procedurep (roots[i]) || scheme_macrop (roots[i])))
 	{
 	  copy_procedure_cells (roots[i],
 				cells);
@@ -173,7 +183,6 @@ copy_root_array (struct lisp_type **roots,
 	{
 	  gc_set_copied_flag (roots[i]);
 	}
-	       
     }
 }
 
@@ -187,9 +196,12 @@ gc_unset_copy_flag (struct lisp_type *item)
   if (item && (scheme_procedurep (item)
 	       || scheme_macrop (item)))
     {
-      scheme_proc_body (item)->copied = false;
-      scheme_proc_formals (item)->copied = false;
-      scheme_proc_environ (item)->copied = false;
+      if (!is_immutable (scheme_proc_body (item)))
+	scheme_proc_body (item)->copied = false;
+      if (!is_immutable (scheme_proc_formals (item)))
+	scheme_proc_formals (item)->copied = false;
+      if (!is_immutable (scheme_proc_environ (item)))
+	scheme_proc_environ (item)->copied = false;
     }
 }
 

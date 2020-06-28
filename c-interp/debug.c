@@ -83,6 +83,6 @@ debugger (struct lisp_type *environ,
   else
     printf (" (unknown)" );
   struct lisp_type *env_dbg = init_debug_environ (environ);
-  repl (env_dbg, "(Debug)", stdin);
+  repl (env_dbg, "(Debug)", &STDIN_CPORT_READER);
   leave_debug (NIL_VALUE);
 }

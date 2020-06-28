@@ -32,6 +32,8 @@ extern struct lisp_type *the_global_environment;
 extern struct lisp_type *form_global;
 extern struct lisp_type *environ_global;
 
+
+
 enum lisp_types
 sym_to_type (struct lisp_type *symb);
 
@@ -93,6 +95,20 @@ struct lisp_item_stack {
   unsigned size;
   struct lisp_type *items[];
 };
+
+struct port {
+  void *state;
+  int (*getbyte)(void *port);
+  void (*ungetbyte)(int c, void *port);
+  void (*writebyte)(void *port, int c);
+};
+
+
+#define cport_getbyte(x) ((x)->getbyte(x->state))
+#define cport_ungetbyte(c, x) ((x)->ungetbyte(c, x->state))
+#define cport_writebyte(x, c) ((x)->writebyte(x->state, c))
+
+extern struct port STDIN_CPORT_READER;
 
 #define DECLARE_LISP_STACK(name, nitems)				\
   char name##_storage[(sizeof(struct lisp_item_stack) / sizeof(char)) +	\
@@ -220,10 +236,10 @@ void
 write0 (struct lisp_type *t);
 
 struct lisp_type *
-read0 (FILE *fp);
+read0 (struct port *fp);
 
 struct lisp_type *
-read1 (FILE *fp);
+read1 (struct port *fp);
 
 void
 write1 (struct lisp_type *t);
@@ -381,12 +397,25 @@ struct lisp_type *
 scheme_vector_ref (struct lisp_type *argl);
 struct lisp_type *
 scheme_vector_set (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_write (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_read (struct lisp_type *argl);
+
+struct lisp_type *
+eval_inner_apply (struct lisp_type *proc,
+		  struct lisp_type *form,
+		  struct lisp_type *environ,
+		  struct lisp_type *eval_argl);
+
 int
 __list_length (unsigned accum, struct lisp_type *argl);
 struct lisp_type *
 repl (struct lisp_type *environ,
       char *prompt,
-      FILE *inp);
+      struct port *inp);
 struct lisp_type *
 scheme_make_vector (struct lisp_type *argl);
 #define MAX_STRING 2048

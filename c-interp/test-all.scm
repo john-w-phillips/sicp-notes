@@ -6,3 +6,4 @@
 (load "envtest.scm")
 (load "test-lists.scm")
 (load "settest.scm")
+(load "state-test.scm")

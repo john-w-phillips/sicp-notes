@@ -89,7 +89,7 @@ free_lisp_type (struct lisp_type *t)
       free (t->v.vec.mem);
       free (t);
     }
-  else if (stringp (t) || symbolp (t))
+  else if (symbolp (t))
     {
       if (t->v.string.free)
 	free (t->v.string.str);
@@ -119,6 +119,7 @@ make_symbol(char *str, bool shouldfree)
   rval->type = SYMBOL;
   rval->v.string.str = str;
   rval->v.string.free = shouldfree;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -145,6 +146,7 @@ make_lambda (struct lisp_type *formals,
   rval->v.scheme_proc.scheme_proc_formals = formals;
   rval->v.scheme_proc.scheme_proc_body = body;
   rval->v.scheme_proc.scheme_proc_env = env;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -217,6 +219,7 @@ make_prealloc_vector (enum lisp_types type,
   rval->v.vec.nitems = nitems;
   rval->v.vec.type = type;
   rval->copied = false;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -240,6 +243,7 @@ make_vector (enum lisp_types type,
       rval->v.vec.mem[elem] = item->v;
       assert (elem < nitems);
     }
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
