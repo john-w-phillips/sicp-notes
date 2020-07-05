@@ -1,4 +1,5 @@
 #include "scheme.h"
+
 const char *types_to_syms[] = {
   [NUMBER] = "int",
   [SYMBOL] = "symbol",
@@ -11,6 +12,7 @@ const char *types_to_syms[] = {
   [SCHEME_EOF] = "eof",
   [DOT] = "dot",
   [SCHEME_VECTOR] = "vector",
+  [SCHEME_VECTOR_MIXED] = "vector-mixed",
 };
 
 const struct lisp_type NIL = {
@@ -84,7 +86,12 @@ free_lisp_type (struct lisp_type *t)
 {
   assert (t);
   assert (!is_immutable (t));
-  if (vectorp (t))
+  if (mixed_vectorp (t))
+    {
+      free (vector_mixedmem(t));
+      free (t);
+    }
+  else if (vectorp (t))
     {
       free (t->v.vec.mem);
       free (t);
@@ -178,6 +185,7 @@ make_number(int num)
   struct lisp_type *rval = calloc(1, sizeof *rval);
   rval->type = NUMBER;
   rval->v.intval = num;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -201,8 +209,8 @@ cdr (struct lisp_type *pair)
 enum lisp_types
 sym_to_type (struct lisp_type *symb) {
   for (int i = 0; i < ARRAY_SIZE(types_to_syms); ++i) {
-    if (strcmp (types_to_syms[i],
-		symbol_string_value (symb)) == 0)
+    if (types_to_syms[i] && strcmp (types_to_syms[i],
+				    symbol_string_value (symb)) == 0)
       return i;
   }
   return INVALID;
@@ -224,10 +232,29 @@ make_prealloc_vector (enum lisp_types type,
 }
 
 struct lisp_type *
-make_vector (enum lisp_types type,
-	     struct lisp_type *items) {
+make_mixed_vector (struct lisp_type *items)
+{
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  unsigned nitems = __list_length (0, items);  
+  unsigned nitems = __list_length (0, items);
+  rval->type = SCHEME_VECTOR_MIXED;
+  rval->v.vec.mixed_mem = calloc (nitems, sizeof(struct lisp_type));
+  rval->v.vec.nitems = nitems;
+  struct lisp_type *iter = items;
+  
+  for (int i = 0; i < nitems; ++i,iter=cdr(iter))
+    {
+      rval->v.vec.mixed_mem[i] = car (iter);
+    }
+  PUSH_STACK (conses, rval);
+  return rval;
+}
+
+struct lisp_type *
+make_vector (enum lisp_types type,
+	     struct lisp_type *items)
+{
+  struct lisp_type *rval = calloc (1, sizeof *rval);
+  unsigned nitems = __list_length (0, items);
   rval->type = SCHEME_VECTOR;
   rval->v.vec.mem = calloc(nitems, sizeof(union scheme_value));
   rval->v.vec.nitems = nitems;

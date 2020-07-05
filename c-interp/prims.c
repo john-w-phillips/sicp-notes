@@ -134,7 +134,8 @@ lisp_assert (struct lisp_type *argl)
     return TRUE_VALUE;
   else
     {
-      longjmp(*jmpbuffer, ASSERTION_FAILURE);
+      scheme_signal_eval_error ("Value is not true");
+      return NIL_VALUE;
     }
 }
 
@@ -288,11 +289,13 @@ scheme_open (struct lisp_type *argl)
   strcpy (fname_cstring, string_c_string (fname));
   strcpy (mode_cstring, string_c_string (mode));
   int flags = 0;
+  mode_t fmode = 0;
   if ((strchr (mode_cstring,
 	       'w') != NULL))
     {
       flags  |= (O_WRONLY | O_CREAT);
-      if ((strchr (mode_cstring, 'a')))
+      fmode |= (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+      if ((strchr (mode_cstring, 'a')) != NULL)
 	flags |= O_APPEND;
     }
   else
@@ -300,7 +303,7 @@ scheme_open (struct lisp_type *argl)
       flags |= O_RDONLY;
     }
 
-  int rval = open (fname_cstring, flags);
+  int rval = open (fname_cstring, flags, fmode);
   if (rval < 0) perror ("open() error: ");
   return make_number (rval);
 }
@@ -316,9 +319,6 @@ scheme_close (struct lisp_type *argl)
 struct lisp_type *
 scheme_sys_read (struct lisp_type *argl)
 {
-  /*
-    TODO: add a vector type.
-   */
   check_argl ("dd", "read requires two arguments.", "Too few arguments for read");
   int n = number_value (car (cdr (argl)));
   char buf[n];
@@ -334,6 +334,21 @@ scheme_sys_read (struct lisp_type *argl)
 					  mem));
 }
 
+struct lisp_type *
+scheme_sys_write (struct lisp_type *argl)
+{
+  check_argl ("ddd", "sys-write requires three arguments.", "Too few arguments for sys-write");
+  int fd = number_value (car (argl));
+  struct lisp_type *vec = car (cdr (argl));
+  int n = number_value (car (cdr (cdr (argl))));
+
+  char buf[n];
+
+  for (int i = 0; i < n; ++i)
+    buf[i] = vec->v.vec.mem[i].intval;
+  int rval = write (fd, buf, n);
+  return make_number (rval);
+}
 
 struct lisp_type *
 scheme_eq (struct lisp_type *argl)
@@ -391,7 +406,10 @@ scheme_make_vector (struct lisp_type *argl)
 	  return NULL;
 	}
       enum lisp_types t = sym_to_type (car (argl));
-      return make_vector (t, cdr (argl));
+      if (t == SCHEME_VECTOR_MIXED)
+	return make_mixed_vector (cdr (argl));
+      else
+	return make_vector (t, cdr (argl));
     }
   return NULL;
 }
@@ -403,11 +421,25 @@ scheme_vector_ref (struct lisp_type *argl)
 	     "Too few arguments for vector-ref");
   int n = number_value (car (cdr (argl)));
   struct lisp_type *v = car (argl);
-  struct lisp_type *clone = calloc (1, sizeof *clone);
-  clone->type = v->v.vec.type;
-  clone->v = v->v.vec.mem[n];
-  PUSH_STACK (conses, clone);
-  return clone;
+  if (!vectorp (v))
+    scheme_signal_eval_error ("Not a vector!");
+  if (n > vector_len (v))
+    {
+      scheme_signal_eval_error ("Out of bounds vector ref!");
+    }
+  if (mixed_vectorp (v))
+    {
+      return vector_mixedmem(v)[n];
+    }
+  else
+    {
+      struct lisp_type *clone = calloc (1, sizeof *clone);
+      clone->type = v->v.vec.type;
+      clone->v = v->v.vec.mem[n];
+      PUSH_STACK (conses, clone);
+      return clone;
+    }
+  return NULL;
 }
 
 struct lisp_reader_state
@@ -427,6 +459,20 @@ __lisp_reader_ungetc (int c, void *argstate)
 					     the_global_environment,
 					     args);
   PUSH_STACK (eval_rval_stack, rval);
+}
+
+struct lisp_type *
+scheme_error (struct lisp_type *argl)
+{
+  if (nilp (argl))
+    {
+      scheme_signal_eval_error ("");
+    }
+  else if (stringp (car (argl)))
+    {
+      scheme_signal_eval_error (string_c_string(car (argl)));
+    }
+  return NULL;
 }
 
 static int
@@ -497,11 +543,38 @@ scheme_write (struct lisp_type *argl)
 }
 
 struct lisp_type *
+scheme_string_equalp (struct lisp_type *argl)
+{
+  check_argl ("dd", "string=? requires two arguments", "too few arguments to string=?!");
+  struct lisp_type *v1 = car (argl);
+  struct lisp_type *v2 = car (cdr (argl));
+  unsigned n1 = v1->v.vec.nitems;
+  unsigned n2 = v2->v.vec.nitems;
+  if (!(stringp (v1) && stringp (v2)))
+    scheme_signal_eval_error("V1 and V2 are not strings! Passed to string=?.");
+
+  if (n1 != n2)
+    return FALSE_VALUE;
+  else
+    {
+      for (int i = 0; i < n1; ++i) {
+	if (v1->v.vec.mem[i].intval != v2->v.vec.mem[i].intval)
+	  return FALSE_VALUE;
+      }
+    }
+  return TRUE_VALUE;
+}
+
+struct lisp_type *
 scheme_vector_set (struct lisp_type *argl)
 {
   check_argl ("ddd", "vector-set! requires three arguments",
 	      "too few arguments for vector-set!");
   struct lisp_type *v = car (argl);
+  eval_assert (vectorp (v),
+	       "First argument to vector-set! must be a vector.");
+  eval_assert (numberp (car (cdr (argl))),
+	       "Second argument to vector-set! must be a number.");
   int n = number_value (car (cdr (argl)));
   struct lisp_type *toset = car (cdr (cdr (argl)));
   v->v.vec.mem[n] = toset->v;

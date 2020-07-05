@@ -11,3 +11,6 @@
 (fibo 20)
 (fibo 20)
 (assert (= (vector-ref vecsave 11) 12))
+
+(define vec-mixed (make-vector 'vector-mixed 'a 'b 'c '(1 2 3)))
+(assert (equal? (vector-ref vec-mixed 3) '(1 2 3)))

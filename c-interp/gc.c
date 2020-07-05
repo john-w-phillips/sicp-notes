@@ -1,4 +1,5 @@
 #include "scheme.h"
+
 bool
 is_immutable (struct lisp_type *it)
 {
@@ -22,6 +23,17 @@ struct cons_cells
   unsigned next;
 };
 
+void
+copy_vector (struct lisp_type *vec,
+	     struct cons_cells *cells);
+void
+copy_cons_cells(struct lisp_type *pair,
+		
+		struct cons_cells *newcells);
+static void
+copy_root_array (struct lisp_type **roots,
+		 struct cons_cells *cells,
+		 unsigned nroots);
 
 void
 gc_set_copied_flag (struct lisp_type *item)
@@ -38,6 +50,28 @@ copy_procedure_cells (struct lisp_type *proc,
 		      struct cons_cells *newcells);
 
 void
+copy_cell (struct lisp_type *car_or_cdr,
+	   struct cons_cells *newcells)
+{
+  if (consp (car_or_cdr))
+    {
+      copy_cons_cells (car_or_cdr, newcells);
+    }
+  else if (scheme_procedurep (car_or_cdr)
+	   || scheme_macrop (car_or_cdr))
+    {
+      copy_procedure_cells (car_or_cdr,
+			    newcells);
+    }
+  else if (mixed_vectorp (car_or_cdr))
+    {
+      copy_vector (car_or_cdr, newcells);
+    }
+  else
+    gc_set_copied_flag (car_or_cdr);
+}
+
+void
 copy_cons_cells(struct lisp_type *pair,
 		struct cons_cells *newcells)
 {
@@ -52,36 +86,48 @@ copy_cons_cells(struct lisp_type *pair,
   pair->v.pair_index = newcells->next++;
   pair->copied = true;
 
-  if (consp (carpair))
-    {
-      copy_cons_cells (carpair, newcells);
-    }
-  else if (scheme_procedurep (carpair)
-	   || scheme_macrop (carpair))
-    {
-      copy_procedure_cells (carpair,
-			    newcells);
-    }
-  else
-      gc_set_copied_flag (carpair);
+  copy_cell (carpair, newcells);
+  copy_cell (cdrpair, newcells);
+  /* if (consp (carpair)) */
+  /*   { */
+  /*     copy_cons_cells (carpair, newcells); */
+  /*   } */
+  /* else if (scheme_procedurep (carpair) */
+  /* 	   || scheme_macrop (carpair)) */
+  /*   { */
+  /*     copy_procedure_cells (carpair, */
+  /* 			    newcells); */
+  /*   } */
+  /* else */
+  /*     gc_set_copied_flag (carpair); */
 
 
-  if (consp (cdrpair))
-    {
-      copy_cons_cells (cdrpair, newcells);
-    }
-  else if (scheme_procedurep (cdrpair)
-	   || scheme_macrop (cdrpair))
-    {
-      copy_procedure_cells (cdrpair,
-			    newcells);
-    }
-  else
-    gc_set_copied_flag (cdrpair);
-
-
+  /* if (consp (cdrpair)) */
+  /*   { */
+  /*     copy_cons_cells (cdrpair, newcells); */
+  /*   } */
+  /* else if (scheme_procedurep (cdrpair) */
+  /* 	   || scheme_macrop (cdrpair)) */
+  /*   { */
+  /*     copy_procedure_cells (cdrpair, */
+  /* 			    newcells); */
+  /*   } */
+  /* else */
+  /*   gc_set_copied_flag (cdrpair); */
 
 }
+
+void
+copy_vector (struct lisp_type *vec,
+	     struct cons_cells *cells) {
+  assert (mixed_vectorp (vec));
+  vec->copied = true;
+  unsigned nitems = vec->v.vec.nitems;
+  copy_root_array (vector_mixedmem(vec),
+		   cells,
+		   nitems);
+}
+
 /*
   Procedure values are special in that they have inside them cons
   cells (the text, environment, and formal args) that may not be
@@ -179,6 +225,10 @@ copy_root_array (struct lisp_type **roots,
 	  copy_procedure_cells (roots[i],
 				cells);
 	}
+      else if (mixed_vectorp (roots[i]))
+	{
+	  copy_vector (roots[i], cells);
+	}
       else if (!is_immutable (roots[i]))
 	{
 	  gc_set_copied_flag (roots[i]);
@@ -202,6 +252,11 @@ gc_unset_copy_flag (struct lisp_type *item)
 	scheme_proc_formals (item)->copied = false;
       if (!is_immutable (scheme_proc_environ (item)))
 	scheme_proc_environ (item)->copied = false;
+    }
+  if (item && mixed_vectorp (item))
+    {
+      for (int i = 0; i < item->v.vec.nitems; ++i)
+	gc_unset_copy_flag (item->v.vec.mixed_mem[i]);
     }
 }
 

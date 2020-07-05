@@ -16,18 +16,31 @@ void write_vec (struct lisp_type *t)
       write_string (t);
       return;
     }
-  printf("#(");
-  enum lisp_types typeval = t->v.vec.type;
-  struct lisp_type dummy_val = {
-    .type = typeval
-  };
-  for (int i = 0; i < t->v.vec.nitems; ++i) {
-    dummy_val.v = t->v.vec.mem[i];
-    write0 (&dummy_val);
-    if (i+1 != t->v.vec.nitems)
-      printf(" ");
-  }
-  printf(")");
+  else if (mixed_vectorp (t))
+    {
+      printf ("#(");
+      for (int i = 0; i < vector_len(t); ++i) {
+	write0 (vector_mixedmem(t)[i]);
+	if (i != vector_len(t)-1)
+	  putc (' ', stdout);
+      }
+      printf(")");
+    }
+  else
+    {
+      printf("#(");
+      enum lisp_types typeval = t->v.vec.type;
+      struct lisp_type dummy_val = {
+	.type = typeval
+      };
+      for (int i = 0; i < t->v.vec.nitems; ++i) {
+	dummy_val.v = t->v.vec.mem[i];
+	write0 (&dummy_val);
+	if (i+1 != t->v.vec.nitems)
+	  printf(" ");
+      }
+      printf(")");
+    }
 }
 
 void
@@ -59,6 +72,7 @@ write0 (struct lisp_type *t)
       printf ("%d", t->v.intval);
       break;
     case SCHEME_VECTOR:
+    case SCHEME_VECTOR_MIXED: 
       write_vec (t);
       break;
     case NIL_TYPE:

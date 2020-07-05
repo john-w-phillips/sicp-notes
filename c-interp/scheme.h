@@ -23,11 +23,14 @@ enum lisp_types {
   DOT,
   SCHEME_VECTOR,
   SCHEME_CHAR,
+  SCHEME_VECTOR_MIXED,
   INVALID,
 };
+
 #define ARRAY_SIZE(arr) (sizeof (arr) / sizeof (arr[0]))
 extern const char *types_to_syms[];
 extern jmp_buf *jmpbuffer;
+extern jmp_buf *debugbuf;
 extern struct lisp_type *the_global_environment;
 extern struct lisp_type *form_global;
 extern struct lisp_type *environ_global;
@@ -60,9 +63,14 @@ struct scheme_vec
 {
   enum lisp_types type;
   unsigned nitems;
-  union scheme_value  *mem;
+  union {
+    union scheme_value  *mem;
+    struct lisp_type **mixed_mem;
+  };
 };
 
+#define vector_mixedmem(vect) (vect)->v.vec.mixed_mem
+#define vector_len(vect) (vect)->v.vec.nitems
 
 #define READER_EOF 2
 #define READER_INVALID_SYNTAX 3
@@ -163,12 +171,20 @@ extern const struct lisp_type UNQUOTE_SPLICE;
 #define FALSE_VALUE		((struct lisp_type *)&FALSE)
 #define UNQUOTE_SPLICE_VALUE    ((struct lisp_type *)&UNQUOTE_SPLICE)
 
+enum scheme_debug_codes
+  {
+    DEBUG_UP = 10,
+    DEBUG_DOWN = 11,
+    DEBUG_LEAVE = 12
+  };
+
 #define symbolp(x) ((x)->type == SYMBOL)
 #define stringp(x) ((x)->type == SCHEME_VECTOR && (x)->v.vec.type == SCHEME_CHAR)
 #define numberp(x) ((x)->type == NUMBER)
 #define variablep(x) ((x)->type == SYMBOL)
 #define booleanp(x) ((x)->type == BOOLEAN)
-#define vectorp(x) ((x)->type == SCHEME_VECTOR)
+#define mixed_vectorp(x) ((x)->type == SCHEME_VECTOR_MIXED)
+#define vectorp(x) ((x)->type == SCHEME_VECTOR || (x)->type == SCHEME_VECTOR_MIXED)
 #define symbol_string_value(x) ((x)->v.string.str)
 #define number_value(x) ((x)->v.intval)
 #define consp(x) ((x)->type == PAIR)
@@ -293,6 +309,9 @@ struct lisp_type *
 make_env_frame (void);
 
 struct lisp_type *
+make_mixed_vector (struct lisp_type *items);
+
+struct lisp_type *
 make_vector (enum lisp_types type,
 	     struct lisp_type *items);
 
@@ -391,6 +410,9 @@ struct lisp_type *
 scheme_sys_read (struct lisp_type *argl);
 
 struct lisp_type *
+scheme_sys_write (struct lisp_type *argl);
+
+struct lisp_type *
 scheme_close (struct lisp_type *argl);
 
 struct lisp_type *
@@ -403,6 +425,18 @@ scheme_write (struct lisp_type *argl);
 
 struct lisp_type *
 scheme_read (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_error (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_dbg_up (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_string_equalp (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_dbg_down (struct lisp_type *argl);
 
 struct lisp_type *
 eval_inner_apply (struct lisp_type *proc,
@@ -418,5 +452,10 @@ repl (struct lisp_type *environ,
       struct port *inp);
 struct lisp_type *
 scheme_make_vector (struct lisp_type *argl);
+
+
+#define environ_first_frame car
+#define enclosing_environ cdr
+
 #define MAX_STRING 2048
 #endif

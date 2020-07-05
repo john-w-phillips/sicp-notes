@@ -1,6 +1,7 @@
 #include "scheme.h"
 
 jmp_buf *jmpbuffer= NULL;
+jmp_buf *debugbuf = NULL;
 struct lisp_type *the_global_environment = NULL;
 struct lisp_type *form_global = NULL;
 struct lisp_type *environ_global = NULL;
@@ -53,8 +54,7 @@ struct port STDIN_CPORT_READER = {
 			symbolp (car (x)) &&				\
 			symbol_string_value_equals (car (x), "define"))
 
-#define environ_first_frame car
-#define enclosing_environ cdr
+
 
 #define lambdap(x) \
   (consp (x) && symbol_string_value_equals (car (x), "lambda"))
@@ -398,7 +398,7 @@ struct lisp_type *eval_application (struct lisp_type *form,
 		  make_bt_entry (form,
 				 NIL_VALUE,
 				 eval_argl,
-				 environ));
+				 the_global_environment));
       lisp_rval = primitive_procedure_proc (proc)(eval_argl);
       POP_STACK (backtrace);
     }
@@ -642,8 +642,13 @@ __eval_quasiquote (struct lisp_type *form,
 	  return make_cons (first_quoted, total);
 	}
       else
-	return make_cons (__eval_quasiquote (car (form), environ),
-			  __eval_quasiquote (cdr (form), environ));
+	{
+	  struct lisp_type *careval = __eval_quasiquote (car (form), environ);
+	  PUSH_STACK (formstack, careval);
+	  struct lisp_type *cdreval = __eval_quasiquote (cdr (form), environ);
+	  POP_STACK (formstack);
+	  return make_cons (careval, cdreval);
+	}
     }
   else
     return form;
@@ -734,9 +739,14 @@ init_environ (struct lisp_type *base)
   add_env_proc ("car", lisp_car);
   add_env_proc ("cdr", lisp_cdr);
   add_env_proc ("cons", lisp_cons);
+  add_env_proc ("error", scheme_error);
+  add_env_proc ("dbg-up", scheme_dbg_up);
+  add_env_proc ("dbg-down", scheme_dbg_down);
   add_env_proc ("sys-open", scheme_open);
   add_env_proc ("sys-read", scheme_sys_read);
   add_env_proc ("sys-close", scheme_close);
+  add_env_proc ("sys-write", scheme_sys_write);
+  add_env_proc ("string=?", scheme_string_equalp);
   add_env_proc ("make-vector", scheme_make_vector);
   add_env_proc ("vector-ref", scheme_vector_ref);
   add_env_proc ("vector-set!", scheme_vector_set);

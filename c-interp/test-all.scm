@@ -7,3 +7,4 @@
 (load "test-lists.scm")
 (load "settest.scm")
 (load "state-test.scm")
+(load "test-files.scm")
