@@ -14,3 +14,15 @@
 
 (define vec-mixed (make-vector 'vector-mixed 'a 'b 'c '(1 2 3)))
 (assert (equal? (vector-ref vec-mixed 3) '(1 2 3)))
+
+(assert (vector=? "abc" "abc"))
+(assert (vector=? (make-vector 'vector-mixed 'a 'b '(1 2 3))
+		  (make-vector 'vector-mixed 'a 'b '(1 2 3))))
+(assert (not (vector=? (make-vector 'vector-mixed 'a 'b 'c)
+		       (make-vector 'vector-mixed 'a 'b 1))))
+
+(assert (vector=? "abc" (vector-concat "a" (vector-concat "b" "c"))))
+
+
+(assert (eq? (string-ref "abc" 0) ?a))
+(assert (eq? (string-ref "abc" 1) ?b))

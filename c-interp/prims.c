@@ -35,6 +35,11 @@ lisp_int_equal (struct lisp_type *argl)
     {
       return TRUE_VALUE;
     }
+  else if (charp (arg1) && charp (arg2)
+	   && (number_value (arg1) == number_value (arg2)))
+    {
+      return TRUE_VALUE;
+    }
   else
     {
       return FALSE_VALUE;
@@ -587,4 +592,111 @@ __list_length (unsigned cur, struct lisp_type *argl)
   if (nilp (argl)) return cur;
   else
     return __list_length (cur + 1, cdr (argl));
+}
+
+struct lisp_type *
+scheme_symbol_to_string (struct lisp_type *argl)
+{
+  check_argl ("d", "symbol->string takes one argument.",
+	      "Too many arguments for symbol->string, it takes one.");
+  struct lisp_type *sym = car (argl);
+  eval_assert (symbolp (sym), "symbol->string takes only symbols.");
+  char *c_str = symbol_string_value (sym);
+  unsigned len = strlen (c_str);
+  union scheme_value *chars = calloc (len, sizeof(union scheme_value));
+  for (int i = 0; i < len; ++i)
+    chars[i].intval = c_str[i];
+  return make_prealloc_vector (SCHEME_CHAR,
+			       len,
+			       chars);
+}
+
+struct lisp_type *
+scheme_string_to_symbol (struct lisp_type *argl)
+{
+  check_argl ("d",
+	      "string->symbol takes one argument.",
+	      "Too many arguments for string->symbol, it takes one.");
+  struct lisp_type *str = car (argl);
+  eval_assert (stringp (str), "string->symbol only takes strings.");
+  unsigned len = vector_len (str);
+  char *c_str = calloc (1, len + 1);
+  for (int i = 0; i < len; ++i)
+    {
+      int cval  = vector_unimem(str)[i].intval;
+      if (isspecial (cval))
+	goto error;
+      else
+	c_str[i] = cval;
+    }
+  return make_symbol (c_str, true);
+ error:
+  free (c_str);
+  scheme_signal_eval_error ("string->symbol: Bad symbol chars in string!");
+  return NIL_VALUE;
+}
+
+
+struct lisp_type *
+scheme_vector_len (struct lisp_type *argl)
+{
+  check_argl ("d", "vector-len takes only one argument",
+	      "Too many arguments for vector-len, it takes one.");
+  struct lisp_type *v = car (argl);
+  eval_assert (vectorp (v), "vector-len must have a vector as its only argument.");
+  return make_number (vector_len (v));
+}
+
+struct lisp_type *
+scheme_vector_concat (struct lisp_type *argl)
+{
+  check_argl ("dd", "vector-concat takes two arguments",
+	      "Too many arguments for vector-concat, it takes two.");
+  struct lisp_type *v1 = car (argl);
+  struct lisp_type *v2 = car (cdr (argl));
+
+  if (mixed_vectorp (v1) && mixed_vectorp (v2))
+    {
+      return mixed_vector_concat (v1, v2);
+    }
+  else if (vectorp (v1) && vectorp (v2)
+	   && v1->type == v2->type)
+    {
+      return vector_concat (v1, v2);
+    }
+  else
+    scheme_signal_eval_error ("vector-concat: Vector types must be the same.");
+  return NULL;
+}
+
+struct lisp_type *
+scheme_vectorp (struct lisp_type *argl)
+{
+  check_argl ("d", "vector? takes only one argument.",
+	      "Too many arguments to vector?, it must have one.");
+  if (vectorp (car (argl)))
+      return TRUE_VALUE;
+  else
+    return FALSE_VALUE;
+}
+
+struct lisp_type *
+scheme_apply (struct lisp_type *argl)
+{
+  check_argl ("dd", "apply takes two arguments.",
+	      "Too many arguments to apply, it takes two.");
+  struct lisp_type *func = car (argl);
+  struct lisp_type *func_args = car (cdr (argl));
+
+  
+}
+
+struct lisp_type *
+scheme_vector_push (struct lisp_type *argl)
+{
+}
+
+struct lisp_type *
+scheme_vector_pop (struct lisp_type *argl)
+{
 }

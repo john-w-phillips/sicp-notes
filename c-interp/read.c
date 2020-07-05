@@ -60,7 +60,7 @@ read_num (int c, struct port *fp)
 }
 #define SYMBSIZE 1024
 
-static bool
+bool
 isspecial (int c)
 {
   return (c == '(' || c == ')' || isspace (c) || c == '.');

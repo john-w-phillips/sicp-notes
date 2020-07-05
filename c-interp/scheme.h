@@ -70,8 +70,9 @@ struct scheme_vec
 };
 
 #define vector_mixedmem(vect) (vect)->v.vec.mixed_mem
+#define vector_unimem(vect) (vect)->v.vec.mem
 #define vector_len(vect) (vect)->v.vec.nitems
-
+#define vector_elemtype(vect) (vect)->v.vec.type
 #define READER_EOF 2
 #define READER_INVALID_SYNTAX 3
 #define ASSERTION_FAILURE 4
@@ -257,6 +258,13 @@ read0 (struct port *fp);
 struct lisp_type *
 read1 (struct port *fp);
 
+/* 
+   True if C is a special character to lisp, and should not be in
+   symbols.
+ */
+bool
+isspecial (int c);
+
 void
 write1 (struct lisp_type *t);
 
@@ -314,6 +322,14 @@ make_mixed_vector (struct lisp_type *items);
 struct lisp_type *
 make_vector (enum lisp_types type,
 	     struct lisp_type *items);
+
+struct lisp_type *
+mixed_vector_concat (struct lisp_type *v1,
+		     struct lisp_type *v2);
+
+struct lisp_type *
+vector_concat (struct lisp_type *v1,
+	       struct lisp_type *v2);
 
 struct lisp_type *
 make_prealloc_vector (enum lisp_types type,
@@ -414,9 +430,11 @@ scheme_sys_write (struct lisp_type *argl);
 
 struct lisp_type *
 scheme_close (struct lisp_type *argl);
-
+struct lisp_type *
+scheme_symbol_to_string (struct lisp_type *argl);
 struct lisp_type *
 scheme_vector_ref (struct lisp_type *argl);
+
 struct lisp_type *
 scheme_vector_set (struct lisp_type *argl);
 
@@ -436,7 +454,13 @@ struct lisp_type *
 scheme_string_equalp (struct lisp_type *argl);
 
 struct lisp_type *
+scheme_string_to_symbol (struct lisp_type *argl);
+
+struct lisp_type *
 scheme_dbg_down (struct lisp_type *argl);
+
+struct lisp_type *
+scheme_vector_concat (struct lisp_type *argl);
 
 struct lisp_type *
 eval_inner_apply (struct lisp_type *proc,
@@ -452,8 +476,10 @@ repl (struct lisp_type *environ,
       struct port *inp);
 struct lisp_type *
 scheme_make_vector (struct lisp_type *argl);
-
-
+struct lisp_type *
+scheme_vectorp (struct lisp_type *argl);
+struct lisp_type *
+scheme_vector_len (struct lisp_type *argl);
 #define environ_first_frame car
 #define enclosing_environ cdr
 

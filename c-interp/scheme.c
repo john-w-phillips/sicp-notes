@@ -367,13 +367,11 @@ eval_inner_apply (struct lisp_type *proc,
   return lisp_rval;
 }
 
-struct lisp_type *eval_application (struct lisp_type *form,
-				    struct lisp_type *environ)
+struct lisp_type *eval_apply (struct lisp_type *proc,
+			      struct lisp_type *args,
+			      struct lisp_type *environ)
 {
-  //assert (cdr (form));
-  eval_assert (cdr (form), "Form is malformed, must be a nil terminated list!");
-  struct lisp_type *proc = eval (car (form), environ);
-  eval_assert (proc, "PROC is null in C, evaluator bug.");
+    eval_assert (proc, "PROC is null in C, evaluator bug.");
   eval_assert ((scheme_procedurep (proc)
 		|| primitive_procedurep (proc)
 		|| scheme_macrop (proc)),
@@ -381,15 +379,6 @@ struct lisp_type *eval_application (struct lisp_type *form,
 
   /* push_form (proc); */
   PUSH_STACK (formstack, proc);
-
-  struct lisp_type *argl = cdr (form);
-  /* push_form (argl); */
-  struct lisp_type *eval_argl = NULL;
-  if (!scheme_macrop (proc))
-    eval_argl
-      = eval_arglist (argl, environ);
-  else
-    eval_argl = argl;
 
   struct lisp_type *lisp_rval = NULL;
   if (primitive_procedurep (proc))
@@ -404,10 +393,10 @@ struct lisp_type *eval_application (struct lisp_type *form,
     }
   else if (scheme_procedurep (proc) || scheme_macrop (proc))
     {
-      lisp_rval =eval_inner_apply (proc,
-				   form,
-				   environ,
-				   eval_argl);
+      lisp_rval = eval_inner_apply (proc,
+				    form,
+				    environ,
+				    eval_argl);
     }
   else
     {
@@ -418,6 +407,24 @@ struct lisp_type *eval_application (struct lisp_type *form,
   POP_STACK (formstack); // proc
   //printf ("return v\n");
   return lisp_rval;
+}
+
+struct lisp_type *eval_application (struct lisp_type *form,
+				    struct lisp_type *environ)
+{
+  //assert (cdr (form));
+  eval_assert (cdr (form), "Form is malformed, must be a nil terminated list!");
+  struct lisp_type *proc = eval (car (form), environ);
+    struct lisp_type *argl = cdr (form);
+  /* push_form (argl); */
+  struct lisp_type *eval_argl = NULL;
+  if (!scheme_macrop (proc))
+    eval_argl
+      = eval_arglist (argl, environ);
+  else
+    eval_argl = argl;
+
+  return eval_apply (proc, eval_argl, environ);
 }
 
 
@@ -747,9 +754,14 @@ init_environ (struct lisp_type *base)
   add_env_proc ("sys-close", scheme_close);
   add_env_proc ("sys-write", scheme_sys_write);
   add_env_proc ("string=?", scheme_string_equalp);
+  add_env_proc ("symbol->string", scheme_symbol_to_string);
+  add_env_proc ("string->symbol", scheme_string_to_symbol);
   add_env_proc ("make-vector", scheme_make_vector);
   add_env_proc ("vector-ref", scheme_vector_ref);
   add_env_proc ("vector-set!", scheme_vector_set);
+  add_env_proc ("vector-concat", scheme_vector_concat);
+  add_env_proc ("vector-len", scheme_vector_len);
+  add_env_proc ("vector?", scheme_vectorp);
   add_env_proc ("read", scheme_read);
   add_env_proc ("write", scheme_write);
   add_env_val ("true", TRUE_VALUE);

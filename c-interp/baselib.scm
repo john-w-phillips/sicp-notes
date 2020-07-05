@@ -52,12 +52,70 @@
       `(if ,(car body)
 	   true
 	   ,(cons 'or (cdr body)))))
-	   
+;; FOrm:
+;; (define-struct abc
+;;  (slot-a slot-b slot-c))
+(define (slots-to-pairs listofslots)
+  (define (slots-to-pair-iter i slots rv)
+    (if (null? slots) rv
+	(slots-to-pair-iter
+	 (+ i 1)
+	 (cdr slots)
+	 (cons (cons (car slots) i)
+	       rv))))
+  (slots-to-pair-iter 0 listofslots '()))
+(define string-concat vector-concat)
+(define string-append vector-concat)
+
+(defmacro (define-struct name slots)
+  (let ((namestr (symbol->string name))
+	(slotpairs (slots-to-pairs slots)))
+  `(begin
+     (define ,(cons (string->symbol (string-append "make-" namestr))
+		    slots)
+       (apply make-vector (cons 'vector-mixed slots)))
+     ,@(map (lambda (slot)
+	      `(begin (define ,(cons (string->symbol (string-append
+						namestr
+						(string-append "-"
+							       (symbol->string (car slot)))))
+			       (list 'struct))
+		  (vector-ref struct (cdr slot)))
+		(define ,(cons (string->symbol (string-append
+						namestr
+						(string-append "-"
+							       (string-append
+								(symbol->string (car slot))
+								"-set!"))))
+			       (list 'struct 'setter))
+		  (vector-set! struct (cdr slot) setter))))
+	    slotpairs))))
+     
+		  
+
+	      
+(define (vector=? a b)
+  (define (vector=?-iter a b elem)
+    (cond
+     ((= (vector-len a) elem) true)
+     (else
+      (and (equal? (vector-ref a elem)
+		   (vector-ref b elem))
+	   (vector=?-iter a b (+ elem 1))))))
+  (if (= (vector-len a) (vector-len b))
+      (vector=?-iter a b 0)
+      false))
+
+(define string-concat vector-concat)
+(define string-ref vector-ref)
+
 (define (equal? a b)
   (cond
    ((eq? a b) true)
    ((and (pair? a) (pair? b))
     (and (equal? (car a) (car b))
 	 (equal? (cdr a) (cdr b))))
+   ((and (vector? a) (vector? b))
+    (vector=? a b))
    (else
     false)))

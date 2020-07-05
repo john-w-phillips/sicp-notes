@@ -88,33 +88,6 @@ copy_cons_cells(struct lisp_type *pair,
 
   copy_cell (carpair, newcells);
   copy_cell (cdrpair, newcells);
-  /* if (consp (carpair)) */
-  /*   { */
-  /*     copy_cons_cells (carpair, newcells); */
-  /*   } */
-  /* else if (scheme_procedurep (carpair) */
-  /* 	   || scheme_macrop (carpair)) */
-  /*   { */
-  /*     copy_procedure_cells (carpair, */
-  /* 			    newcells); */
-  /*   } */
-  /* else */
-  /*     gc_set_copied_flag (carpair); */
-
-
-  /* if (consp (cdrpair)) */
-  /*   { */
-  /*     copy_cons_cells (cdrpair, newcells); */
-  /*   } */
-  /* else if (scheme_procedurep (cdrpair) */
-  /* 	   || scheme_macrop (cdrpair)) */
-  /*   { */
-  /*     copy_procedure_cells (cdrpair, */
-  /* 			    newcells); */
-  /*   } */
-  /* else */
-  /*   gc_set_copied_flag (cdrpair); */
-
 }
 
 void
