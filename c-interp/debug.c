@@ -45,7 +45,7 @@ print_bt_entry (struct lisp_type *bt_ent) {
 
 
 struct lisp_type *
-show_backtrace (struct lisp_type *argl)
+show_backtrace (struct lisp_type *argl, struct lisp_type *env)
 {
   for (int i = backtrace->index-1; i >= 0; --i) {
     print_bt_entry (backtrace->items[i]);
@@ -55,7 +55,7 @@ show_backtrace (struct lisp_type *argl)
 }
 
 struct lisp_type *
-leave_debug (struct lisp_type *argl)
+leave_debug (struct lisp_type *argl, struct lisp_type *env)
 {
   longjmp (*jmpbuffer, DEBUG_RESTART);
 }
@@ -115,19 +115,19 @@ debugger (struct lisp_type *environ,
       case DEBUG_LEAVE:
 	{
 	  debugbuf = NULL;
-	  leave_debug(NIL_VALUE);
+	  leave_debug(NIL_VALUE, environ);
 	  break;
 	}
       default:
 	abort();
       }
   repl (env_dbg, "(Debug)", &STDIN_CPORT_READER);
-  leave_debug(NIL_VALUE);
+  leave_debug(NIL_VALUE, environ);
 }
 
 
 struct lisp_type *
-scheme_dbg_up (struct lisp_type *argl)
+scheme_dbg_up (struct lisp_type *argl, struct lisp_type *env)
 {
   if (debugbuf)
     {
@@ -139,7 +139,7 @@ scheme_dbg_up (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_dbg_down (struct lisp_type *argl)
+scheme_dbg_down (struct lisp_type *argl, struct lisp_type *env)
 {
   if (debugbuf)
     {

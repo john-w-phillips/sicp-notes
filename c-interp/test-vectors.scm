@@ -26,3 +26,9 @@
 
 (assert (eq? (string-ref "abc" 0) ?a))
 (assert (eq? (string-ref "abc" 1) ?b))
+(define vec-mixed-ext (make-vector 'vector-mixed 1 2 3))
+(vector-extend! vec-mixed-ext (make-vector 'vector-mixed 'a 'b 'c))
+(assert (vector=? vec-mixed-ext (make-vector 'vector-mixed 1 2 3 'a 'b 'c)))
+(define str-ext "abcd")
+(vector-extend! str-ext "def")
+(assert (vector=? str-ext "abcddef"))

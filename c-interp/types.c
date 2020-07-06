@@ -159,7 +159,7 @@ make_lambda (struct lisp_type *formals,
 
 
 struct lisp_type *
-make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *))
+make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct lisp_type *))
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
   rval->type = PRIMITIVE_PROC;
@@ -264,6 +264,25 @@ make_mixed_vector (struct lisp_type *items)
 }
 
 struct lisp_type *
+mixed_vector_set (struct lisp_type *v,
+		  unsigned n,
+		  struct lisp_type *item)
+{
+  vector_mixedmem(v)[n] = item;
+  return item;
+}
+
+struct lisp_type *
+univector_set (struct lisp_type *v,
+	       unsigned n,
+	       struct lisp_type *item)
+{
+  vector_unimem(v)[n] = item->v;
+  return item;
+}
+
+
+struct lisp_type *
 make_vector (enum lisp_types type,
 	     struct lisp_type *items)
 {
@@ -332,14 +351,33 @@ vector_concat (struct lisp_type *v1,
 }
 
 struct lisp_type *
-mixed_vector_push (struct lisp_type *v1,
-		   struct lisp_type *i)
+mixed_vector_extend (struct lisp_type *v1,
+		     struct lisp_type *v2)
 {
+  struct lisp_type **v1mem = vector_mixedmem(v1);
+  unsigned newsize = vector_len(v1) + vector_len(v2);
+  vector_set_mixedmem(v1,
+		      realloc (v1mem, newsize * sizeof (struct lisp_type *)));
+  assert (vector_mixedmem (v1));
+  memcpy (vector_mixedmem (v1) + vector_len(v1),
+	  vector_mixedmem(v2),
+	  vector_len (v2) * sizeof(struct lisp_type *));
+  vector_set_len (v1, vector_len (v1) + vector_len (v2));
+  return v1;
 }
 
 struct lisp_type *
-vector_push (struct lisp_type *v1, struct lisp_type *i)
+univector_extend (struct lisp_type *v1, struct lisp_type *v2)
 {
+  union scheme_value *v1mem = vector_unimem (v1);
+  unsigned newsize = vector_len (v1) + vector_len (v2);
+  vector_set_unimem (v1,
+		     realloc (v1mem, newsize * sizeof (union scheme_value)));
+  memcpy (vector_unimem (v1) + vector_len (v1),
+	  vector_unimem (v2),
+	  vector_len (v2) * sizeof (union scheme_value));
+  vector_set_len (v1, newsize);
+  return v1;
 }
 
 struct lisp_type *
@@ -371,6 +409,8 @@ make_cons (struct lisp_type *car,
   struct lisp_type *rval = calloc(1, sizeof *rval);
   rval->type = PAIR;
   assert (max_cons_idx < NPAIRS);
+  assert (car);
+  assert (cdr);
   cars[max_cons_idx] = car;
   cdrs[max_cons_idx] = cdr;
   rval->v.pair_index = max_cons_idx++;

@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 struct lisp_type *
-scheme_not (struct lisp_type *argl)
+scheme_not (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "not takes one argument")))
     {
@@ -23,7 +23,7 @@ scheme_not (struct lisp_type *argl)
 }
 
 struct lisp_type *
-lisp_int_equal (struct lisp_type *argl)
+lisp_int_equal (struct lisp_type *argl, struct lisp_type *env)
 {
   struct lisp_type *arg1 = list_seq_manip (argl, argl, "a",
 					   0, "= takes two arguments");
@@ -47,7 +47,7 @@ lisp_int_equal (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_car (struct lisp_type *argl)
+scheme_car (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "car takes one argument")))
     {
@@ -59,7 +59,7 @@ scheme_car (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_cdr (struct lisp_type *argl)
+scheme_cdr (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "cdr takes one argument")))
     {
@@ -72,7 +72,7 @@ scheme_cdr (struct lisp_type *argl)
 
 
 struct lisp_type *
-list_func (struct lisp_type *argl)
+list_func (struct lisp_type *argl, struct lisp_type *env)
 {
   return argl;
 }
@@ -112,7 +112,7 @@ __lisp_int_arith(struct lisp_type *argl,
 
 
 struct lisp_type *
-mul (struct lisp_type *argl)
+mul (struct lisp_type *argl, struct lisp_type *env)
 {
   return make_number (__lisp_int_arith (argl,
 					ARITH_MUL,
@@ -120,7 +120,7 @@ mul (struct lisp_type *argl)
 }
 
 struct lisp_type *
-sub (struct lisp_type *argl)
+sub (struct lisp_type *argl, struct lisp_type *env)
 {
   if (nilp (cdr (argl)))
     return make_number (-1 * number_value (car (argl)));
@@ -132,7 +132,7 @@ sub (struct lisp_type *argl)
 
 
 struct lisp_type *
-lisp_assert (struct lisp_type *argl)
+lisp_assert (struct lisp_type *argl, struct lisp_type *env)
 {
   
   if (truep (car (argl)))
@@ -145,7 +145,7 @@ lisp_assert (struct lisp_type *argl)
 }
 
 struct lisp_type *
-lisp_cons (struct lisp_type *argl)
+lisp_cons (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "dd", 0, "CONS takes two arguments")))
     {
@@ -158,7 +158,7 @@ lisp_cons (struct lisp_type *argl)
 }
 
 struct lisp_type *
-lisp_car (struct lisp_type *argl)
+lisp_car (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "CAR takes one argument")))
     {
@@ -170,7 +170,7 @@ lisp_car (struct lisp_type *argl)
 }
 
 struct lisp_type *
-lisp_cdr (struct lisp_type *argl)
+lisp_cdr (struct lisp_type *argl, struct lisp_type *env)
 {
     if (!nilp (list_seq_manip (argl, argl, "d", 0, "CDR takes one argument")))
     {
@@ -182,7 +182,7 @@ lisp_cdr (struct lisp_type *argl)
 }
 
 struct lisp_type *
-add (struct lisp_type *argl)
+add (struct lisp_type *argl, struct lisp_type *env)
 {
 
   return make_number (__lisp_int_arith (argl,
@@ -192,7 +192,7 @@ add (struct lisp_type *argl)
 
 
 struct lisp_type *
-less_than (struct lisp_type *argl)
+less_than (struct lisp_type *argl, struct lisp_type *env)
 {
   //assert (consp (argl));
   eval_assert (consp (argl), "Argl must not a list! <.");
@@ -239,7 +239,7 @@ __lisp_load (char *file, struct lisp_type *environ)
 }
 
 struct lisp_type *
-lisp_load (struct lisp_type *argl)
+lisp_load (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (list_seq_manip (argl, argl, "d", 0, "load takes one argument")))
     {
@@ -251,7 +251,7 @@ lisp_load (struct lisp_type *argl)
 }
 
 struct lisp_type *
-lisp_symb_equal (struct lisp_type *argl)
+lisp_symb_equal (struct lisp_type *argl, struct lisp_type *env)
 {
   struct lisp_type *arg1 = list_seq_manip (argl, argl, "a", 0,
 					   "symbol=? requires two arguments");
@@ -284,7 +284,7 @@ lisp_symb_equal (struct lisp_type *argl)
   } while (0)
   
 struct lisp_type *
-scheme_open (struct lisp_type *argl)
+scheme_open (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl("dd", "open() requires two arguments", "Too few arguments for open()");
   struct lisp_type *fname = car (argl);
@@ -314,7 +314,7 @@ scheme_open (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_close (struct lisp_type *argl)
+scheme_close (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("d", "close() requires one argument.", "Too few arguments for close");
   int rval = close (number_value (car (argl)));
@@ -322,7 +322,7 @@ scheme_close (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_sys_read (struct lisp_type *argl)
+scheme_sys_read (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("dd", "read requires two arguments.", "Too few arguments for read");
   int n = number_value (car (cdr (argl)));
@@ -330,17 +330,22 @@ scheme_sys_read (struct lisp_type *argl)
   int rval = read (number_value (car (argl)),
 		   buf,
 		   n);
-  union scheme_value *mem = calloc (n, sizeof(union scheme_value));
-  for (int i = 0; i < n; ++i)
-    mem[i].intval = buf[i];
-  return make_cons (make_number (rval),
-		    make_prealloc_vector (SCHEME_CHAR,
-					  n,
-					  mem));
+  if (rval < 0)
+    return make_cons (make_number (rval), NIL_VALUE);
+  else
+    {
+      union scheme_value *mem = calloc (rval, sizeof(union scheme_value));
+      for (int i = 0; i < rval; ++i)
+	mem[i].intval = buf[i];
+      return make_cons (make_number (rval),
+			make_prealloc_vector (SCHEME_CHAR,
+					      rval,
+					      mem));
+    }
 }
 
 struct lisp_type *
-scheme_sys_write (struct lisp_type *argl)
+scheme_sys_write (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("ddd", "sys-write requires three arguments.", "Too few arguments for sys-write");
   int fd = number_value (car (argl));
@@ -356,7 +361,7 @@ scheme_sys_write (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_eq (struct lisp_type *argl)
+scheme_eq (struct lisp_type *argl, struct lisp_type *env)
 {
 
   if (!nilp (list_seq_manip (argl, argl, "dd", 0, "eq? requires two arguments")))
@@ -367,7 +372,9 @@ scheme_eq (struct lisp_type *argl)
     {
       struct lisp_type *arg1 = car (argl);
       struct lisp_type *arg2 = car (cdr (argl));
-      if (nilp (arg1) && nilp (arg2))
+      if (arg1 == arg2)
+	return TRUE_VALUE;
+      else if (nilp (arg1) && nilp (arg2))
 	{
 	  return TRUE_VALUE;
 	}
@@ -378,9 +385,9 @@ scheme_eq (struct lisp_type *argl)
 	{
 	  return TRUE_VALUE;
 	}
-      else if (lisp_symb_equal (argl) == TRUE_VALUE)
+      else if (lisp_symb_equal (argl, env) == TRUE_VALUE)
 	return TRUE_VALUE;
-      else if (lisp_int_equal (argl) == TRUE_VALUE)
+      else if (lisp_int_equal (argl, env) == TRUE_VALUE)
 	return TRUE_VALUE;
       else
 	return FALSE_VALUE;
@@ -389,7 +396,7 @@ scheme_eq (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_consp (struct lisp_type *argl)
+scheme_consp (struct lisp_type *argl, struct lisp_type *env)
 {
   if (!nilp (argl) && consp (car (argl)))
     return TRUE_VALUE;
@@ -398,7 +405,7 @@ scheme_consp (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_make_vector (struct lisp_type *argl)
+scheme_make_vector (struct lisp_type *argl, struct lisp_type *env)
 {
   if (nilp (argl))
     scheme_signal_eval_error ("make-vector takes at least one argument");
@@ -420,7 +427,7 @@ scheme_make_vector (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_vector_ref (struct lisp_type *argl)
+scheme_vector_ref (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl("dd", "vector-ref requires two arguments",
 	     "Too few arguments for vector-ref");
@@ -460,14 +467,13 @@ __lisp_reader_ungetc (int c, void *argstate)
   struct lisp_reader_state *state = argstate;
   struct lisp_type *args = make_cons (make_number (c), NIL_VALUE);
   struct lisp_type *rval = eval_inner_apply (state->unget_proc,
-					     NIL_VALUE,
 					     the_global_environment,
 					     args);
   PUSH_STACK (eval_rval_stack, rval);
 }
 
 struct lisp_type *
-scheme_error (struct lisp_type *argl)
+scheme_error (struct lisp_type *argl, struct lisp_type *env)
 {
   if (nilp (argl))
     {
@@ -485,7 +491,6 @@ __lisp_reader_getc (void *argstate)
 {
   struct lisp_reader_state *state = argstate;
   struct lisp_type *rval = eval_inner_apply (state->read_proc,
-					     NIL_VALUE,
 					     the_global_environment,
 					     NIL_VALUE);
   if (!(numberp (rval) || charp (rval)))
@@ -513,7 +518,7 @@ init_cport_reader_from_scheme_reader (struct lisp_type *scheme_reader,
 }
 
 struct lisp_type *
-scheme_read (struct lisp_type *argl)
+scheme_read (struct lisp_type *argl, struct lisp_type *env)
 {
   if (nilp (argl))
     return read1 (&STDIN_CPORT_READER);
@@ -535,7 +540,7 @@ scheme_read (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_write (struct lisp_type *argl)
+scheme_write (struct lisp_type *argl, struct lisp_type *env)
 {
   if (nilp (argl))
     {
@@ -548,7 +553,7 @@ scheme_write (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_string_equalp (struct lisp_type *argl)
+scheme_string_equalp (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("dd", "string=? requires two arguments", "too few arguments to string=?!");
   struct lisp_type *v1 = car (argl);
@@ -571,7 +576,7 @@ scheme_string_equalp (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_vector_set (struct lisp_type *argl)
+scheme_vector_set (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("ddd", "vector-set! requires three arguments",
 	      "too few arguments for vector-set!");
@@ -582,9 +587,12 @@ scheme_vector_set (struct lisp_type *argl)
 	       "Second argument to vector-set! must be a number.");
   int n = number_value (car (cdr (argl)));
   struct lisp_type *toset = car (cdr (cdr (argl)));
-  v->v.vec.mem[n] = toset->v;
-  return toset;
+  if (mixed_vectorp (v))
+    return mixed_vector_set (v, n, toset);
+  else
+    return univector_set (v, n, toset);
 }
+
 
 int
 __list_length (unsigned cur, struct lisp_type *argl)
@@ -595,7 +603,7 @@ __list_length (unsigned cur, struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_symbol_to_string (struct lisp_type *argl)
+scheme_symbol_to_string (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("d", "symbol->string takes one argument.",
 	      "Too many arguments for symbol->string, it takes one.");
@@ -612,7 +620,7 @@ scheme_symbol_to_string (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_string_to_symbol (struct lisp_type *argl)
+scheme_string_to_symbol (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("d",
 	      "string->symbol takes one argument.",
@@ -638,7 +646,7 @@ scheme_string_to_symbol (struct lisp_type *argl)
 
 
 struct lisp_type *
-scheme_vector_len (struct lisp_type *argl)
+scheme_vector_len (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("d", "vector-len takes only one argument",
 	      "Too many arguments for vector-len, it takes one.");
@@ -648,7 +656,7 @@ scheme_vector_len (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_vector_concat (struct lisp_type *argl)
+scheme_vector_concat (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("dd", "vector-concat takes two arguments",
 	      "Too many arguments for vector-concat, it takes two.");
@@ -670,7 +678,7 @@ scheme_vector_concat (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_vectorp (struct lisp_type *argl)
+scheme_vectorp (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("d", "vector? takes only one argument.",
 	      "Too many arguments to vector?, it must have one.");
@@ -681,22 +689,76 @@ scheme_vectorp (struct lisp_type *argl)
 }
 
 struct lisp_type *
-scheme_apply (struct lisp_type *argl)
+scheme_apply (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("dd", "apply takes two arguments.",
 	      "Too many arguments to apply, it takes two.");
   struct lisp_type *func = car (argl);
   struct lisp_type *func_args = car (cdr (argl));
 
-  
+  return eval_apply (func, func_args, env);
+}
+
+/*
+  Like concat except the first argument is mutated,
+  there is no new vector.
+ */
+struct lisp_type *
+scheme_vector_extend (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("dd", "vector-extend! takes two arguments.",
+	      "vector-extend! takes only two arguments.");
+  struct lisp_type *v1 = car (argl);
+  struct lisp_type *v2 = car (cdr (argl));
+  eval_assert ((vectorp (v1) && vectorp (v2)), "vector-extend! takes only two vectors.");
+
+  if (mixed_vectorp (v1))
+    return mixed_vector_extend(v1, v2);
+  else
+    return univector_extend (v1, v2);	      
 }
 
 struct lisp_type *
-scheme_vector_push (struct lisp_type *argl)
+scheme_stringp (struct lisp_type *argl, struct lisp_type *env)
 {
+  if (stringp (car (argl))) return TRUE_VALUE;
+  return FALSE_VALUE;
 }
 
 struct lisp_type *
-scheme_vector_pop (struct lisp_type *argl)
+scheme_number_to_string (struct lisp_type *argl, struct lisp_type *env)
 {
+  check_argl ("d", "number->string takes only one argument.",
+	      "number->string takes one argument.");
+  int n = number_value (car (argl));
+  char sbuf[MAX_STRING];
+  int nchars = snprintf (sbuf, MAX_STRING, "%d", n);
+  if (nchars <= 0)
+    scheme_signal_eval_error ("Not a string!");
+  union scheme_value *mem = calloc (nchars, sizeof(union scheme_value));
+  for (int i = 0; i < nchars; ++i)
+    {
+      mem[i].intval = sbuf[i];
+    }
+  return make_prealloc_vector (SCHEME_CHAR,
+			       nchars,
+			       mem);
+}
+
+struct lisp_type *
+scheme_numberp (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("d", "number? takes only one argument.", "number? takes only one argument.");
+  if (numberp (car (argl)))
+      return TRUE_VALUE;
+  return FALSE_VALUE;
+}
+
+struct lisp_type *
+scheme_symbolp (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("d", "symbol? takes only one argument.", "symbol? takes only one argument.");
+  if (symbolp (car (argl)))
+      return TRUE_VALUE;
+  return FALSE_VALUE;
 }

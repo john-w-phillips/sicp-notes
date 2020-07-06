@@ -5,7 +5,20 @@ void write_string (struct lisp_type *t)
   int nchars = t->v.vec.nitems;
   putc('"', stdout);
   for (int i = 0; i < nchars; ++i)
-    putc(t->v.vec.mem[i].intval, stdout);
+    {
+      if (vector_unimem(t)[i].intval == '\n')
+	{
+	  putc ('\\', stdout);
+	  putc ('n', stdout);
+	}
+      else if (vector_unimem(t)[i].intval == '"')
+	{
+	  putc ('\\', stdout);
+	  putc ('"', stdout);
+	}
+      else
+	putc(t->v.vec.mem[i].intval, stdout);
+    }
   putc('"', stdout);
 }
 

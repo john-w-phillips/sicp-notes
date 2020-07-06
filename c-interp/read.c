@@ -81,7 +81,18 @@ read_symbol (int c, struct port *fp)
   return make_symbol (strdup (symbuf), true);
 }
 
-
+int
+read_escaped (struct port *fp)
+{
+  int c = cport_getbyte (fp);
+  switch (c)
+    {
+    case 'n':
+      return '\n';
+    default:
+      return c;
+    }
+}
 struct lisp_type *
 read_string (int c, struct port *fp)
 {
@@ -89,7 +100,12 @@ read_string (int c, struct port *fp)
   union scheme_value strbuf[MAX_STRING] = {0};
   while ( ((c = cport_getbyte (fp)) != '"') && (index < MAX_STRING))
     {
-      strbuf[index++].intval = c;
+      if (c == '\\')
+	{
+	  strbuf[index++].intval = read_escaped (fp);
+	}
+      else
+	strbuf[index++].intval = c;
     }
 
   union scheme_value *mem = calloc (index, sizeof(union scheme_value));

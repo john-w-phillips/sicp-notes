@@ -316,16 +316,17 @@ __bind_args (struct lisp_type *formals,
     }
 
 }
+
+
 struct lisp_type *
 eval_inner_apply (struct lisp_type *proc,
-		  struct lisp_type *form,
 		  struct lisp_type *environ,
 		  struct lisp_type *eval_argl)
 {
   struct lisp_type *lisp_rval = NULL;
   /* push_form(eval_argl); */
   
-  PUSH_STACK (formstack, eval_argl);
+  /* PUSH_STACK (formstack, eval_argl); */
   struct lisp_type *lambda_env =
     scheme_proc_environ (proc);
   struct lisp_type *lambda_formals =
@@ -342,15 +343,8 @@ eval_inner_apply (struct lisp_type *proc,
     = environment_extend (lambda_env,
 			  formals,
 			  arguments);
-  struct lisp_type *btent = make_bt_entry(form,
-					  formals,
-					  arguments,
-					  new_environ);
-  PUSH_STACK (backtrace,
-	      btent); 
-  PUSH_STACK (formstack, btent); //protect btent from GC.
-  PUSH_STACK (formstack, arguments);
-  PUSH_STACK (formstack, formals);
+  /* PUSH_STACK (formstack, arguments); */
+  /* PUSH_STACK (formstack, formals); */
   lisp_rval =  eval_sequence (scheme_proc_body (proc),
 			      new_environ);
 
@@ -359,11 +353,9 @@ eval_inner_apply (struct lisp_type *proc,
       assert (lisp_rval);
       lisp_rval = eval (lisp_rval, environ);
     }
-  POP_STACK (backtrace); // btent
-  POP_STACK (formstack); // formals
-  POP_STACK (formstack); // arguments
-  POP_STACK (formstack); // btent 
-  POP_STACK (formstack); // eval_argl
+  /* POP_STACK (formstack); // formals */
+  /* POP_STACK (formstack); // arguments */
+  /* POP_STACK (formstack); // eval_argl */
   return lisp_rval;
 }
 
@@ -371,41 +363,29 @@ struct lisp_type *eval_apply (struct lisp_type *proc,
 			      struct lisp_type *args,
 			      struct lisp_type *environ)
 {
-    eval_assert (proc, "PROC is null in C, evaluator bug.");
+  eval_assert (proc, "PROC is null in C, evaluator bug.");
   eval_assert ((scheme_procedurep (proc)
 		|| primitive_procedurep (proc)
 		|| scheme_macrop (proc)),
 	       "Form is not a procedure");
 
-  /* push_form (proc); */
-  PUSH_STACK (formstack, proc);
-
   struct lisp_type *lisp_rval = NULL;
   if (primitive_procedurep (proc))
     {
-      PUSH_STACK (backtrace,
-		  make_bt_entry (form,
-				 NIL_VALUE,
-				 eval_argl,
-				 the_global_environment));
-      lisp_rval = primitive_procedure_proc (proc)(eval_argl);
-      POP_STACK (backtrace);
+      lisp_rval = primitive_procedure_proc (proc)(args, environ);
     }
   else if (scheme_procedurep (proc) || scheme_macrop (proc))
     {
       lisp_rval = eval_inner_apply (proc,
-				    form,
 				    environ,
-				    eval_argl);
+				    args);
     }
   else
     {
       fprintf (stderr, "Bad procedure type.\n");
       abort();
     }
-  /* pop_form (); */
-  POP_STACK (formstack); // proc
-  //printf ("return v\n");
+  assert (lisp_rval);
   return lisp_rval;
 }
 
@@ -415,16 +395,32 @@ struct lisp_type *eval_application (struct lisp_type *form,
   //assert (cdr (form));
   eval_assert (cdr (form), "Form is malformed, must be a nil terminated list!");
   struct lisp_type *proc = eval (car (form), environ);
-    struct lisp_type *argl = cdr (form);
+  struct lisp_type *argl = cdr (form);
   /* push_form (argl); */
   struct lisp_type *eval_argl = NULL;
+
+  PUSH_STACK (formstack, proc);
+
   if (!scheme_macrop (proc))
     eval_argl
       = eval_arglist (argl, environ);
   else
     eval_argl = argl;
-
-  return eval_apply (proc, eval_argl, environ);
+  PUSH_STACK (formstack, eval_argl);
+  struct lisp_type *btent = make_bt_entry (form,
+					   NIL_VALUE,
+					   eval_argl,
+					   the_global_environment);
+  PUSH_STACK (backtrace,
+	      btent);
+  PUSH_STACK (formstack, btent);
+  struct lisp_type *rval =  eval_apply (proc, eval_argl, environ);
+  POP_STACK (backtrace);
+  POP_STACK (formstack); // eval_argl
+  POP_STACK (formstack); // btent 
+  POP_STACK (formstack); // proc
+  assert (rval);
+  return rval;
 }
 
 
@@ -728,10 +724,11 @@ init_environ (struct lisp_type *base)
     = make_env_frame ();
   struct lisp_type *env_cur
     = make_cons (frame, base);
-  
+
   add_env_proc ("+", add);
   add_env_proc ("-", sub);
   add_env_proc ("*", mul);
+  add_env_proc ("apply", scheme_apply);
   add_env_proc ("assert", lisp_assert);
   add_env_proc ("=", lisp_int_equal);
   add_env_proc ("symbol=?", lisp_symb_equal);
@@ -754,16 +751,22 @@ init_environ (struct lisp_type *base)
   add_env_proc ("sys-close", scheme_close);
   add_env_proc ("sys-write", scheme_sys_write);
   add_env_proc ("string=?", scheme_string_equalp);
+  add_env_proc ("string?", scheme_stringp);
   add_env_proc ("symbol->string", scheme_symbol_to_string);
   add_env_proc ("string->symbol", scheme_string_to_symbol);
   add_env_proc ("make-vector", scheme_make_vector);
   add_env_proc ("vector-ref", scheme_vector_ref);
   add_env_proc ("vector-set!", scheme_vector_set);
+  add_env_proc ("vector-extend!", scheme_vector_extend);
   add_env_proc ("vector-concat", scheme_vector_concat);
   add_env_proc ("vector-len", scheme_vector_len);
   add_env_proc ("vector?", scheme_vectorp);
+  add_env_proc ("number?", scheme_numberp);
+  add_env_proc ("number->string", scheme_number_to_string);
+  add_env_proc ("symbol?", scheme_symbolp);
   add_env_proc ("read", scheme_read);
   add_env_proc ("write", scheme_write);
+  add_env_val ("eof", EOF_VALUE);
   add_env_val ("true", TRUE_VALUE);
   add_env_val ("false", FALSE_VALUE);
 

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
-#define NPAIRS 2048
+#define NPAIRS 8192
 
 enum lisp_types {
   NUMBER,
@@ -73,6 +73,9 @@ struct scheme_vec
 #define vector_unimem(vect) (vect)->v.vec.mem
 #define vector_len(vect) (vect)->v.vec.nitems
 #define vector_elemtype(vect) (vect)->v.vec.type
+#define vector_set_mixedmem(vect, newmem) ((vect)->v.vec.mixed_mem = newmem)
+#define vector_set_unimem(vect, newmem) ((vect)->v.vec.mem = newmem)
+#define vector_set_len(vect, newlen) ((vect)->v.vec.nitems = newlen)
 #define READER_EOF 2
 #define READER_INVALID_SYNTAX 3
 #define ASSERTION_FAILURE 4
@@ -88,7 +91,8 @@ union scheme_value
     int intval;
     unsigned pair_index;
     struct scheme_proc scheme_proc;
-    struct lisp_type *(*proc_value)(struct lisp_type *argl);
+  struct lisp_type *(*proc_value)(struct lisp_type *argl,
+				  struct lisp_type *environ);
 };
 
 
@@ -295,7 +299,7 @@ make_lambda (struct lisp_type *formals,
 	     struct lisp_type *env);
 
 struct lisp_type *
-make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *));
+make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct lisp_type *));
 
 struct lisp_type *
 make_string (char *str, bool shouldfree);
@@ -322,7 +326,14 @@ make_mixed_vector (struct lisp_type *items);
 struct lisp_type *
 make_vector (enum lisp_types type,
 	     struct lisp_type *items);
-
+struct lisp_type *
+univector_set (struct lisp_type *v,
+	       unsigned n,
+	       struct lisp_type *item);
+struct lisp_type *
+mixed_vector_set (struct lisp_type *v,
+		  unsigned n,
+		  struct lisp_type *item);
 struct lisp_type *
 mixed_vector_concat (struct lisp_type *v1,
 		     struct lisp_type *v2);
@@ -330,6 +341,12 @@ mixed_vector_concat (struct lisp_type *v1,
 struct lisp_type *
 vector_concat (struct lisp_type *v1,
 	       struct lisp_type *v2);
+struct lisp_type *
+mixed_vector_extend (struct lisp_type *v1,
+		     struct lisp_type *v2);
+struct lisp_type *
+univector_extend (struct lisp_type *v1,
+		  struct lisp_type *v2);
 
 struct lisp_type *
 make_prealloc_vector (enum lisp_types type,
@@ -362,16 +379,16 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ);
 
 // Primitive interpreter functions.
 struct lisp_type *
-scheme_consp (struct lisp_type *argl);
+scheme_consp (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_eq (struct lisp_type *argl);
+scheme_eq (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_symb_equal (struct lisp_type *argl);
+lisp_symb_equal (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_load (struct lisp_type *argl);
+lisp_load (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
 __lisp_load (char *file, struct lisp_type *environ);
@@ -382,92 +399,106 @@ lists_append (struct lisp_type *l1,
 
 
 struct lisp_type *
-less_than (struct lisp_type *argl);
+less_than (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-add (struct lisp_type *argl);
+add (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_cdr (struct lisp_type *argl);
+lisp_cdr (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_car (struct lisp_type *argl);
+lisp_car (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_cons (struct lisp_type *argl);
+lisp_cons (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_assert (struct lisp_type *argl);
+lisp_assert (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-sub (struct lisp_type *argl);
+sub (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-mul (struct lisp_type *argl);
+mul (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-list_func (struct lisp_type *argl);
+list_func (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_cdr (struct lisp_type *argl);
+scheme_cdr (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_car (struct lisp_type *argl);
+scheme_car (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-lisp_int_equal (struct lisp_type *argl);
+lisp_int_equal (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_not (struct lisp_type *argl);
+scheme_not (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_open (struct lisp_type *argl);
+scheme_open (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
-scheme_sys_read (struct lisp_type *argl);
+scheme_sys_read (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_sys_write (struct lisp_type *argl);
+scheme_sys_write (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_close (struct lisp_type *argl);
+scheme_close (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
-scheme_symbol_to_string (struct lisp_type *argl);
+scheme_symbol_to_string (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
-scheme_vector_ref (struct lisp_type *argl);
+scheme_vector_ref (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_vector_set (struct lisp_type *argl);
+scheme_vector_set (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_write (struct lisp_type *argl);
+scheme_stringp (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_read (struct lisp_type *argl);
+scheme_write (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_error (struct lisp_type *argl);
+scheme_read (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_dbg_up (struct lisp_type *argl);
+scheme_error (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_string_equalp (struct lisp_type *argl);
+scheme_dbg_up (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_string_to_symbol (struct lisp_type *argl);
+scheme_string_equalp (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_dbg_down (struct lisp_type *argl);
+scheme_string_to_symbol (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
-scheme_vector_concat (struct lisp_type *argl);
+scheme_symbolp (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_number_to_string (struct lisp_type *argl, struct lisp_type *env);
+struct lisp_type *
+scheme_numberp (struct lisp_type *argl, struct lisp_type *env);
+struct lisp_type *
+scheme_dbg_down (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_apply (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_vector_concat (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
 eval_inner_apply (struct lisp_type *proc,
-		  struct lisp_type *form,
 		  struct lisp_type *environ,
 		  struct lisp_type *eval_argl);
-
+struct lisp_type *eval_apply (struct lisp_type *proc,
+			      struct lisp_type *args,
+			      struct lisp_type *environ);
 int
 __list_length (unsigned accum, struct lisp_type *argl);
 struct lisp_type *
@@ -475,11 +506,13 @@ repl (struct lisp_type *environ,
       char *prompt,
       struct port *inp);
 struct lisp_type *
-scheme_make_vector (struct lisp_type *argl);
+scheme_make_vector (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
-scheme_vectorp (struct lisp_type *argl);
+scheme_vectorp (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
-scheme_vector_len (struct lisp_type *argl);
+scheme_vector_len (struct lisp_type *argl, struct lisp_type *env);
+struct lisp_type *
+scheme_vector_extend (struct lisp_type *argl, struct lisp_type *env);
 #define environ_first_frame car
 #define enclosing_environ cdr
 

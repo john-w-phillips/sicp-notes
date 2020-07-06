@@ -70,30 +70,33 @@
 (defmacro (define-struct name slots)
   (let ((namestr (symbol->string name))
 	(slotpairs (slots-to-pairs slots)))
-  `(begin
-     (define ,(cons (string->symbol (string-append "make-" namestr))
-		    slots)
-       (apply make-vector (cons 'vector-mixed slots)))
-     ,@(map (lambda (slot)
-	      `(begin (define ,(cons (string->symbol (string-append
-						namestr
-						(string-append "-"
-							       (symbol->string (car slot)))))
-			       (list 'struct))
-		  (vector-ref struct (cdr slot)))
-		(define ,(cons (string->symbol (string-append
-						namestr
-						(string-append "-"
-							       (string-append
-								(symbol->string (car slot))
-								"-set!"))))
-			       (list 'struct 'setter))
-		  (vector-set! struct (cdr slot) setter))))
-	    slotpairs))))
-     
-		  
+    `(begin
+       (define ,(cons (string->symbol (string-append "make-" namestr))
+		      'slots)
+	 (apply make-vector (cons 'vector-mixed (cons (quote ,name) slots))))
+       ,@(map (lambda (slot)
+		`(begin
+		   (define ,(cons (string->symbol (string-append
+						   namestr "?"))
+				  (list 'struct))
+		     (and (vector? struct)
+			  (eq? (vector-ref struct 0) (quote ,name))))
+		   (define ,(cons (string->symbol (string-append
+						   namestr
+						   (string-append "-"
+								  (symbol->string (car slot)))))
+				  (list 'struct))
+		     (vector-ref struct ,(+ 1 (cdr slot))))
+		   (define ,(cons (string->symbol (string-append
+						   namestr
+						   (string-append "-"
+								  (string-append
+								   (symbol->string (car slot))
+								   "-set!"))))
+				  (list 'struct 'setter))
+		     (vector-set! struct ,(+ 1 (cdr slot)) setter))))
+	      slotpairs))))
 
-	      
 (define (vector=? a b)
   (define (vector=?-iter a b elem)
     (cond
@@ -119,3 +122,32 @@
     (vector=? a b))
    (else
     false)))
+(define (> a b)
+  (not (or (= a b) (< a b))))
+
+(define (strings-concat . strs)
+  (if (null? strs) ""
+      (string-concat (car strs)
+		     (apply strings-concat (cdr strs)))))
+(define (memq elem alist)
+  (if (null? alist) false
+      (or (eq? elem (car alist))
+	  (memq elem (cdr alist)))))
+
+(define (reverse alist)
+  (define (rev-iter inlist returnlist)
+    (if (null? inlist) returnlist
+	(rev-iter (cdr inlist) (cons (car inlist) returnlist))))
+  (rev-iter alist '()))
+(define cadr (lambda (x) (car (cdr x))))
+(define caddr (lambda (x) (car (cdr (cdr x)))))
+
+(define (vec-contains? avec anelem)
+  (define (vec-iter i)
+    (cond
+     ((= i (vector-len avec)) false)
+     ((equal? anelem (vector-ref avec i))
+      true)
+     (else
+      (vec-iter (+ i 1)))))
+  (vec-iter 0))

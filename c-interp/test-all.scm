@@ -8,3 +8,4 @@
 (load "settest.scm")
 (load "state-test.scm")
 (load "test-files.scm")
+(load "test-structs.scm")
