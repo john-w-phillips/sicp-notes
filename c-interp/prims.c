@@ -762,3 +762,14 @@ scheme_symbolp (struct lisp_type *argl, struct lisp_type *env)
       return TRUE_VALUE;
   return FALSE_VALUE;
 }
+
+struct lisp_type *
+scheme_load_compiled_module (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("d", "load-compiled takes only one argument.",
+	      "load-compiled takes one argument.");
+  char strbuf[MAX_STRING] = {0};
+  char *c_string = string_c_string (car (argl));
+  strncpy (strbuf, c_string, MAX_STRING);  
+  return load_compiled_module (c_string);
+}

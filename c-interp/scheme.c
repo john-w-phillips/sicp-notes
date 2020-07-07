@@ -1,4 +1,5 @@
 #include "scheme.h"
+#include <dlfcn.h>
 
 jmp_buf *jmpbuffer= NULL;
 jmp_buf *debugbuf = NULL;
@@ -324,9 +325,6 @@ eval_inner_apply (struct lisp_type *proc,
 		  struct lisp_type *eval_argl)
 {
   struct lisp_type *lisp_rval = NULL;
-  /* push_form(eval_argl); */
-  
-  /* PUSH_STACK (formstack, eval_argl); */
   struct lisp_type *lambda_env =
     scheme_proc_environ (proc);
   struct lisp_type *lambda_formals =
@@ -343,8 +341,6 @@ eval_inner_apply (struct lisp_type *proc,
     = environment_extend (lambda_env,
 			  formals,
 			  arguments);
-  /* PUSH_STACK (formstack, arguments); */
-  /* PUSH_STACK (formstack, formals); */
   lisp_rval =  eval_sequence (scheme_proc_body (proc),
 			      new_environ);
 
@@ -353,10 +349,14 @@ eval_inner_apply (struct lisp_type *proc,
       assert (lisp_rval);
       lisp_rval = eval (lisp_rval, environ);
     }
-  /* POP_STACK (formstack); // formals */
-  /* POP_STACK (formstack); // arguments */
-  /* POP_STACK (formstack); // eval_argl */
   return lisp_rval;
+}
+
+struct lisp_type *eval_apply_compield (struct lisp_type *proc,
+				       struct lisp_type *args_evaled,
+				       struct lisp_type *environ)
+{
+  
 }
 
 struct lisp_type *eval_apply (struct lisp_type *proc,
@@ -366,7 +366,8 @@ struct lisp_type *eval_apply (struct lisp_type *proc,
   eval_assert (proc, "PROC is null in C, evaluator bug.");
   eval_assert ((scheme_procedurep (proc)
 		|| primitive_procedurep (proc)
-		|| scheme_macrop (proc)),
+		|| scheme_macrop (proc)
+		|| compiled_procedurep (proc)),
 	       "Form is not a procedure");
 
   struct lisp_type *lisp_rval = NULL;
@@ -374,7 +375,8 @@ struct lisp_type *eval_apply (struct lisp_type *proc,
     {
       lisp_rval = primitive_procedure_proc (proc)(args, environ);
     }
-  else if (scheme_procedurep (proc) || scheme_macrop (proc))
+  else if (scheme_procedurep (proc) || scheme_macrop (proc)
+	   || compiled_procedurep (proc))
     {
       lisp_rval = eval_inner_apply (proc,
 				    environ,
@@ -716,6 +718,15 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 }
 
 struct lisp_type *
+load_compiled_module (char *fname)
+{
+  void *dlhandle = dlopen (fname, RTLD_LAZY);
+  module_initializer_t modinit = NULL;
+  assert ((modinit = dlsym (dlhandle, "init_mod")));
+  return modinit (the_global_environment);
+}
+
+struct lisp_type *
 init_environ (struct lisp_type *base)
 {
   
@@ -763,13 +774,13 @@ init_environ (struct lisp_type *base)
   add_env_proc ("vector?", scheme_vectorp);
   add_env_proc ("number?", scheme_numberp);
   add_env_proc ("number->string", scheme_number_to_string);
+  add_env_proc ("load-compiled", scheme_load_compiled_module);
   add_env_proc ("symbol?", scheme_symbolp);
   add_env_proc ("read", scheme_read);
   add_env_proc ("write", scheme_write);
   add_env_val ("eof", EOF_VALUE);
   add_env_val ("true", TRUE_VALUE);
   add_env_val ("false", FALSE_VALUE);
-
   return env_cur;
 }
 
@@ -830,85 +841,4 @@ void
 init_io (void)
 {
   STDIN_CPORT_READER.state = stdin;
-}
-
-int
-main (int argc, char **argv)
-{
-  init_stacks ();
-  init_pairs ();
-  init_io ();
-  jmp_buf jumpbuffer_main;
-  FILE *inp;
-  char *toload = NULL;
-  int rval = 0;
-  if (argc == 2)
-    {
-      toload = argv[1];
-      inp = stdin;
-    }
-  else if (argc == 1)
-    {
-      inp = stdin;
-    }
-  else
-    {
-      fprintf (stderr, "Invalid arguments!");
-      rval = EXITCODE_BAD_ARGS;
-      goto exit_normal;
-    }
-
-  STDIN_CPORT_READER.state = inp;
-  struct lisp_type *environ = NIL_VALUE;
-  environ = init_environ (environ);
-  struct lisp_type *form = NULL;
-  PUSH_STACK (formstack, environ);
-  the_global_environment = environ;
-  int unwind_stack_idx = formstack->index;
-  jmpbuffer = &jumpbuffer_main;
-  if ((rval = setjmp (jumpbuffer_main)) != 0)
-    {
-      if (rval == READER_EOF)
-	{
-	  rval = EXITCODE_SUCCESS;
-	  goto exit_eof;
-	}
-      else if (rval == ASSERTION_FAILURE)
-	{
-	  goto exit_assert;
-	}
-      else if (rval == DEBUG_RESTART)
-	{
-	  formstack->index = unwind_stack_idx;
-	  backtrace->index = 0;
-	  fprintf (stderr, ";; Leaving debugger...\n");
-	  goto repl_enter;
-	}
-      else
-	{
-	  formstack->index = unwind_stack_idx;
-	  fprintf(stderr, "Unknown error occured, recovering...\n ");
-	  goto repl_enter;
-	}
-    }
-  if (toload)
-    {
-      write1 (__lisp_load (toload, the_global_environment));
-      printf(";; loaded %s\n", toload);
-    }
- repl_enter:
-  repl (environ, "Toplevel", &STDIN_CPORT_READER);
-  goto exit_normal;
- exit_assert:
-  fprintf (stderr, "Assertion failure\n");
-  fflush (stdout);
-  fflush (stderr);
-  goto exit_normal;
- exit_eof:
-  printf("EOF\n");
- exit_normal:
-  if (inp != stdin) fclose (inp);
-  CLEAR_STACK (formstack);
-  gc (true);
-  return rval;
 }

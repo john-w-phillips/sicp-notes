@@ -168,6 +168,17 @@ make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct l
 }
 
 struct lisp_type *
+make_compiled_procedure (compiled_func_t proc, struct lisp_type *env)
+{  
+  struct lisp_type *rval = calloc (1, sizeof *rval);
+  rval->type = COMPILED_PROC;
+  rval->v.compiled_proc.compiled_proc_func = proc;
+  rval->v.compiled_proc.compiled_proc_env = env;
+  PUSH_STACK (conses, rval);
+  return rval;
+}
+			 
+struct lisp_type *
 make_string (char *str, bool shouldfree)
 {
   int str_length = strlen(str);

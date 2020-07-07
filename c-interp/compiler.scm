@@ -4,16 +4,44 @@
 			     variables-mod
 			     statements))
 
-;; All C procedures take argl and env as arguments.
-(define-struct c-procedure (name statements))
+;; One kind of statement is not a list but a struct representing a
+;; separate function, which has a procedure name and inner statements.
+(define-struct c-procedure-statement (statement-name inner-statements))
 
 (define empty-c-statements (make-c-statements '() '() '()))
 
-(define (sort-module statements)
-  (define (sort-iter output statements)
-    (if (c-procedure? (car statements))
-	(sort-iter (append-statement-sequences
-	
+(define (wrap-module-statements need mod statements)
+  (make-c-procedure-statement
+   'init_mod
+   (end-with-linkage
+    'return
+    (make-c-statements
+     need
+     mod
+     statements))))
+
+(define (prepare-sort-module statements)
+  (let ((need (c-statements-variables-need statements))
+	(mod (c-statements-variables-mod statements)))
+  (define (sort-iter proc-output normal-output statements)
+    (cond ((null? statements)
+	   (append (reverse proc-output) (list (wrap-module-statements
+						need mod
+						(reverse normal-output)))))
+	  ((c-procedure-statement? (car statements))
+	   (sort-iter (cons (car statements) proc-output)
+		      normal-output
+		      (cdr statements)))
+	  (else
+	   (sort-iter proc-output
+		      (cons (car statements) normal-output)
+		      (cdr statements)))))
+  (make-c-statements
+   (c-statements-variables-need statements)
+   (c-statements-variables-mod statements)
+   (sort-iter '() '() (c-statements-statements statements)))))
+
+  
 (define (list-union l1 l2)
   (cond
    ((null? l1) l2)
@@ -90,44 +118,58 @@
 
 
 ;; (define c-standard-boilerplate (list "#include \"scheme.h\""))
-(define (compile-self-evaluating expr target)
+(define (compile-self-evaluating expr target linkage)
   (cond
    ((number? expr)
-    (make-c-statements
-     '()
-     (list target)
-     (list
-      (strings-concat (stringify target) " = make_number (" (number->string expr) ")"))))
+    (end-with-linkage
+     linkage
+     (make-c-statements
+      '()
+      (list target)
+      (list
+       (strings-concat (stringify target) " = make_number (" (number->string expr) ")")))))
    ((string? expr)
-    (make-c-statements
-     '() (list target)
-     (list
-      (strings-concat (stringify target) " = make_string (\"" expr "\", false)"))))))
+    (end-with-linkage
+     linkage
+     (make-c-statements
+      '() (list target)
+      (list
+       (strings-concat (stringify target) " = make_string (\"" expr "\", false)")))))))
 
-(define (compile-var-lookup expr target)
-  (make-c-statements
-   '(env)
-   (list target)
-   (list (strings-concat (stringify target)
-			 " = env_find_var (env, make_symbol (\"" (stringify expr) "\", false))"))))
+(define (compile-var-lookup expr target linkage)
+  (end-with-linkage
+   linkage
+   (make-c-statements
+    '(env)
+    (list target)
+    (list (strings-concat (stringify target)
+			  " = env_find_var (env, make_symbol (\"" (stringify expr) "\", false))")
+	  (strings-concat "if (" (stringify target) ") {")
+	  (strings-concat (stringify target) " = cdr (" (stringify target) ")")
+	  " } else {"
+	  (strings-concat
+	   "scheme_signal_eval_error (\"Undefined variable %s\", \""
+	   (stringify expr) "\")")
+	  "}"))))
 
-(define (compile-application expr target)
-  (let ((proc-code (compile-to-c (car expr) 'proc))
+(define (compile-application expr target linkage)
+  (let ((proc-code (compile-to-c (car expr) 'proc 'next))
 	(args-code (compile-arglist-eval (cdr expr) 'argl))
 	(apply-code (make-c-statements
 		     '(proc env) (list target)
 		     (list (strings-concat
 			    (stringify target)
 			    " = eval_apply (proc, argl, env)")))))
-				       
-    (preserving '(proc)
-		proc-code
-		(preserving '(env)
-			    args-code
-			    apply-code))))
+    (end-with-linkage
+     linkage
+     (preserving '(proc)
+		 proc-code
+		 (preserving '(env)
+			     args-code
+			     apply-code)))))
 
 (define (compile-arglist-eval argl target)
-  (let ((arg-compilations (map (lambda (arg) (compile-to-c arg 'rval))
+  (let ((arg-compilations (map (lambda (arg) (compile-to-c arg 'rval 'next))
 			       argl)))
     (define (compile-all-together args)
       (if (null? args) (make-c-statements
@@ -142,8 +184,17 @@
 				     (stringify target)
 				     " = make_cons (rval," (stringify target) ")"))))))
     (compile-all-together arg-compilations)))
-	  
 
+(define (end-with-linkage linkage statements)
+  (cond
+   ((eq? linkage 'next) statements)
+   ((eq? linkage 'return)
+    (append-statement-sequences
+     statements
+     (make-c-statements '(rval) '() (list "return rval"))))
+   (else (error "Unknown linkage!"))))
+    
+    
 ;; (define (compile-application expr target c-file-object)
 ;;   (let ((proc-code (compile-to-c (car expr) 'proc c-file-object))
 ;; 	(arg-code (compile-argslist-to-c (cdr expr) 'argl c-file-object)))
@@ -160,15 +211,52 @@
 
 (define (application? expr)
   (pair? expr))
+(define *lambda-num* 1)
 
-(define (compile-to-c expr target)
+(define (gen-anon-lambda-name)
+  (let ((rval (strings-concat
+	       "scheme_anon_func" (number->string *lambda-num*))))
+    (set! *lambda-num* (+ *lambda-num* 1))
+    rval))
+
+(define (lambda? expr)
+  (and (pair? expr) (eq? (car expr) 'lambda)))
+
+(define (lambda-body expr)
+  (cddr expr))
+
+(define (compile-sequence-to-c exprs target linkage)
+  (cond
+   ((null? (cdr exprs))
+     (compile-to-c (car exprs) target linkage))
+   (else
+    (append-sequences
+     (compile-to-c (car exprs) target 'next)
+     (compile-sequence-to-c (cdr exprs) target linkage)))))
+
+(define (compile-lambda expr target linkage)
+  (let ((body (compile-sequence-to-c (lambda-body expr) 'rval 'return))
+	(anon-name (gen-anon-lambda-name)))
+    (end-with-linkage
+     linkage
+     (make-c-statements
+      '(env)
+      (list target)
+      (list
+       (make-c-procedure-statement anon-name body)
+       (strings-concat (stringify target) " = make_compiled_procedure ("
+		       (stringify anon-name) ", env)"))))))
+
+(define (compile-to-c expr target linkage)
   (cond
    ((self-evaluating? expr)
-    (compile-self-evaluating expr target))
+    (compile-self-evaluating expr target linkage))
    ((variable? expr)
-    (compile-var-lookup expr target))
+    (compile-var-lookup expr target linkage))
+   ((lambda? expr)
+    (compile-lambda expr target linkage))
    ((application? expr)
-    (compile-application expr target))
+    (compile-application expr target linkage))
    (else (error "Unknown expression type"))))
 
 (define (emit-to-list statements)
@@ -195,16 +283,54 @@
        false
        (not (vec-contains? a-string ?}))))
 
+(define (make-decls stmts)
+  (let ((decl-mods (c-statements-variables-mod stmts)))
+    (map (lambda (x) (strings-concat "struct lisp_type * " (stringify x) " = NULL;\n"))
+	 decl-mods)))
+
+(define (make-params stmts)
+  (let ((decl-needs (c-statements-variables-need stmts)))
+    (define (params-iter pstring decl-vars)
+      (cond ((null? decl-vars) " ()")
+	    ((null? (cdr decl-vars))
+	     (strings-concat pstring "struct lisp_type * " (stringify (car decl-vars)) ")"))
+	    (else
+	     (params-iter
+	      (strings-concat pstring "struct lisp_type * " (stringify (car decl-vars)) ", ")
+	      (cdr decl-vars)))))
+    (params-iter " (" decl-needs)))
+	     
+
+(define (write-procedure file statement)
+  (let ((name (stringify (c-procedure-statement-statement-name statement)))
+	(stmts (c-procedure-statement-inner-statements statement)))
+    (let ((var-decls (make-decls stmts))
+	  (var-params (make-params stmts)))
+      (write-to-port file (strings-concat "struct lisp_type *\n"
+					  (stringify name)))
+      (write-to-port file var-params)
+      (write-to-port file "\n{\n")
+      (map (lambda (decl) (write-to-port file decl)) var-decls)
+      (write-statements-iter file (c-statements-statements stmts))
+      (write-to-port file "}\n"))))
+
+(define (write-statements-iter file statements)
+  (cond ((null? statements) true)
+	((c-procedure-statement? (car statements))
+	 (begin
+	   (write-procedure file (car statements))
+	   (write-statements-iter file (cdr statements))))
+	(else
+	 (begin
+	   (write-to-port file (car statements))
+	   (if (needs-colon? (car statements))
+	       (write-to-port file ";\n")
+	       (write-to-port file "\n"))
+	   (write-statements-iter file (cdr statements))))))
+
 (define (write-to-file fname statement-list)
   (let ((file (open-port fname "w")))
-    (define (write-iter statements)
-      (if (null? statements) (close-port file)
-	  (begin
-	    (write-to-port file (car statements))
-	    (if (needs-colon? (car statements))
-		(write-to-port file ";\n")
-		(write-to-port file "\n"))
-	    (write-iter (cdr statements)))))
-    (write-iter statement-list)))
+    (write-statements-iter file statement-list)
+    (close-port file)))
 
 ;; (compile-to-c 1 'rval (make-default-c-file-object "hello.c"))

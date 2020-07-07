@@ -24,6 +24,7 @@ enum lisp_types {
   SCHEME_VECTOR,
   SCHEME_CHAR,
   SCHEME_VECTOR_MIXED,
+  COMPILED_PROC,
   INVALID,
 };
 
@@ -34,7 +35,8 @@ extern jmp_buf *debugbuf;
 extern struct lisp_type *the_global_environment;
 extern struct lisp_type *form_global;
 extern struct lisp_type *environ_global;
-
+typedef struct lisp_type *(*module_initializer_t)(struct lisp_type *env);
+typedef struct lisp_type *(*compiled_func_t)(struct lisp_type *env);
 
 
 enum lisp_types
@@ -48,6 +50,12 @@ struct scheme_proc
   struct lisp_type *scheme_proc_body;
   struct lisp_type *scheme_proc_formals;
   struct lisp_type *scheme_proc_env;
+};
+
+struct compiled_proc
+{
+  struct lisp_type *compiled_proc_env;
+  compiled_func_t compiled_proc_func;
 };
 
 struct scheme_string
@@ -86,13 +94,14 @@ struct scheme_vec
 #define EXITCODE_SUCCESS 2
 union scheme_value
 {
-    struct scheme_vec vec;
-    struct scheme_string string;
-    int intval;
-    unsigned pair_index;
-    struct scheme_proc scheme_proc;
+  struct scheme_vec vec;
+  struct scheme_string string;
+  int intval;
+  unsigned pair_index;
+  struct scheme_proc scheme_proc;
   struct lisp_type *(*proc_value)(struct lisp_type *argl,
 				  struct lisp_type *environ);
+  struct compiled_proc compiled_proc;
 };
 
 
@@ -195,7 +204,9 @@ enum scheme_debug_codes
 #define consp(x) ((x)->type == PAIR)
 #define primitive_procedurep(x) ((x)->type == PRIMITIVE_PROC)
 #define primitive_procedure_proc(x) ((x)->v.proc_value)
-
+#define compiled_procedurep(x) ((x)->type == COMPILED_PROC)
+#define compiled_procedure_proc(x) ((x)->v.compiled_proc.compiled_proc_func)
+#define compiled_procedure_env(x) ((x)->v.compiled_proc.compiled_proc_env)
 #define scheme_macrop(x) ((x)->type == MACRO)
 #define falsep(x) ((x)->type == BOOLEAN && x->v.intval == 0)
 #define truep(x) (!falsep (x) && !nilp (x))
@@ -300,6 +311,9 @@ make_lambda (struct lisp_type *formals,
 
 struct lisp_type *
 make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct lisp_type *));
+
+struct lisp_type *
+make_compiled_procedure (compiled_func_t proc, struct lisp_type *env);
 
 struct lisp_type *
 make_string (char *str, bool shouldfree);
@@ -515,6 +529,20 @@ struct lisp_type *
 scheme_vector_extend (struct lisp_type *argl, struct lisp_type *env);
 #define environ_first_frame car
 #define enclosing_environ cdr
+void
+init_io (void);
+void
+init_stacks ();
+void
+init_pairs (void);
+struct lisp_type *
+init_environ (struct lisp_type *base);
+struct lisp_type *
+load_compiled_module (char *fname);
+
+struct lisp_type *
+scheme_load_compiled_module (struct lisp_type *argl, struct lisp_type *env);
+
 
 #define MAX_STRING 2048
 #endif
