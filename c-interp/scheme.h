@@ -8,7 +8,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
-#define NPAIRS 32768
+#define NPAIRS 8192
 
 enum lisp_types {
   NUMBER,

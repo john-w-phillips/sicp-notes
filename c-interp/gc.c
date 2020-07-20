@@ -146,7 +146,54 @@ free_old_cells (struct cons_cells *cells)
 {
   for (int i = 0; i < cells->free_index; ++i)
     {
-      free_lisp_type (cells->to_free[i]);
+      if ((i < (cells->free_index - 1))
+	  && (cells->to_free[i+1] == cells->to_free[i]))
+	continue;
+      else
+	{
+	  free_lisp_type (cells->to_free[i]);
+	}
+    }
+}
+
+
+void quicksort_cells (struct lisp_type **cells, unsigned len)
+{
+  if (len <= 1)
+    {
+      return;
+    }
+  else if (len == 2)
+    {
+      if (cells[0] < cells[1])
+	{
+	  struct lisp_type *tmp = cells[0];
+	  cells[0] = cells[1];
+	  cells[1] = tmp;
+	  return;
+	}
+      else
+	return;
+    }
+  else
+    {
+      struct lisp_type *tmp = NULL;
+      int partition_index = 0;
+      for (int i = 1; i < len; ++i)
+	{
+	  if (((unsigned long)cells[i]) <= ((unsigned long)cells[partition_index]))
+	    {
+	      tmp = cells[partition_index + 1];
+	      cells[partition_index + 1] = cells[partition_index];
+	      cells[partition_index] = cells[i];
+	      cells[i] = tmp;
+	      partition_index++;
+	    }
+	}
+      assert (partition_index < len);
+      assert (partition_index - len >= 0);
+      quicksort_cells (cells, partition_index);
+      quicksort_cells (cells + partition_index + 1, (len - partition_index) -1);
     }
 }
 
@@ -162,27 +209,11 @@ find_old_cells (struct lisp_type **cells,
 	  && !is_immutable (cells[i])
 	  && should_delete (cells[i]))
 	{
-	  //bzero (cells[i], sizeof (*cells[i]));
-	  bool found = false;
-	  for (int j = 0; j < cells_out->free_index; ++j)
-	    {
-	      /*
-		we already have this cell so go to the next loop.
-	      */
-	      if (cells_out->to_free[j] == cells[i])
-		{
-		  found = true;
-		  break;
-		}
-	    }
-	  if (!found)
-	    {
-	      cells_out->to_free[cells_out->free_index++] = cells[i];
-	    }
+	  cells_out->to_free[cells_out->free_index++] = cells[i];
 	  cells[i] = NULL;
 	}
-
     }
+  quicksort_cells (cells_out->to_free, cells_out->free_index);
 }
 
 static void
@@ -284,32 +315,18 @@ gc (bool force)
   bzero (cells.cdrs, sizeof (cells.cdrs));
   cells.next = 0;
   cells.free_index = 0;
-  /* copy_root_array (roots, &cells, nroots); */
   copy_root_array (formstack->items, &cells, formstack->index);
-
-  /* find_old_cells (cars, &cells, NPAIRS); */
-  /* find_old_cells (cdrs, &cells, NPAIRS); */
-  /* find_old_cells (formstack->items + (formstack->index), */
-  /* 		  &cells, */
-  /* 		  (formstack->size - formstack->index)); */
   find_old_cells (conses->items,
 		  &cells,
 		  conses->index);
-  /* find_old_cells (eval_rval_stack->items, */
-  /* 		  &cells, */
-  /* 		  eval_rval_stack->index); */
   free_old_cells (&cells);
   compact_conses (conses);
-  //compact_conses (eval_rval_stack);
   for (int i = 0; i < NPAIRS; ++i)
     {
       gc_unset_copy_flag (cells.cars[i]);
       gc_unset_copy_flag (cells.cdrs[i]);
     }
 
-  /* for (int i = 0; i < nroots; ++i) */
-  /*   gc_unset_copy_flag (roots[i]); */
-      
   for (int i = 0; i < formstack->index; ++i)
     gc_unset_copy_flag (formstack->items[i]);
 
