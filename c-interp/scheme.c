@@ -341,23 +341,26 @@ eval_inner_apply (struct lisp_type *proc,
     = environment_extend (lambda_env,
 			  formals,
 			  arguments);
-  lisp_rval =  eval_sequence (scheme_proc_body (proc),
-			      new_environ);
-
-  if (scheme_macrop (proc))
+  if (compiled_procedurep (proc))
     {
-      assert (lisp_rval);
-      lisp_rval = eval (lisp_rval, environ);
+      lisp_rval = compiled_procedure_proc(proc)(new_environ);
     }
+  else
+    {
+      lisp_rval =  eval_sequence (scheme_proc_body (proc),
+				  new_environ);
+
+      if (scheme_macrop (proc))
+	{
+	  assert (lisp_rval);
+	  lisp_rval = eval (lisp_rval, environ);
+	}
+    }
+  assert (lisp_rval);
   return lisp_rval;
 }
 
-struct lisp_type *eval_apply_compield (struct lisp_type *proc,
-				       struct lisp_type *args_evaled,
-				       struct lisp_type *environ)
-{
-  
-}
+
 
 struct lisp_type *eval_apply (struct lisp_type *proc,
 			      struct lisp_type *args,
@@ -769,6 +772,7 @@ init_environ (struct lisp_type *base)
   add_env_proc ("vector-ref", scheme_vector_ref);
   add_env_proc ("vector-set!", scheme_vector_set);
   add_env_proc ("vector-extend!", scheme_vector_extend);
+  add_env_proc ("vector-truncate!", scheme_vector_trunc);
   add_env_proc ("vector-concat", scheme_vector_concat);
   add_env_proc ("vector-len", scheme_vector_len);
   add_env_proc ("vector?", scheme_vectorp);

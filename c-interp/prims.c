@@ -773,3 +773,12 @@ scheme_load_compiled_module (struct lisp_type *argl, struct lisp_type *env)
   strncpy (strbuf, c_string, MAX_STRING);  
   return load_compiled_module (c_string);
 }
+
+struct lisp_type *
+scheme_vector_trunc (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("dd", "vector-truncate! takes two arguments",
+	      "vector-truncate! takes two arguments.");
+  int nitems_new = number_value (car (cdr (argl)));
+  return vector_trunc (car (argl), nitems_new); 
+}

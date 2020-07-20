@@ -75,6 +75,22 @@
        (append (c-statements-statements  (car statements))
 	       (c-statements-statements rest-stmts)))))))
 
+(define (tack-on-statement-sequences . statements)
+  (define (tack-2-statement-seqs s1 s2)
+    (make-c-statements
+     (list-union (c-statements-variables-need s1)
+		 (c-statements-variables-need s2))
+     (list-union (c-statements-variables-mod s1)
+		 (c-statements-variables-mod s2))
+     (append (c-statements-statements s1)
+	     (c-statements-statements s2))))
+  (define (tack-iter statements)
+    (if (null? statements) empty-c-statements
+	(tack-2-statement-seqs (car statements)
+			       (tack-iter (cdr statements)))))
+  (tack-iter statements))
+
+
 (define (stringify x)
   (if (string? x)
       x
@@ -89,15 +105,15 @@
     (if (null? preserved) (list saves pops actually-preserved)
 	(if (and
 	     (memq (car preserved) modded)
-	     (memq (car preserved) (c-statements-variables-need seq1)))
+	     (memq (car preserved) (c-statements-variables-need seq2)))
 	    (push-needed
 	     (cdr preserved)
 	     modded
-	     (cons (strings-concat "PUSH (formstack, " (stringify (car preserved)) ")")
+	     (cons (strings-concat "PUSH_STACK (formstack, " (stringify (car preserved)) ")")
 		   saves)
 	     (cons (strings-concat
 		    (stringify (car preserved))
-		    " = POP (formstack, " (stringify (car preserved)) ")")
+		    " = POP_STACK (formstack)")
 		   pops)
 	     (cons (car preserved) actually-preserved))
 	    (push-needed (cdr preserved)
@@ -106,7 +122,7 @@
 			 pops
 			 actually-preserved))))
   (let ((saves-pops
-	 (push-needed vars (c-statements-variables-mod seq2)
+	 (push-needed vars (c-statements-variables-mod seq1)
 		      '()
 		      '()
 		      '())))
@@ -155,18 +171,29 @@
 (define (compile-application expr target linkage)
   (let ((proc-code (compile-to-c (car expr) 'proc 'next))
 	(args-code (compile-arglist-eval (cdr expr) 'argl))
-	(apply-code (make-c-statements
-		     '(proc env) (list target)
-		     (list (strings-concat
-			    (stringify target)
-			    " = eval_apply (proc, argl, env)")))))
+	(apply-code
+	 (make-c-statements
+	  '(proc env argl)
+	  (list target)
+	  (list
+	    "PUSH_STACK (formstack, argl)"
+	    "PUSH_STACK (formstack, env)"
+	    "PUSH_STACK (formstack, proc)"
+	    "gc (false)"
+	    (strings-concat
+	     (stringify target)
+	     " = eval_apply (proc, argl, env)")
+	    "POP_STACK (formstack)"
+	    "POP_STACK (formstack)"
+	    "POP_STACK (formstack)"))))
     (end-with-linkage
      linkage
+     (append-statement-sequences
+      proc-code
      (preserving '(proc)
-		 proc-code
-		 (preserving '(env)
-			     args-code
-			     apply-code)))))
+		 args-code
+		 apply-code)))))
+
 
 (define (compile-arglist-eval argl target)
   (let ((arg-compilations (map (lambda (arg) (compile-to-c arg 'rval 'next))
@@ -178,12 +205,15 @@
 			(list (strings-concat (stringify target) " = NIL_VALUE")))
 	  (append-statement-sequences
 	   (compile-all-together (cdr args))
-	   (car args)
-	   (make-c-statements '(rval argl) (list target)
-			      (list (strings-concat
-				     (stringify target)
-				     " = make_cons (rval," (stringify target) ")"))))))
-    (compile-all-together arg-compilations)))
+	   (preserving
+	    (list target)
+	    (car args)
+	    (make-c-statements '(rval argl) (list target)
+			       (list (strings-concat
+				      (stringify target)
+				      " = make_cons (rval," (stringify target) ")")))))))
+      (compile-all-together arg-compilations)))
+
 
 (define (end-with-linkage linkage statements)
   (cond
@@ -222,8 +252,14 @@
 (define (lambda? expr)
   (and (pair? expr) (eq? (car expr) 'lambda)))
 
+(define (quoted? expr)
+  (and (pair? expr) (eq? (car expr) 'quote)))
+
 (define (lambda-body expr)
   (cddr expr))
+	      
+(define (lambda-formals expr)
+  (cadr expr))
 
 (define (compile-sequence-to-c exprs target linkage)
   (cond
@@ -236,16 +272,107 @@
 
 (define (compile-lambda expr target linkage)
   (let ((body (compile-sequence-to-c (lambda-body expr) 'rval 'return))
+	(arglist (compile-quotation (lambda-formals expr) 'argl 'next))
 	(anon-name (gen-anon-lambda-name)))
     (end-with-linkage
      linkage
-     (make-c-statements
-      '(env)
-      (list target)
-      (list
-       (make-c-procedure-statement anon-name body)
-       (strings-concat (stringify target) " = make_compiled_procedure ("
-		       (stringify anon-name) ", env)"))))))
+     (append-statement-sequences
+      arglist
+      (make-c-statements
+       '(env argl)
+       (list target)
+       (list
+	(make-c-procedure-statement anon-name body)
+	(strings-concat (stringify target)
+			" = make_compiled_procedure ( "
+			(stringify anon-name)
+			", argl, env)")))))))
+
+(define (if? expr) (and (pair? expr) (eq? (car expr) 'if)))
+(define (if-predicate expr) (cadr expr))
+(define (if-consequent expr) (caddr expr))
+(define (if-alternative expr) (cadddr expr))
+
+(define (compile-if expr target linkage)
+  (let ((pred-code (compile-to-c (if-predicate expr) 'rval 'next))
+	(consequent-code (compile-to-c (if-consequent expr) target 'next))
+	(alternative-code (compile-to-c (if-alternative expr) target 'next)))
+    (end-with-linkage linkage
+		      (append-statement-sequences
+		       pred-code
+		       (tack-on-statement-sequences
+			(make-c-statements
+			 '(rval)
+			 '()
+			 (list "if (truep (rval)) \n{"))
+			consequent-code
+			(make-c-statements
+			 '()
+			 '()
+			 (list "}\nelse\n{"))
+			alternative-code
+			(make-c-statements
+			 '()
+			 '()
+			 (list "\n}\n")))))))
+
+(define (compile-quotation expr target linkage)
+  (cond
+   ((self-evaluating? expr)
+    (compile-self-evaluating expr target linkage))
+   ((null? expr)
+    (make-c-statements
+     '() (list target)
+     (list (strings-concat (stringify target) " = NIL_VALUE"))))
+   ((symbol? expr)
+    (make-c-statements
+     '()
+     (list target)
+     (list 
+     (strings-concat (stringify target)
+		     " = make_symbol(\"" (stringify expr)
+		     "\", false)"))))
+   ((pair? expr)
+    (let ((car-code (compile-quotation (car expr) 'rval linkage))
+	  (cdr-code (compile-quotation (cdr expr) 'argl linkage)))
+      (append-statement-sequences
+       cdr-code
+      (preserving
+       '(argl)
+       car-code
+       (make-c-statements
+	'(argl rval)
+	(list target)
+	(list (strings-concat (stringify target) " = make_cons (rval, argl)")))))))
+   (else (error "Bad expression type for quotation"))))
+
+(define (definition? expr)
+  (and (pair? expr) (eq? (car expr) 'define)))
+
+(define (definition-value expr)
+  (caddr expr))
+
+(define (definition-variable expr)
+  (cadr expr))
+
+(define (compile-definition expr target linkage)
+  (let ((assigner-code (compile-to-c
+			(definition-value expr)
+			target
+			'next))
+	(var (definition-variable expr)))
+    (end-with-linkage
+     linkage
+     (append-statement-sequences
+      assigner-code
+      (make-c-statements
+       (list target)
+       '()
+       (list
+	(strings-concat 
+	"env_frame_set_var_value (environ_first_frame (env), make_symbol (\""
+	(stringify var) "\", false), rval)")))))))
+
 
 (define (compile-to-c expr target linkage)
   (cond
@@ -253,6 +380,12 @@
     (compile-self-evaluating expr target linkage))
    ((variable? expr)
     (compile-var-lookup expr target linkage))
+   ((quoted? expr)
+    (compile-quotation (cadr expr) target linkage))
+   ((if? expr)
+    (compile-if expr target linkage))
+   ((definition? expr)
+    (compile-definition expr target linkage))
    ((lambda? expr)
     (compile-lambda expr target linkage))
    ((application? expr)
@@ -269,6 +402,7 @@
 	       '(env)))))
     (append vars-dcls
 	    (c-statements-statements statements))))
+
 (define (emit-to-list-procedure procname statements)
   (append
    (list (strings-concat
@@ -284,7 +418,10 @@
        (not (vec-contains? a-string ?}))))
 
 (define (make-decls stmts)
-  (let ((decl-mods (c-statements-variables-mod stmts)))
+  (let ((decl-mods
+	 (list-diff
+	  (c-statements-variables-mod stmts)
+	  (c-statements-variables-need stmts))))
     (map (lambda (x) (strings-concat "struct lisp_type * " (stringify x) " = NULL;\n"))
 	 decl-mods)))
 

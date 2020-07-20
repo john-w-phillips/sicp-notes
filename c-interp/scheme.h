@@ -8,7 +8,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
-#define NPAIRS 8192
+#define NPAIRS 32768
 
 enum lisp_types {
   NUMBER,
@@ -55,6 +55,7 @@ struct scheme_proc
 struct compiled_proc
 {
   struct lisp_type *compiled_proc_env;
+  struct lisp_type *proc_formals;
   compiled_func_t compiled_proc_func;
 };
 
@@ -70,6 +71,7 @@ struct scheme_string
 struct scheme_vec
 {
   enum lisp_types type;
+  unsigned capacity;
   unsigned nitems;
   union {
     union scheme_value  *mem;
@@ -77,6 +79,8 @@ struct scheme_vec
   };
 };
 
+#define vector_capacity(vect) ((vect)->v.vec.capacity)
+#define vector_set_capacity(vect, newcap) ((vect)->v.vec.capacity = newcap)
 #define vector_mixedmem(vect) (vect)->v.vec.mixed_mem
 #define vector_unimem(vect) (vect)->v.vec.mem
 #define vector_len(vect) (vect)->v.vec.nitems
@@ -144,11 +148,19 @@ extern struct port STDIN_CPORT_READER;
     stack->items[stack->index++] = item;	\
   } while (0)
 
-#define POP_STACK(stack)			\
-  do {						\
-    assert (stack->index > 0);			\
-    stack->index--;				\
-  } while (0)
+/* #define POP_STACK(stack)			\ */
+/*   assert (stack->index > 0);			\ */
+/*   stack->index--;				\ */
+/*   stack->items[stack->index+1]			\ */
+
+static inline struct lisp_type *
+POP_STACK (struct lisp_item_stack *s)
+{
+  s->index--;
+  assert (s->index >= 0);
+  return s->items[s->index];
+}
+
 
 #define INIT_STACK(stack) do {			\
     stack->size = stack##_size;			\
@@ -210,8 +222,14 @@ enum scheme_debug_codes
 #define scheme_macrop(x) ((x)->type == MACRO)
 #define falsep(x) ((x)->type == BOOLEAN && x->v.intval == 0)
 #define truep(x) (!falsep (x) && !nilp (x))
-#define scheme_proc_environ(x) ((x)->v.scheme_proc.scheme_proc_env)
-#define scheme_proc_formals(x) ((x)->v.scheme_proc.scheme_proc_formals)
+#define scheme_proc_environ(x) (compiled_procedurep(x) ?		\
+				((x)->v.compiled_proc.compiled_proc_env) : \
+				((x)->v.scheme_proc.scheme_proc_env))
+
+#define scheme_proc_formals(x) (compiled_procedurep (x) ?		\
+				((x)->v.compiled_proc.proc_formals) :	\
+				(x)->v.scheme_proc.scheme_proc_formals)
+
 #define scheme_proc_body(x) ((x)->v.scheme_proc.scheme_proc_body)
 #define scheme_procedurep(x) ((x)->type == SCHEME_PROC)
 #define nilp(x) ((x) == &NIL)
@@ -313,7 +331,7 @@ struct lisp_type *
 make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct lisp_type *));
 
 struct lisp_type *
-make_compiled_procedure (compiled_func_t proc, struct lisp_type *env);
+make_compiled_procedure (compiled_func_t proc, struct lisp_type *formals, struct lisp_type *env);
 
 struct lisp_type *
 make_string (char *str, bool shouldfree);
@@ -366,7 +384,8 @@ struct lisp_type *
 make_prealloc_vector (enum lisp_types type,
 		      unsigned nitems,
 		      union scheme_value *mem);
-
+struct lisp_type *
+vector_trunc (struct lisp_type *v1, unsigned nitems);
 struct lisp_type *
 last_pair (struct lisp_type *list);
 
@@ -523,6 +542,8 @@ struct lisp_type *
 scheme_make_vector (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
 scheme_vectorp (struct lisp_type *argl, struct lisp_type *env);
+struct lisp_type *
+scheme_vector_trunc (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *
 scheme_vector_len (struct lisp_type *argl, struct lisp_type *env);
 struct lisp_type *

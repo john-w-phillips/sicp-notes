@@ -58,6 +58,7 @@ copy_cell (struct lisp_type *car_or_cdr,
       copy_cons_cells (car_or_cdr, newcells);
     }
   else if (scheme_procedurep (car_or_cdr)
+	   || compiled_procedurep (car_or_cdr)
 	   || scheme_macrop (car_or_cdr))
     {
       copy_procedure_cells (car_or_cdr,
@@ -113,14 +114,16 @@ copy_procedure_cells (struct lisp_type *proc,
 {
   if (proc->copied)
     return;
-  assert (scheme_procedurep (proc) || scheme_macrop (proc));
+  assert (scheme_procedurep (proc)
+	  || scheme_macrop (proc)
+	  || compiled_procedurep (proc));
   proc->copied = true;
-  if (consp (scheme_proc_body (proc)))
+  if (!compiled_procedurep (proc) && consp (scheme_proc_body (proc)))
     {
       copy_cons_cells (scheme_proc_body (proc),
 		       newcells);
     }
-  else
+  else if (!compiled_procedurep (proc))
     {
       assert (is_immutable (scheme_proc_body (proc)));
     }
@@ -193,7 +196,9 @@ copy_root_array (struct lisp_type **roots,
 	{
 	  copy_cons_cells (roots[i], cells);
 	}
-      else if ((scheme_procedurep (roots[i]) || scheme_macrop (roots[i])))
+      else if ((scheme_procedurep (roots[i])
+		|| compiled_procedurep (roots[i])
+		|| scheme_macrop (roots[i])))
 	{
 	  copy_procedure_cells (roots[i],
 				cells);
@@ -282,20 +287,20 @@ gc (bool force)
   /* copy_root_array (roots, &cells, nroots); */
   copy_root_array (formstack->items, &cells, formstack->index);
 
-  find_old_cells (cars, &cells, NPAIRS);
-  find_old_cells (cdrs, &cells, NPAIRS);
-  find_old_cells (formstack->items + (formstack->index),
-		  &cells,
-		  (formstack->size - formstack->index));
+  /* find_old_cells (cars, &cells, NPAIRS); */
+  /* find_old_cells (cdrs, &cells, NPAIRS); */
+  /* find_old_cells (formstack->items + (formstack->index), */
+  /* 		  &cells, */
+  /* 		  (formstack->size - formstack->index)); */
   find_old_cells (conses->items,
 		  &cells,
 		  conses->index);
-  find_old_cells (eval_rval_stack->items,
-		  &cells,
-		  eval_rval_stack->index);
+  /* find_old_cells (eval_rval_stack->items, */
+  /* 		  &cells, */
+  /* 		  eval_rval_stack->index); */
   free_old_cells (&cells);
   compact_conses (conses);
-  compact_conses (eval_rval_stack);
+  //compact_conses (eval_rval_stack);
   for (int i = 0; i < NPAIRS; ++i)
     {
       gc_unset_copy_flag (cells.cars[i]);
@@ -305,7 +310,7 @@ gc (bool force)
   /* for (int i = 0; i < nroots; ++i) */
   /*   gc_unset_copy_flag (roots[i]); */
       
-  for (int i = 0; i < formstack->size; ++i)
+  for (int i = 0; i < formstack->index; ++i)
     gc_unset_copy_flag (formstack->items[i]);
 
   memcpy (cdrs, cells.cdrs, NPAIRS * sizeof (struct lisp_type *));

@@ -32,3 +32,8 @@
 (define str-ext "abcd")
 (vector-extend! str-ext "def")
 (assert (vector=? str-ext "abcddef"))
+
+(define vec-to-trunc "abcdefg")
+(vector-truncate! vec-to-trunc 2)
+(assert (vector=? vec-to-trunc "ab"))
+(assert (= (vector-len vec-to-trunc) 2))

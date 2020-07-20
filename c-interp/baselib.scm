@@ -142,6 +142,7 @@
 (define cadr (lambda (x) (car (cdr x))))
 (define caddr (lambda (x) (car (cdr (cdr x)))))
 (define cddr (lambda (x) (cdr (cdr x))))
+(define cadddr (lambda (x) (car (cdr (cdr (cdr x))))))
 
 (define (vec-contains? avec anelem)
   (define (vec-iter i)

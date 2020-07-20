@@ -116,6 +116,7 @@ make_char (int c)
   struct lisp_type *rval = calloc (1, sizeof *rval);
   rval->type = SCHEME_CHAR;
   rval->v.intval = c;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -140,6 +141,7 @@ make_macro (struct lisp_type *formals,
   rval->v.scheme_proc.scheme_proc_formals = formals;
   rval->v.scheme_proc.scheme_proc_body = body;
   rval->v.scheme_proc.scheme_proc_env = env;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
@@ -164,16 +166,18 @@ make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct l
   struct lisp_type *rval = calloc(1, sizeof *rval);
   rval->type = PRIMITIVE_PROC;
   rval->v.proc_value = proc;
+  PUSH_STACK (conses, rval);
   return rval;
 }
 
 struct lisp_type *
-make_compiled_procedure (compiled_func_t proc, struct lisp_type *env)
+make_compiled_procedure (compiled_func_t proc, struct lisp_type *formals, struct lisp_type *env)
 {  
   struct lisp_type *rval = calloc (1, sizeof *rval);
   rval->type = COMPILED_PROC;
   rval->v.compiled_proc.compiled_proc_func = proc;
   rval->v.compiled_proc.compiled_proc_env = env;
+  rval->v.compiled_proc.proc_formals = formals;
   PUSH_STACK (conses, rval);
   return rval;
 }
@@ -236,6 +240,7 @@ make_prealloc_vector (enum lisp_types type,
   rval->type = SCHEME_VECTOR;
   rval->v.vec.mem = mem;
   rval->v.vec.nitems = nitems;
+  rval->v.vec.capacity = nitems;
   rval->v.vec.type = type;
   rval->copied = false;
   PUSH_STACK (conses, rval);
@@ -251,6 +256,7 @@ make_prealloc_mixed_vector (unsigned nitems,
   rval->v.vec.mixed_mem = mem;
   rval->v.vec.nitems = nitems;
   rval->v.vec.type = SCHEME_VECTOR_MIXED;
+  rval->v.vec.capacity = nitems;
   rval->copied = false;
   PUSH_STACK (conses, rval);
   return rval;
@@ -264,6 +270,7 @@ make_mixed_vector (struct lisp_type *items)
   rval->type = SCHEME_VECTOR_MIXED;
   rval->v.vec.mixed_mem = calloc (nitems, sizeof(struct lisp_type));
   rval->v.vec.nitems = nitems;
+  rval->v.vec.capacity = nitems;
   struct lisp_type *iter = items;
   
   for (int i = 0; i < nitems; ++i,iter=cdr(iter))
@@ -303,6 +310,7 @@ make_vector (enum lisp_types type,
   rval->v.vec.mem = calloc(nitems, sizeof(union scheme_value));
   rval->v.vec.nitems = nitems;
   rval->v.vec.type = type;
+  rval->v.vec.capacity = nitems;
   rval->copied = false;
   int elem = 0;
   for (struct lisp_type *i = items; i != NIL_VALUE; ((i = cdr (i)),elem = elem + 1))
@@ -317,6 +325,7 @@ make_vector (enum lisp_types type,
   PUSH_STACK (conses, rval);
   return rval;
 }
+
 
 
 struct lisp_type *
@@ -367,8 +376,12 @@ mixed_vector_extend (struct lisp_type *v1,
 {
   struct lisp_type **v1mem = vector_mixedmem(v1);
   unsigned newsize = vector_len(v1) + vector_len(v2);
-  vector_set_mixedmem(v1,
-		      realloc (v1mem, newsize * sizeof (struct lisp_type *)));
+  if (vector_capacity (v1) < newsize)
+    {
+      vector_set_mixedmem(v1,
+			  realloc (v1mem, newsize * sizeof (struct lisp_type *)));
+      vector_set_capacity (v1, newsize);
+    }
   assert (vector_mixedmem (v1));
   memcpy (vector_mixedmem (v1) + vector_len(v1),
 	  vector_mixedmem(v2),
@@ -382,8 +395,12 @@ univector_extend (struct lisp_type *v1, struct lisp_type *v2)
 {
   union scheme_value *v1mem = vector_unimem (v1);
   unsigned newsize = vector_len (v1) + vector_len (v2);
-  vector_set_unimem (v1,
-		     realloc (v1mem, newsize * sizeof (union scheme_value)));
+  if (vector_capacity (v1) < newsize)
+    {
+      vector_set_unimem (v1,
+			 realloc (v1mem, newsize * sizeof (union scheme_value)));
+      vector_set_capacity (v1, newsize);
+    }
   memcpy (vector_unimem (v1) + vector_len (v1),
 	  vector_unimem (v2),
 	  vector_len (v2) * sizeof (union scheme_value));
@@ -392,9 +409,15 @@ univector_extend (struct lisp_type *v1, struct lisp_type *v2)
 }
 
 struct lisp_type *
-vector_pop (struct lisp_type *v1)
+vector_trunc (struct lisp_type *v1, unsigned nitems)
 {
+  eval_assert (nitems <= vector_len (v1), "New capacity must be <= old capacity");
+  vector_set_len (v1, nitems);
+  return v1;
 }
+
+
+
 
 
 #define MAX_STRING 2048
