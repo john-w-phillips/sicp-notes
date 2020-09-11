@@ -1,4 +1,5 @@
 (load "baselib.scm")
+(load "files.scm")
 (define-struct c-file-object (current main procs vars))
 (define-struct c-statements (variables-need
 			     variables-mod
@@ -266,7 +267,7 @@
    ((null? (cdr exprs))
      (compile-to-c (car exprs) target linkage))
    (else
-    (append-sequences
+    (append-statement-sequences
      (compile-to-c (car exprs) target 'next)
      (compile-sequence-to-c (cdr exprs) target linkage)))))
 
@@ -346,6 +347,11 @@
 	(list (strings-concat (stringify target) " = make_cons (rval, argl)")))))))
    (else (error "Bad expression type for quotation"))))
 
+(define (begin? expr)
+  (eq? (car expr) 'begin))
+(define (begin-exprs expr)
+  (cdr expr))
+
 (define (definition? expr)
   (and (pair? expr) (eq? (car expr) 'define)))
 
@@ -366,7 +372,7 @@
      (append-statement-sequences
       assigner-code
       (make-c-statements
-       (list target)
+       (list target 'env)
        '()
        (list
 	(strings-concat 
@@ -388,6 +394,8 @@
     (compile-definition expr target linkage))
    ((lambda? expr)
     (compile-lambda expr target linkage))
+   ((begin? expr)
+    (compile-sequence-to-c (begin-exprs expr) target linkage))
    ((application? expr)
     (compile-application expr target linkage))
    (else (error "Unknown expression type"))))
@@ -436,7 +444,7 @@
 	      (strings-concat pstring "struct lisp_type * " (stringify (car decl-vars)) ", ")
 	      (cdr decl-vars)))))
     (params-iter " (" decl-needs)))
-	     
+
 
 (define (write-procedure file statement)
   (let ((name (stringify (c-procedure-statement-statement-name statement)))
@@ -467,7 +475,15 @@
 
 (define (write-to-file fname statement-list)
   (let ((file (open-port fname "w")))
+    (write-to-port file "#include \"scheme.h\"\n")
     (write-statements-iter file statement-list)
     (close-port file)))
 
+(define (compile-as-module expr fname)
+  (let ((statements (compile-to-c expr 'rval 'next)))
+    (let ((module (prepare-sort-module statements)))
+      (write-to-file fname (c-statements-statements module)))))
+
+(define (compile-file fname)
+  )
 ;; (compile-to-c 1 'rval (make-default-c-file-object "hello.c"))

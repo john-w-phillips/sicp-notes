@@ -124,6 +124,8 @@
     false)))
 (define (> a b)
   (not (or (= a b) (< a b))))
+(define (<= a b)
+  (or (< a b) (= a b)))
 
 (define (strings-concat . strs)
   (if (null? strs) ""

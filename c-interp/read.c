@@ -194,7 +194,8 @@ read0 (struct port *fp)
     return EOF_VALUE;
   else
     {
-      fprintf(stderr, "Unspecified reader error!\n");
+      fprintf(stderr, "Unspecified reader error! got c: %c\n",
+	      c);
       exit(1);
     }
   return NULL;

@@ -1,5 +1,6 @@
 CC := gcc
-CFLAGS :=  -pg -g3 -L.
+# -DGC_RECORD_STATS=1 
+CFLAGS :=  -O1 -g3 -L. 
 LIBS := -ldl
 %.o: %.c scheme.h
 	$(CC) $(CFLAGS) -c -fPIC -o $@ $<

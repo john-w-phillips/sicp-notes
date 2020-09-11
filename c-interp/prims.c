@@ -1,6 +1,7 @@
 #include "scheme.h"
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -322,6 +323,62 @@ scheme_close (struct lisp_type *argl, struct lisp_type *env)
 }
 
 struct lisp_type *
+scheme_sys_fork (struct lisp_type *argl, struct lisp_type *env)
+{
+  pid_t pid = fork ();
+  return make_number (pid);
+}
+
+#define MAX_ARGS 1024
+struct lisp_type *
+scheme_sys_exec(struct lisp_type *argl, struct lisp_type *env)
+{
+  if (nilp (argl) || !stringp (car (argl)))
+    {
+      scheme_signal_eval_error("exec requires at least one string argument.");
+    }
+  char **arguments = NULL;
+  struct lisp_type *node_iter = argl;
+  // Count items in list.
+  int count = 0, i = 0;
+  for (count = 0; !nilp (node_iter); ++count,node_iter=cdr (node_iter));
+  arguments = malloc (sizeof (char *) * count);
+
+  for (node_iter=argl; !nilp (node_iter); ++i,node_iter = cdr (node_iter))
+    {
+      char *argstr = strdup (string_c_string (car (node_iter)));
+      arguments[i] = argstr;
+    }
+  arguments[i] = NULL;
+  int rcode = execvp (arguments[0], arguments);
+  // Should this instead just be an exit? This enters the debugger.
+  // Probably just fprintf to stderr and die.
+  scheme_signal_eval_error("Error doing an exec!");
+  return NIL_VALUE;
+}
+
+struct lisp_type *
+scheme_sys_waitpid (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("d", "waitpid requires one integer argument.",
+	      "Too few arguments to waitpid, requires one argument.");
+  pid_t pid = number_value (car (argl));
+  int wstatus = 0;
+  if (waitpid (pid, &wstatus, 0) != pid)
+    fprintf (stderr, "sys-waitpid: WARNING: waitpid did not return %d, the child pid\n",
+	     pid);
+  if (!WIFEXITED (wstatus))
+    {
+      fprintf (stderr, "sys-waitpid: WARNING: child did not exit, returning -1.\n");
+      return make_number (-1);
+    }
+  else
+    {
+      return make_number (WEXITSTATUS (wstatus));
+    }
+}
+
+struct lisp_type *
 scheme_sys_read (struct lisp_type *argl, struct lisp_type *env)
 {
   check_argl ("dd", "read requires two arguments.", "Too few arguments for read");
@@ -343,6 +400,7 @@ scheme_sys_read (struct lisp_type *argl, struct lisp_type *env)
 					      mem));
     }
 }
+
 
 struct lisp_type *
 scheme_sys_write (struct lisp_type *argl, struct lisp_type *env)
@@ -446,7 +504,7 @@ scheme_vector_ref (struct lisp_type *argl, struct lisp_type *env)
   else
     {
       struct lisp_type *clone = calloc (1, sizeof *clone);
-      clone->type = v->v.vec.type;
+      clone->type_flags = v->v.vec.type_flags;
       clone->v = v->v.vec.mem[n];
       PUSH_STACK (conses, clone);
       return clone;
@@ -493,11 +551,13 @@ __lisp_reader_getc (void *argstate)
   struct lisp_type *rval = eval_inner_apply (state->read_proc,
 					     the_global_environment,
 					     NIL_VALUE);
-  if (!(numberp (rval) || charp (rval)))
+  if (!(numberp (rval) || charp (rval) || eofp (rval)))
     {
       scheme_signal_eval_error ("Lisp byte reader returned non-int");
       return -1;
     }
+  else if (eofp (rval))
+    return EOF;
   else
     return number_value (rval);
 }
@@ -668,7 +728,7 @@ scheme_vector_concat (struct lisp_type *argl, struct lisp_type *env)
       return mixed_vector_concat (v1, v2);
     }
   else if (vectorp (v1) && vectorp (v2)
-	   && v1->type == v2->type)
+	   && v1->v.vec.type_flags == v2->v.vec.type_flags)
     {
       return vector_concat (v1, v2);
     }

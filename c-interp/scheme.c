@@ -764,6 +764,9 @@ init_environ (struct lisp_type *base)
   add_env_proc ("sys-read", scheme_sys_read);
   add_env_proc ("sys-close", scheme_close);
   add_env_proc ("sys-write", scheme_sys_write);
+  add_env_proc ("sys-fork", scheme_sys_fork);
+  add_env_proc ("sys-exec", scheme_sys_exec);
+  add_env_proc ("sys-waitpid", scheme_sys_waitpid);
   add_env_proc ("string=?", scheme_string_equalp);
   add_env_proc ("string?", scheme_stringp);
   add_env_proc ("symbol->string", scheme_symbol_to_string);

@@ -16,24 +16,25 @@ const char *types_to_syms[] = {
 };
 
 const struct lisp_type NIL = {
-  .type = NIL_TYPE
+  .type_flags = AS_IMMUTABLE(NIL_TYPE)
 };
+
 const struct lisp_type TRUE = {
-  .type = BOOLEAN,
+  .type_flags = AS_IMMUTABLE(BOOLEAN),
   .v = { 
     .intval = 1
   }
 };
 
 const struct lisp_type FALSE = {
-  .type = BOOLEAN,
+  .type_flags = AS_IMMUTABLE(BOOLEAN),
   .v = {
     .intval = 0
   }
 };
 
 const struct lisp_type QUOTESYM = {
-  .type = SYMBOL,
+  .type_flags = AS_IMMUTABLE(SYMBOL),
   .v = {
     .string = {
       .str = "quote",
@@ -43,7 +44,7 @@ const struct lisp_type QUOTESYM = {
 };
 
 const struct lisp_type QUASIQUOTE = {
-  .type = SYMBOL,
+  .type_flags = AS_IMMUTABLE(SYMBOL),
   .v = {
     .string = {
       .str = "quasiquote",
@@ -53,7 +54,7 @@ const struct lisp_type QUASIQUOTE = {
 };
 
 const struct lisp_type UNQUOTE = {
-  .type = SYMBOL,
+  .type_flags = AS_IMMUTABLE(SYMBOL),
   .v =  {
     .string = {
       .str = "unquote",
@@ -63,7 +64,7 @@ const struct lisp_type UNQUOTE = {
 };
 
 const struct lisp_type UNQUOTE_SPLICE = {
-  .type = SYMBOL,
+  .type_flags = AS_IMMUTABLE(SYMBOL),
   .v = {
     .string = {
       .str = "unquote-splicing",
@@ -73,11 +74,11 @@ const struct lisp_type UNQUOTE_SPLICE = {
 };
 
 const struct lisp_type SCHEME_EOF_V = {
-  .type = SCHEME_EOF
+  .type_flags = AS_IMMUTABLE(SCHEME_EOF)
 };
 
 const struct lisp_type SCHEME_DOT = {
-  .type = DOT
+  .type_flags = AS_IMMUTABLE(DOT)
 };
 
 
@@ -114,7 +115,7 @@ struct lisp_type *
 make_char (int c)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = SCHEME_CHAR;
+  set_type_enum(rval, SCHEME_CHAR);
   rval->v.intval = c;
   PUSH_STACK (conses, rval);
   return rval;
@@ -124,7 +125,7 @@ struct lisp_type *
 make_symbol(char *str, bool shouldfree)
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
-  rval->type = SYMBOL;
+  set_type_enum (rval, SYMBOL);
   rval->v.string.str = str;
   rval->v.string.free = shouldfree;
   PUSH_STACK (conses, rval);
@@ -137,7 +138,7 @@ make_macro (struct lisp_type *formals,
 	    struct lisp_type *env)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = MACRO;
+  set_type_enum (rval, MACRO);
   rval->v.scheme_proc.scheme_proc_formals = formals;
   rval->v.scheme_proc.scheme_proc_body = body;
   rval->v.scheme_proc.scheme_proc_env = env;
@@ -151,7 +152,7 @@ make_lambda (struct lisp_type *formals,
 	     struct lisp_type *env)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = SCHEME_PROC;
+  set_type_enum (rval, SCHEME_PROC);
   rval->v.scheme_proc.scheme_proc_formals = formals;
   rval->v.scheme_proc.scheme_proc_body = body;
   rval->v.scheme_proc.scheme_proc_env = env;
@@ -164,7 +165,7 @@ struct lisp_type *
 make_primitive_procedure (struct lisp_type *(*proc)(struct lisp_type *, struct lisp_type *))
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
-  rval->type = PRIMITIVE_PROC;
+  set_type_enum (rval, PRIMITIVE_PROC);
   rval->v.proc_value = proc;
   PUSH_STACK (conses, rval);
   return rval;
@@ -174,7 +175,7 @@ struct lisp_type *
 make_compiled_procedure (compiled_func_t proc, struct lisp_type *formals, struct lisp_type *env)
 {  
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = COMPILED_PROC;
+  set_type_enum (rval, COMPILED_PROC);
   rval->v.compiled_proc.compiled_proc_func = proc;
   rval->v.compiled_proc.compiled_proc_env = env;
   rval->v.compiled_proc.proc_formals = formals;
@@ -198,7 +199,7 @@ struct lisp_type *
 make_number(int num)
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
-  rval->type = NUMBER;
+  set_type_enum (rval, NUMBER);
   rval->v.intval = num;
   PUSH_STACK (conses, rval);
   return rval;
@@ -208,7 +209,7 @@ struct lisp_type *
 car (struct lisp_type *pair)
 {
   //assert(pair->type == PAIR);
-  eval_assert((pair->type == PAIR),
+  eval_assert(consp (pair),
 	      "CAR of a non-pair!");
   return cars[pair->v.pair_index];
 }
@@ -216,13 +217,14 @@ car (struct lisp_type *pair)
 struct lisp_type *
 cdr (struct lisp_type *pair)
 {
-  eval_assert ((pair->type == PAIR),
+  eval_assert (consp (pair),
 	       "CDR of a non-pair!");
   return cdrs[pair->v.pair_index];
 }
 
 enum lisp_types
-sym_to_type (struct lisp_type *symb) {
+sym_to_type (struct lisp_type *symb)
+{
   for (int i = 0; i < ARRAY_SIZE(types_to_syms); ++i) {
     if (types_to_syms[i] && strcmp (types_to_syms[i],
 				    symbol_string_value (symb)) == 0)
@@ -231,17 +233,29 @@ sym_to_type (struct lisp_type *symb) {
   return INVALID;
 }
 
+const char *
+get_type_string (enum lisp_types type)
+{
+  if (type < ARRAY_SIZE (types_to_syms)
+      && types_to_syms[type] != NULL)
+    {
+      return types_to_syms[type];
+    }
+  else
+    return "undefined-type";
+}
+
 struct lisp_type *
 make_prealloc_vector (enum lisp_types type,
 		      unsigned nitems,
 		      union scheme_value *mem)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = SCHEME_VECTOR;
+  set_type_enum (rval, SCHEME_VECTOR);
   rval->v.vec.mem = mem;
   rval->v.vec.nitems = nitems;
   rval->v.vec.capacity = nitems;
-  rval->v.vec.type = type;
+  rval->v.vec.type_flags = enum_as_type_flag(type);
   rval->copied = false;
   PUSH_STACK (conses, rval);
   return rval;
@@ -252,10 +266,11 @@ make_prealloc_mixed_vector (unsigned nitems,
 			    struct lisp_type **mem)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
-  rval->type = SCHEME_VECTOR_MIXED;
+  set_type_enum (rval, SCHEME_VECTOR_MIXED);
   rval->v.vec.mixed_mem = mem;
   rval->v.vec.nitems = nitems;
-  rval->v.vec.type = SCHEME_VECTOR_MIXED;
+  //rval->v.vec.type = SCHEME_VECTOR_MIXED;
+  rval->v.vec.type_flags = enum_as_type_flag(SCHEME_VECTOR_MIXED);
   rval->v.vec.capacity = nitems;
   rval->copied = false;
   PUSH_STACK (conses, rval);
@@ -267,10 +282,11 @@ make_mixed_vector (struct lisp_type *items)
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
   unsigned nitems = __list_length (0, items);
-  rval->type = SCHEME_VECTOR_MIXED;
+  set_type_enum (rval, SCHEME_VECTOR_MIXED);
   rval->v.vec.mixed_mem = calloc (nitems, sizeof(struct lisp_type));
   rval->v.vec.nitems = nitems;
   rval->v.vec.capacity = nitems;
+  rval->v.vec.type_flags = enum_as_type_flag (SCHEME_VECTOR_MIXED);
   struct lisp_type *iter = items;
   
   for (int i = 0; i < nitems; ++i,iter=cdr(iter))
@@ -306,17 +322,17 @@ make_vector (enum lisp_types type,
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
   unsigned nitems = __list_length (0, items);
-  rval->type = SCHEME_VECTOR;
+  set_type_enum(rval, SCHEME_VECTOR);
   rval->v.vec.mem = calloc(nitems, sizeof(union scheme_value));
   rval->v.vec.nitems = nitems;
-  rval->v.vec.type = type;
+  rval->v.vec.type_flags = enum_as_type_flag(type);
   rval->v.vec.capacity = nitems;
   rval->copied = false;
   int elem = 0;
   for (struct lisp_type *i = items; i != NIL_VALUE; ((i = cdr (i)),elem = elem + 1))
     {
       struct lisp_type *item = car (i);
-      if (item->type != type)
+      if (get_type_enum(item) != type)
 	scheme_signal_eval_error("Bad item type in make-vector argument list, %d",
 				 elem);
       rval->v.vec.mem[elem] = item->v;
@@ -353,7 +369,8 @@ vector_concat (struct lisp_type *v1,
 	       struct lisp_type *v2)
 {
   assert (vectorp (v1) && vectorp (v2));
-  assert ((vector_elemtype (v1) == vector_elemtype (v2)) && v1->type != SCHEME_VECTOR_MIXED);
+  assert ((vector_elemtype (v1) == vector_elemtype (v2)) &&
+	  !mixed_vectorp (v1));
   unsigned len1 = vector_len (v1);
   unsigned len2 = vector_len (v2);
 
@@ -441,7 +458,7 @@ make_cons (struct lisp_type *car,
 	  struct lisp_type *cdr)
 {
   struct lisp_type *rval = calloc(1, sizeof *rval);
-  rval->type = PAIR;
+  set_type_enum (rval, PAIR);
   assert (max_cons_idx < NPAIRS);
   assert (car);
   assert (cdr);

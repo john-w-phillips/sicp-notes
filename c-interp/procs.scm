@@ -1,0 +1,5 @@
+(define (run-program . args)
+  (let ((pid (sys-fork)))
+    (if (= 0 pid)
+	(apply sys-exec args)
+	(sys-waitpid pid))))

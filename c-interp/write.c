@@ -42,9 +42,9 @@ void write_vec (struct lisp_type *t)
   else
     {
       printf("#(");
-      enum lisp_types typeval = t->v.vec.type;
+      enum lisp_types typeval = t->v.vec.type_flags;
       struct lisp_type dummy_val = {
-	.type = typeval
+	.type_flags = typeval
       };
       for (int i = 0; i < t->v.vec.nitems; ++i) {
 	dummy_val.v = t->v.vec.mem[i];
@@ -59,7 +59,7 @@ void write_vec (struct lisp_type *t)
 void
 write_list (struct lisp_type *t, bool space)
 {
-  if (t->type == NIL_TYPE)
+  if (get_type_enum (t) == NIL_TYPE)
     printf (")");
   else if (!consp (t))
     {
@@ -79,7 +79,7 @@ write_list (struct lisp_type *t, bool space)
 void
 write0 (struct lisp_type *t)
 {
-  switch (t->type)
+  switch (get_type_enum (t))
     {
     case NUMBER:
       printf ("%d", t->v.intval);
@@ -132,7 +132,7 @@ write0 (struct lisp_type *t)
       break;
     }
     default:
-      fprintf (stderr, "can't write this type: %d!\n", t->type);
+      fprintf (stderr, "can't write this type: %d!\n", get_type_enum (t));
       //exit (1);
     }
 }

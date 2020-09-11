@@ -8,8 +8,9 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
-#define NPAIRS 8192
+#define NPAIRS 16384
 
+#define IMMUT_FLAG 1
 enum lisp_types {
   NUMBER,
   SYMBOL,
@@ -27,6 +28,8 @@ enum lisp_types {
   COMPILED_PROC,
   INVALID,
 };
+const char *
+get_type_string (enum lisp_types type);
 
 #define ARRAY_SIZE(arr) (sizeof (arr) / sizeof (arr[0]))
 extern const char *types_to_syms[];
@@ -41,10 +44,16 @@ typedef struct lisp_type *(*compiled_func_t)(struct lisp_type *env);
 
 enum lisp_types
 sym_to_type (struct lisp_type *symb);
-
+#define is_immutable(x) ((x)->type_flags & IMMUT_FLAG)
+#define get_type_enum(x) ((x)->type_flags >> 1)
+#define set_type_enum(x, enumval) ((x)->type_flags |= (enumval << 1))
+#define type_flag_as_enum(flag) ((flag) >> 1)
+#define enum_as_type_flag(enumv) ((enumv) << 1)
+#define AS_IMMUTABLE(enumval) ((enumval << 1) | IMMUT_FLAG)
 void
 scheme_signal_eval_error (char *msg, ...);
 #define eval_assert(x, msg) do { if (!(x)) {scheme_signal_eval_error(msg);} } while (0)
+
 struct scheme_proc
 {
   struct lisp_type *scheme_proc_body;
@@ -70,7 +79,8 @@ struct scheme_string
  */
 struct scheme_vec
 {
-  enum lisp_types type;
+  //enum lisp_types type;
+  unsigned type_flags; 
   unsigned capacity;
   unsigned nitems;
   union {
@@ -84,7 +94,7 @@ struct scheme_vec
 #define vector_mixedmem(vect) (vect)->v.vec.mixed_mem
 #define vector_unimem(vect) (vect)->v.vec.mem
 #define vector_len(vect) (vect)->v.vec.nitems
-#define vector_elemtype(vect) (vect)->v.vec.type
+#define vector_elemtype(vect) (type_flag_as_enum ((vect)->v.vec.type_flags))
 #define vector_set_mixedmem(vect, newmem) ((vect)->v.vec.mixed_mem = newmem)
 #define vector_set_unimem(vect, newmem) ((vect)->v.vec.mem = newmem)
 #define vector_set_len(vect, newlen) ((vect)->v.vec.nitems = newlen)
@@ -111,7 +121,8 @@ union scheme_value
 
 struct lisp_type
 {
-  enum lisp_types type;
+  unsigned type_flags; 
+  //enum lisp_types type;
   int copied;
   union scheme_value v;
 };
@@ -204,23 +215,25 @@ enum scheme_debug_codes
     DEBUG_LEAVE = 12
   };
 
-#define symbolp(x) ((x)->type == SYMBOL)
-#define stringp(x) ((x)->type == SCHEME_VECTOR && (x)->v.vec.type == SCHEME_CHAR)
-#define numberp(x) ((x)->type == NUMBER)
-#define variablep(x) ((x)->type == SYMBOL)
-#define booleanp(x) ((x)->type == BOOLEAN)
-#define mixed_vectorp(x) ((x)->type == SCHEME_VECTOR_MIXED)
-#define vectorp(x) ((x)->type == SCHEME_VECTOR || (x)->type == SCHEME_VECTOR_MIXED)
+#define type_matchp(x, enumv) ((get_type_enum (x) == enumv))
+#define symbolp(x) (type_matchp (x, SYMBOL))
+#define stringp(x) (type_matchp (x, SCHEME_VECTOR) && type_flag_as_enum ((x)->v.vec.type_flags) == SCHEME_CHAR)
+#define eofp(x) (type_matchp (x, SCHEME_EOF))
+#define numberp(x) (type_matchp (x, NUMBER))
+#define variablep(x) (type_matchp (x, SYMBOL))
+#define booleanp(x) (type_matchp (x, BOOLEAN))
+#define mixed_vectorp(x) (type_matchp (x, SCHEME_VECTOR_MIXED))
+#define vectorp(x) (type_matchp (x, SCHEME_VECTOR) || mixed_vectorp (x))
 #define symbol_string_value(x) ((x)->v.string.str)
 #define number_value(x) ((x)->v.intval)
-#define consp(x) ((x)->type == PAIR)
-#define primitive_procedurep(x) ((x)->type == PRIMITIVE_PROC)
+#define consp(x) (type_matchp (x, PAIR))
+#define primitive_procedurep(x) (type_matchp (x, PRIMITIVE_PROC))
 #define primitive_procedure_proc(x) ((x)->v.proc_value)
-#define compiled_procedurep(x) ((x)->type == COMPILED_PROC)
+#define compiled_procedurep(x) (type_matchp (x, COMPILED_PROC))
 #define compiled_procedure_proc(x) ((x)->v.compiled_proc.compiled_proc_func)
 #define compiled_procedure_env(x) ((x)->v.compiled_proc.compiled_proc_env)
-#define scheme_macrop(x) ((x)->type == MACRO)
-#define falsep(x) ((x)->type == BOOLEAN && x->v.intval == 0)
+#define scheme_macrop(x) (type_matchp (x, MACRO))
+#define falsep(x) (type_matchp(x, BOOLEAN) && x->v.intval == 0)
 #define truep(x) (!falsep (x) && !nilp (x))
 #define scheme_proc_environ(x) (compiled_procedurep(x) ?		\
 				((x)->v.compiled_proc.compiled_proc_env) : \
@@ -231,9 +244,9 @@ enum scheme_debug_codes
 				(x)->v.scheme_proc.scheme_proc_formals)
 
 #define scheme_proc_body(x) ((x)->v.scheme_proc.scheme_proc_body)
-#define scheme_procedurep(x) ((x)->type == SCHEME_PROC)
+#define scheme_procedurep(x) (type_matchp (x, SCHEME_PROC))
 #define nilp(x) ((x) == &NIL)
-#define charp(x) ((x)->type == SCHEME_CHAR)
+#define charp(x) (type_matchp (x, SCHEME_CHAR))
 //#define string_c_string symbol_string_value
 char *string_c_string (struct lisp_type *t);
 #define symbol_equalp(x, y) \
@@ -301,8 +314,8 @@ isspecial (int c);
 void
 write1 (struct lisp_type *t);
 
-bool
-is_immutable (struct lisp_type *it);
+/* bool */
+/* is_immutable (struct lisp_type *it); */
 
 struct lisp_type *
 list_seq_manip (struct lisp_type *form_orig,
@@ -472,6 +485,7 @@ scheme_not (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
 scheme_open (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_sys_read (struct lisp_type *argl, struct lisp_type *env);
 
@@ -479,9 +493,22 @@ struct lisp_type *
 scheme_sys_write (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
+scheme_sys_fork (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_sys_exec (struct lisp_type *argl, struct lisp_type *env);
+
+#define SCHEMEFUNC_DEC(name) \
+  struct lisp_type * name (struct lisp_type *argl, struct lisp_type *env)
+
+SCHEMEFUNC_DEC (scheme_sys_waitpid);
+
+struct lisp_type *
 scheme_close (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_symbol_to_string (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_vector_ref (struct lisp_type *argl, struct lisp_type *env);
 
@@ -514,8 +541,10 @@ scheme_symbolp (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
 scheme_number_to_string (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_numberp (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_dbg_down (struct lisp_type *argl, struct lisp_type *env);
 
@@ -529,35 +558,48 @@ struct lisp_type *
 eval_inner_apply (struct lisp_type *proc,
 		  struct lisp_type *environ,
 		  struct lisp_type *eval_argl);
+
 struct lisp_type *eval_apply (struct lisp_type *proc,
 			      struct lisp_type *args,
 			      struct lisp_type *environ);
 int
 __list_length (unsigned accum, struct lisp_type *argl);
+
 struct lisp_type *
 repl (struct lisp_type *environ,
       char *prompt,
       struct port *inp);
+
 struct lisp_type *
 scheme_make_vector (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_vectorp (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_vector_trunc (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_vector_len (struct lisp_type *argl, struct lisp_type *env);
+
 struct lisp_type *
 scheme_vector_extend (struct lisp_type *argl, struct lisp_type *env);
+
 #define environ_first_frame car
 #define enclosing_environ cdr
+
 void
 init_io (void);
+
 void
 init_stacks ();
+
 void
 init_pairs (void);
+
 struct lisp_type *
 init_environ (struct lisp_type *base);
+
 struct lisp_type *
 load_compiled_module (char *fname);
 

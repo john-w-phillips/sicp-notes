@@ -1,18 +1,6 @@
 #include "scheme.h"
 
-bool
-is_immutable (struct lisp_type *it)
-{
-  return (it == NIL_VALUE
-	  || it == TRUE_VALUE
-	  || it == FALSE_VALUE
-	  || it == QUOTE_VALUE
-	  || it == QUASIQUOTE_VALUE
-	  || it == UNQUOTE_VALUE
-	  || it == UNQUOTE_SPLICE_VALUE
-	  || it == EOF_VALUE
-	  || it == DOT_VALUE);
-}
+
 
 struct cons_cells
 {
@@ -21,12 +9,32 @@ struct cons_cells
   struct lisp_type *to_free[NPAIRS];
   unsigned free_index;
   unsigned next;
+  unsigned type_counters[INVALID]; // As many as the enum.
 };
+
+static inline void
+__print_type_stats(struct cons_cells *cells)
+{
+  for (int i = 0; i < INVALID; ++i)
+    {
+      printf("GC found %d %s.\n",
+	     cells->type_counters[i],
+	     get_type_string (i));
+    }
+}
+
+#ifdef GC_RECORD_STATS
+#define record_type(cells, x) ((cells->type_counters[get_type_enum(x)]++))
+#define print_type_stats(cells) __print_type_stats(cells)
+#else
+#define record_type(cells, x)
+#define print_type_stats(cells)
+#endif
 
 void
 copy_vector (struct lisp_type *vec,
 	     struct cons_cells *cells);
-void
+static inline void
 copy_cons_cells(struct lisp_type *pair,
 		
 		struct cons_cells *newcells);
@@ -35,7 +43,7 @@ copy_root_array (struct lisp_type **roots,
 		 struct cons_cells *cells,
 		 unsigned nroots);
 
-void
+static inline void
 gc_set_copied_flag (struct lisp_type *item)
 {
   if (is_immutable (item))
@@ -49,10 +57,11 @@ void
 copy_procedure_cells (struct lisp_type *proc,
 		      struct cons_cells *newcells);
 
-void
+static inline void
 copy_cell (struct lisp_type *car_or_cdr,
 	   struct cons_cells *newcells)
 {
+  record_type(newcells, car_or_cdr);
   if (consp (car_or_cdr))
     {
       copy_cons_cells (car_or_cdr, newcells);
@@ -72,7 +81,7 @@ copy_cell (struct lisp_type *car_or_cdr,
     gc_set_copied_flag (car_or_cdr);
 }
 
-void
+static inline void
 copy_cons_cells(struct lisp_type *pair,
 		struct cons_cells *newcells)
 {
@@ -86,7 +95,6 @@ copy_cons_cells(struct lisp_type *pair,
   newcells->cdrs[newcells->next] = cdrpair;
   pair->v.pair_index = newcells->next++;
   pair->copied = true;
-
   copy_cell (carpair, newcells);
   copy_cell (cdrpair, newcells);
 }
@@ -216,7 +224,7 @@ find_old_cells (struct lisp_type **cells,
   quicksort_cells (cells_out->to_free, cells_out->free_index);
 }
 
-static void
+static inline void
 copy_root_array (struct lisp_type **roots,
 		 struct cons_cells *cells,
 		 unsigned nroots)
@@ -248,12 +256,13 @@ copy_root_array (struct lisp_type **roots,
 void
 gc_unset_copy_flag (struct lisp_type *item)
 {
-  if (item && !is_immutable (item))
+  if (!item) return;
+  if (!is_immutable (item))
     {
       item->copied = false;
     }
-  if (item && (scheme_procedurep (item)
-	       || scheme_macrop (item)))
+  if ((scheme_procedurep (item)
+       || scheme_macrop (item)))
     {
       if (!is_immutable (scheme_proc_body (item)))
 	scheme_proc_body (item)->copied = false;
@@ -262,7 +271,7 @@ gc_unset_copy_flag (struct lisp_type *item)
       if (!is_immutable (scheme_proc_environ (item)))
 	scheme_proc_environ (item)->copied = false;
     }
-  if (item && mixed_vectorp (item))
+  if (mixed_vectorp (item))
     {
       for (int i = 0; i < item->v.vec.nitems; ++i)
 	gc_unset_copy_flag (item->v.vec.mixed_mem[i]);
@@ -313,6 +322,7 @@ gc (bool force)
   struct cons_cells cells;
   bzero (cells.cars, sizeof (cells.cars));
   bzero (cells.cdrs, sizeof (cells.cdrs));
+  bzero (cells.type_counters, sizeof (cells.type_counters));
   cells.next = 0;
   cells.free_index = 0;
   copy_root_array (formstack->items, &cells, formstack->index);
@@ -321,16 +331,17 @@ gc (bool force)
 		  conses->index);
   free_old_cells (&cells);
   compact_conses (conses);
-  for (int i = 0; i < NPAIRS; ++i)
-    {
-      gc_unset_copy_flag (cells.cars[i]);
-      gc_unset_copy_flag (cells.cdrs[i]);
-    }
+  /* for (int i = 0; i < NPAIRS; ++i) */
+  /*   { */
+  /*     gc_unset_copy_flag (cells.cars[i]); */
+  /*     gc_unset_copy_flag (cells.cdrs[i]); */
+  /*   } */
 
-  for (int i = 0; i < formstack->index; ++i)
-    gc_unset_copy_flag (formstack->items[i]);
+  /* for (int i = 0; i < formstack->index; ++i) */
+  /*   gc_unset_copy_flag (formstack->items[i]); */
 
   memcpy (cdrs, cells.cdrs, NPAIRS * sizeof (struct lisp_type *));
   memcpy (cars, cells.cars, NPAIRS * sizeof (struct lisp_type *));
   max_cons_idx = cells.next;
+  print_type_stats(&cells);
 }

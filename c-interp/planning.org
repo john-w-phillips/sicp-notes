@@ -1,0 +1,26 @@
+* Plan for code
+** <2020-09-11 Fri>
+   Basic layout for future code:
+*** DONE Add begin statement to compiler.
+*** DONE Extend interpreter to have a builtin fork/exec so we can compile
+    inside a REPL.
+*** TODO Add framework for compiling a file.
+*** TODO Add assignment statement to compiler.
+*** TODO Add some compiler tests 
+    that compile an expression, load the module, and assert the return
+    type. The end result should be a single file we can just run or
+    load,which tells us everything is okay.
+
+*** TODO Add lexical lookup to the compiler.
+    use vectors in the environment instead of linked lists.
+
+*** TODO Add support for compile-time macros to the compiler
+    so we canuse our macro library in compiled modules
+*** TODO Possibly  before (4,5), speed up the environment
+     by using vectors instead of lists.
+*** TODO Add a MIX simulator.
+*** TODO  Add a MIX assembler.
+*** TODO Use vectors for argument lists when possible.
+*** TODO use obarray/intern/unintern for symbols.
+
+
