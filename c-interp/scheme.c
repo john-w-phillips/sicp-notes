@@ -776,6 +776,7 @@ init_environ (struct lisp_type *base)
   add_env_proc ("vector-set!", scheme_vector_set);
   add_env_proc ("vector-extend!", scheme_vector_extend);
   add_env_proc ("vector-truncate!", scheme_vector_trunc);
+  add_env_proc ("vector-push-back!", scheme_vector_push_back);
   add_env_proc ("vector-concat", scheme_vector_concat);
   add_env_proc ("vector-len", scheme_vector_len);
   add_env_proc ("vector?", scheme_vectorp);

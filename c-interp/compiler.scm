@@ -485,5 +485,6 @@
       (write-to-file fname (c-statements-statements module)))))
 
 (define (compile-file fname)
-  )
+  (let ((scheme-code (read-scheme-file fname)))
+    (compile-as-module scheme-code fname)))
 ;; (compile-to-c 1 'rval (make-default-c-file-object "hello.c"))

@@ -155,3 +155,15 @@
      (else
       (vec-iter (+ i 1)))))
   (vec-iter 0))
+
+(define (substring a-string start-index length)
+  (define (substring-iterator building-string current-index length-remaining)
+    (if (= length-remaining 0) building-string
+	(begin
+	  (vector-extend! building-string (vector-ref a-string current-index))
+	  (substring-iterator
+	   building-string
+	   (+ 1 current-index)
+	   (- length-remaining 1)))))
+  (let ((new-string ""))
+    (substring-iterator new-string start-index length)))

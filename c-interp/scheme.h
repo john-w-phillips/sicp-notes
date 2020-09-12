@@ -376,6 +376,12 @@ univector_set (struct lisp_type *v,
 	       unsigned n,
 	       struct lisp_type *item);
 struct lisp_type *
+mixed_vector_push (struct lisp_type *vector, struct lisp_type *new_element);
+
+struct lisp_type *
+univector_push (struct lisp_type *vector, struct lisp_type *new_vector_element);
+
+struct lisp_type *
 mixed_vector_set (struct lisp_type *v,
 		  unsigned n,
 		  struct lisp_type *item);
@@ -584,6 +590,10 @@ scheme_vector_len (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
 scheme_vector_extend (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_vector_push_back (struct lisp_type *argl,
+			 struct lisp_type *env);
 
 #define environ_first_frame car
 #define enclosing_environ cdr

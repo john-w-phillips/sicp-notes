@@ -342,6 +342,27 @@ make_vector (enum lisp_types type,
   return rval;
 }
 
+void
+vector_ensure_enough_capacity (struct lisp_type *vector,
+			     unsigned total_expected_size_items,
+			     unsigned item_size)
+{
+  void *vector_memory = vector->v.vec.mem;
+  unsigned vector_size_bytes = item_size * vector->v.vec.capacity;
+  unsigned new_size_bytes = item_size * total_expected_size_items;
+    
+  if (new_size_bytes > vector_size_bytes)
+    {
+      vector->v.vec.mem = realloc (vector->v.vec.mem,
+				   new_size_bytes);
+      vector->v.vec.capacity = new_size_bytes / item_size;
+    }
+}
+
+#define univector_ensure_capacity(vector, capacity) \
+  vector_ensure_enough_capacity (vector, capacity, sizeof (union scheme_value))
+#define mixed_vector_ensure_capacity(vector, capacity) \
+  vector_ensure_enough_capacity (vector, capacity, sizeof (struct lisp_type *))
 
 
 struct lisp_type *
@@ -352,7 +373,7 @@ mixed_vector_concat (struct lisp_type *v1,
   unsigned len1 = vector_len (v1);
   unsigned len2 = vector_len (v2);
 
-  struct lisp_type **mem = calloc( len1 + len2, sizeof(struct lisp_type *));
+  struct lisp_type **mem = calloc (len1 + len2, sizeof(struct lisp_type *));
 
   memcpy (mem,
 	  vector_mixedmem (v1),
@@ -391,14 +412,15 @@ struct lisp_type *
 mixed_vector_extend (struct lisp_type *v1,
 		     struct lisp_type *v2)
 {
-  struct lisp_type **v1mem = vector_mixedmem(v1);
+  /* struct lisp_type **v1mem = vector_mixedmem(v1); */
   unsigned newsize = vector_len(v1) + vector_len(v2);
-  if (vector_capacity (v1) < newsize)
-    {
-      vector_set_mixedmem(v1,
-			  realloc (v1mem, newsize * sizeof (struct lisp_type *)));
-      vector_set_capacity (v1, newsize);
-    }
+  mixed_vector_ensure_capacity (v1, newsize);
+  /* if (vector_capacity (v1) < newsize) */
+  /*   { */
+  /*     vector_set_mixedmem(v1, */
+  /* 			  realloc (v1mem, newsize * sizeof (struct lisp_type *))); */
+  /*     vector_set_capacity (v1, newsize); */
+  /*   } */
   assert (vector_mixedmem (v1));
   memcpy (vector_mixedmem (v1) + vector_len(v1),
 	  vector_mixedmem(v2),
@@ -410,19 +432,45 @@ mixed_vector_extend (struct lisp_type *v1,
 struct lisp_type *
 univector_extend (struct lisp_type *v1, struct lisp_type *v2)
 {
-  union scheme_value *v1mem = vector_unimem (v1);
+  /* union scheme_value *v1mem = vector_unimem (v1); */
   unsigned newsize = vector_len (v1) + vector_len (v2);
-  if (vector_capacity (v1) < newsize)
-    {
-      vector_set_unimem (v1,
-			 realloc (v1mem, newsize * sizeof (union scheme_value)));
-      vector_set_capacity (v1, newsize);
-    }
+  univector_ensure_capacity (v1, newsize);
+  /* if (vector_capacity (v1) < newsize) */
+  /*   { */
+  /*     vector_set_unimem (v1, */
+  /* 			 realloc (v1mem, newsize * sizeof (union scheme_value))); */
+  /*     vector_set_capacity (v1, newsize); */
+  /*   } */
   memcpy (vector_unimem (v1) + vector_len (v1),
 	  vector_unimem (v2),
 	  vector_len (v2) * sizeof (union scheme_value));
   vector_set_len (v1, newsize);
   return v1;
+}
+
+
+struct lisp_type *
+univector_push (struct lisp_type *vector, struct lisp_type *new_vector_element)
+{
+  eval_assert (type_matchp (new_vector_element, vector_elemtype (vector)),
+	       "Vector element must have same type as vector for univectors.");
+
+  unsigned newvec_size = vector_len (vector) + 1;
+  univector_ensure_capacity (vector, newvec_size);
+  vector_unimem (vector)[vector_len (vector)] = new_vector_element->v;
+  vector_set_len (vector, newvec_size);
+  
+  return vector;
+}
+
+struct lisp_type *
+mixed_vector_push (struct lisp_type *vector, struct lisp_type *new_element)
+{
+  unsigned newvec_size = vector_len (vector) + 1;
+  mixed_vector_ensure_capacity (vector, newvec_size);
+  vector_mixedmem (vector)[vector_len (vector)] = new_element;
+  vector_set_len (vector, newvec_size);
+  return vector;
 }
 
 struct lisp_type *
@@ -432,8 +480,6 @@ vector_trunc (struct lisp_type *v1, unsigned nitems)
   vector_set_len (v1, nitems);
   return v1;
 }
-
-
 
 
 

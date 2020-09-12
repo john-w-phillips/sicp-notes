@@ -842,3 +842,21 @@ scheme_vector_trunc (struct lisp_type *argl, struct lisp_type *env)
   int nitems_new = number_value (car (cdr (argl)));
   return vector_trunc (car (argl), nitems_new); 
 }
+
+struct lisp_type *
+scheme_vector_push_back (struct lisp_type *argl,
+			 struct lisp_type *env)
+{
+  check_argl ("dd", "vector-push-back! takes two arguments.",
+	      "vector-push-back! takes two arguments.");
+
+  struct lisp_type *vector = car (argl);
+  struct lisp_type *element = car (cdr (argl));
+
+  eval_assert (vectorp (vector),
+	       "First argument to vector-push-back! must be a vector.");
+  if (mixed_vectorp (vector))
+      mixed_vector_push (vector, element);
+  else
+      univector_push (vector, element);
+}
