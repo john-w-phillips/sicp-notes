@@ -723,7 +723,7 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ)
 struct lisp_type *
 load_compiled_module (char *fname)
 {
-  void *dlhandle = dlopen (fname, RTLD_LAZY);
+  void *dlhandle = dlopen (fname, RTLD_LAZY | RTLD_LOCAL);
   module_initializer_t modinit = NULL;
   assert ((modinit = dlsym (dlhandle, "init_mod")));
   return modinit (the_global_environment);
@@ -773,6 +773,8 @@ init_environ (struct lisp_type *base)
   add_env_proc ("string->symbol", scheme_string_to_symbol);
   add_env_proc ("make-vector", scheme_make_vector);
   add_env_proc ("vector-ref", scheme_vector_ref);
+  add_env_proc ("char?", scheme_charp);
+  add_env_proc ("char->number", scheme_char_to_number);
   add_env_proc ("vector-set!", scheme_vector_set);
   add_env_proc ("vector-extend!", scheme_vector_extend);
   add_env_proc ("vector-truncate!", scheme_vector_trunc);

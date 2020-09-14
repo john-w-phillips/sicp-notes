@@ -78,7 +78,7 @@ read_symbol (int c, struct port *fp)
     }
   symbuf[index] = '\0';
   cport_ungetbyte (c, fp);
-  return make_symbol (strdup (symbuf), true);
+  return intern_symb (strdup (symbuf), true);
 }
 
 int
@@ -107,12 +107,13 @@ read_string (int c, struct port *fp)
       else
 	strbuf[index++].intval = c;
     }
-
   union scheme_value *mem = calloc (index, sizeof(union scheme_value));
   memcpy (mem, strbuf, sizeof(union scheme_value) * index);
-  return make_prealloc_vector (SCHEME_CHAR,
-			       index,
-			       mem);
+  struct lisp_type *rval =  make_prealloc_vector (SCHEME_CHAR,
+						  index,
+						  mem);
+  vector_set_immutable(rval, true);
+  return rval;
 }
 
 struct lisp_type *read_quoted (struct port *fp)

@@ -13,6 +13,7 @@ const char *types_to_syms[] = {
   [DOT] = "dot",
   [SCHEME_VECTOR] = "vector",
   [SCHEME_VECTOR_MIXED] = "vector-mixed",
+  [SCHEME_CHAR] = "char"
 };
 
 const struct lisp_type NIL = {
@@ -195,6 +196,7 @@ make_string (char *str, bool shouldfree)
   return make_prealloc_vector(SCHEME_CHAR, str_length, mem);
 }
 
+
 struct lisp_type *
 make_number(int num)
 {
@@ -252,6 +254,7 @@ make_prealloc_vector (enum lisp_types type,
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
   set_type_enum (rval, SCHEME_VECTOR);
+  vector_set_immutable (rval, false);
   rval->v.vec.mem = mem;
   rval->v.vec.nitems = nitems;
   rval->v.vec.capacity = nitems;
@@ -267,9 +270,9 @@ make_prealloc_mixed_vector (unsigned nitems,
 {
   struct lisp_type *rval = calloc (1, sizeof *rval);
   set_type_enum (rval, SCHEME_VECTOR_MIXED);
+  vector_set_immutable (rval, false);
   rval->v.vec.mixed_mem = mem;
   rval->v.vec.nitems = nitems;
-  //rval->v.vec.type = SCHEME_VECTOR_MIXED;
   rval->v.vec.type_flags = enum_as_type_flag(SCHEME_VECTOR_MIXED);
   rval->v.vec.capacity = nitems;
   rval->copied = false;
@@ -323,6 +326,7 @@ make_vector (enum lisp_types type,
   struct lisp_type *rval = calloc (1, sizeof *rval);
   unsigned nitems = __list_length (0, items);
   set_type_enum(rval, SCHEME_VECTOR);
+  vector_set_immutable (rval, false);
   rval->v.vec.mem = calloc(nitems, sizeof(union scheme_value));
   rval->v.vec.nitems = nitems;
   rval->v.vec.type_flags = enum_as_type_flag(type);
@@ -412,15 +416,8 @@ struct lisp_type *
 mixed_vector_extend (struct lisp_type *v1,
 		     struct lisp_type *v2)
 {
-  /* struct lisp_type **v1mem = vector_mixedmem(v1); */
   unsigned newsize = vector_len(v1) + vector_len(v2);
   mixed_vector_ensure_capacity (v1, newsize);
-  /* if (vector_capacity (v1) < newsize) */
-  /*   { */
-  /*     vector_set_mixedmem(v1, */
-  /* 			  realloc (v1mem, newsize * sizeof (struct lisp_type *))); */
-  /*     vector_set_capacity (v1, newsize); */
-  /*   } */
   assert (vector_mixedmem (v1));
   memcpy (vector_mixedmem (v1) + vector_len(v1),
 	  vector_mixedmem(v2),
@@ -432,15 +429,8 @@ mixed_vector_extend (struct lisp_type *v1,
 struct lisp_type *
 univector_extend (struct lisp_type *v1, struct lisp_type *v2)
 {
-  /* union scheme_value *v1mem = vector_unimem (v1); */
   unsigned newsize = vector_len (v1) + vector_len (v2);
   univector_ensure_capacity (v1, newsize);
-  /* if (vector_capacity (v1) < newsize) */
-  /*   { */
-  /*     vector_set_unimem (v1, */
-  /* 			 realloc (v1mem, newsize * sizeof (union scheme_value))); */
-  /*     vector_set_capacity (v1, newsize); */
-  /*   } */
   memcpy (vector_unimem (v1) + vector_len (v1),
 	  vector_unimem (v2),
 	  vector_len (v2) * sizeof (union scheme_value));
@@ -454,7 +444,8 @@ univector_push (struct lisp_type *vector, struct lisp_type *new_vector_element)
 {
   eval_assert (type_matchp (new_vector_element, vector_elemtype (vector)),
 	       "Vector element must have same type as vector for univectors.");
-
+  eval_assert (!vector_immutablep (vector),
+	       "Vector cannot be immutable.");
   unsigned newvec_size = vector_len (vector) + 1;
   univector_ensure_capacity (vector, newvec_size);
   vector_unimem (vector)[vector_len (vector)] = new_vector_element->v;
@@ -466,6 +457,8 @@ univector_push (struct lisp_type *vector, struct lisp_type *new_vector_element)
 struct lisp_type *
 mixed_vector_push (struct lisp_type *vector, struct lisp_type *new_element)
 {
+  eval_assert (!vector_immutablep (vector),
+	       "Vector cannot be immutable.");
   unsigned newvec_size = vector_len (vector) + 1;
   mixed_vector_ensure_capacity (vector, newvec_size);
   vector_mixedmem (vector)[vector_len (vector)] = new_element;
@@ -476,6 +469,8 @@ mixed_vector_push (struct lisp_type *vector, struct lisp_type *new_element)
 struct lisp_type *
 vector_trunc (struct lisp_type *v1, unsigned nitems)
 {
+  eval_assert (!vector_immutablep (v1),
+	       "Vector cannot be immutable.");
   eval_assert (nitems <= vector_len (v1), "New capacity must be <= old capacity");
   vector_set_len (v1, nitems);
   return v1;

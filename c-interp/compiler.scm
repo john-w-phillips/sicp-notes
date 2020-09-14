@@ -21,26 +21,52 @@
      mod
      statements))))
 
+;; Given an overal c-statements object, recursively sort out the lambda bodies,
+;; and pull them to the top. The remaining statements are wrapped in a function
+;; called 'init_mod' which is run in the beginning.
 (define (prepare-sort-module statements)
   (let ((need (c-statements-variables-need statements))
 	(mod (c-statements-variables-mod statements)))
-  (define (sort-iter proc-output normal-output statements)
-    (cond ((null? statements)
-	   (append (reverse proc-output) (list (wrap-module-statements
-						need mod
-						(reverse normal-output)))))
-	  ((c-procedure-statement? (car statements))
-	   (sort-iter (cons (car statements) proc-output)
-		      normal-output
-		      (cdr statements)))
-	  (else
-	   (sort-iter proc-output
-		      (cons (car statements) normal-output)
-		      (cdr statements)))))
-  (make-c-statements
-   (c-statements-variables-need statements)
-   (c-statements-variables-mod statements)
-   (sort-iter '() '() (c-statements-statements statements)))))
+    ;; Recurse into a procedure, pull out nested lambdas, into the
+    ;; toplevel procedures.
+    (define (extract-nested-procedures
+	     a-procedure)
+      (let ((procedure-statements (c-procedure-statement-inner-statements a-procedure)))
+	(let ((filtered-items (sort-iter '() '() (c-statements-statements procedure-statements))))
+	  (cons
+	   (make-c-procedure-statement
+	    (c-procedure-statement-statement-name a-procedure)
+	    (make-c-statements
+	     (c-statements-variables-need procedure-statements)
+	     (c-statements-variables-mod procedure-statements)
+	     (reverse (cadr filtered-items))))
+	   (car filtered-items)))))
+    (define (sort-iter proc-output normal-output statements)
+      (cond ((null? statements)
+	     (list proc-output normal-output))
+
+	    ((c-procedure-statement? (car statements))
+	     (let ((recursively-extracted
+		    (extract-nested-procedures (car statements))))
+	       (sort-iter
+		(append recursively-extracted proc-output)
+		normal-output
+		(cdr statements))))
+	    (else
+	     (sort-iter proc-output
+			(cons (car statements) normal-output)
+			(cdr statements)))))
+    (let ((sorted-output (sort-iter '() '() (c-statements-statements statements))))
+      (let ((procedures (car sorted-output))
+	    (normal-statements (cadr sorted-output)))
+	(make-c-statements
+	 (c-statements-variables-need statements)
+	 (c-statements-variables-mod statements)
+      	 (append (reverse procedures)
+		 (list (wrap-module-statements
+			need mod
+			(reverse normal-statements)))))))))
+
 
   
 (define (list-union l1 l2)
@@ -134,24 +160,37 @@
      seq2)))
 
 
-;; (define c-standard-boilerplate (list "#include \"scheme.h\""))
-(define (compile-self-evaluating expr target linkage)
+(define (self-evaluating-call-string expr)
   (cond
-   ((number? expr)
-    (end-with-linkage
-     linkage
-     (make-c-statements
-      '()
-      (list target)
-      (list
-       (strings-concat (stringify target) " = make_number (" (number->string expr) ")")))))
-   ((string? expr)
+   ((number? expr) (strings-concat "make_number (" (number->string expr) ")"))
+   ((string? expr) (strings-concat "make_string (\"" expr "\", false)"))
+   ((char? expr) (strings-concat "make_char (" (number->string (char->number expr)) ")"))))
+
+(define (compile-self-evaluating expr target linkage)
+  (let ((exprstring (self-evaluating-call-string expr)))
     (end-with-linkage
      linkage
      (make-c-statements
       '() (list target)
       (list
-       (strings-concat (stringify target) " = make_string (\"" expr "\", false)")))))))
+       (strings-concat (stringify target) " = " exprstring))))))
+     
+  ;; (cond
+  ;;  ((number? expr)
+  ;;   (end-with-linkage
+  ;;    linkage
+  ;;    (make-c-statements
+  ;;     '()
+  ;;     (list target)
+  ;;     (list
+  ;;      (strings-concat (stringify target) " = make_number (" (number->string expr) ")")))))
+  ;;  ((string? expr)
+  ;;   (end-with-linkage
+  ;;    linkage
+  ;;    (make-c-statements
+  ;;     '() (list target)
+  ;;     (list
+  ;;      (strings-concat (stringify target) " = make_string (\"" expr "\", false)")))))))
 
 (define (compile-var-lookup expr target linkage)
   (end-with-linkage
@@ -160,7 +199,7 @@
     '(env)
     (list target)
     (list (strings-concat (stringify target)
-			  " = env_find_var (env, make_symbol (\"" (stringify expr) "\", false))")
+			  " = env_find_var (env, intern_symb (\"" (stringify expr) "\", false))")
 	  (strings-concat "if (" (stringify target) ") {")
 	  (strings-concat (stringify target) " = cdr (" (stringify target) ")")
 	  " } else {"
@@ -235,7 +274,9 @@
 ;;     (c-file-emit-statement (strings-concat target " = eval_apply (proc, argl, environ)"))))
 
 (define (self-evaluating? expr)
-  (or (number? expr) (string? expr)))
+  (or (number? expr)
+      (string? expr)
+      (char? expr)))
 
 (define (variable? expr)
   (symbol? expr))
@@ -331,7 +372,7 @@
      (list target)
      (list 
      (strings-concat (stringify target)
-		     " = make_symbol(\"" (stringify expr)
+		     " = intern_symb (\"" (stringify expr)
 		     "\", false)"))))
    ((pair? expr)
     (let ((car-code (compile-quotation (car expr) 'rval linkage))
@@ -348,7 +389,9 @@
    (else (error "Bad expression type for quotation"))))
 
 (define (begin? expr)
-  (eq? (car expr) 'begin))
+  (and (pair? expr)
+       (eq? (car expr) 'begin)))
+
 (define (begin-exprs expr)
   (cdr expr))
 
@@ -356,10 +399,19 @@
   (and (pair? expr) (eq? (car expr) 'define)))
 
 (define (definition-value expr)
-  (caddr expr))
+  (let ((variable-expression (cadr expr))
+	(value-expression (cddr expr)))
+    (if (not (pair? variable-expression))
+	(car value-expression)
+	`(lambda ,(cdr variable-expression)
+	   ,@value-expression))))
 
 (define (definition-variable expr)
-  (cadr expr))
+  (let ((var-expr (cadr expr)))
+    (if (pair? var-expr)
+	(car var-expr)
+	var-expr)))
+
 
 (define (compile-definition expr target linkage)
   (let ((assigner-code (compile-to-c
@@ -376,9 +428,54 @@
        '()
        (list
 	(strings-concat 
-	"env_frame_set_var_value (environ_first_frame (env), make_symbol (\""
+	"env_frame_set_var_value (environ_first_frame (env), intern_symb (\""
 	(stringify var) "\", false), rval)")))))))
 
+(define (assignment-value expr)
+  (caddr expr))
+
+(define (assignment-variable expr)
+  (cadr expr))
+
+(define (assignment? expr)
+  (and (pair? expr) (eq? (car expr) 'set!)))
+
+(define (compile-assignment expr target linkage)
+  (let ((value-code (compile-to-c
+		     (assignment-value expr)
+		     target
+		     'next)))
+    (end-with-linkage
+     linkage
+     (tack-on-statement-sequences
+      value-code
+      ;; I do not fill out the needs/modifies,
+      ;; since we do not want the overall statement to 'need'
+      ;; the target register.
+      (make-c-statements '()
+			 '()
+			 (list
+			  (strings-concat "PUSH_STACK (formstack," (stringify target) ")")))
+      (make-c-statements
+       '(env)
+       (list target)
+       (list
+	(strings-concat
+	(stringify  target)
+	 " = env_find_var (env, intern_symb (\""
+	 (stringify (assignment-variable expr)) "\", false))")
+	(strings-concat
+	 "if (!"
+	 (stringify target)
+	 ") { scheme_signal_eval_error (\"Undefined variable %s\", \""
+	 (stringify (assignment-variable expr))
+	 "\"); }")
+	(strings-concat (stringify target) " = set_cdr (" (stringify target) ", POP_STACK (formstack))")))))))
+      
+      
+      
+
+    
 
 (define (compile-to-c expr target linkage)
   (cond
@@ -394,6 +491,8 @@
     (compile-definition expr target linkage))
    ((lambda? expr)
     (compile-lambda expr target linkage))
+   ((assignment? expr)
+    (compile-assignment expr target linkage))
    ((begin? expr)
     (compile-sequence-to-c (begin-exprs expr) target linkage))
    ((application? expr)
@@ -485,6 +584,23 @@
       (write-to-file fname (c-statements-statements module)))))
 
 (define (compile-file fname)
-  (let ((scheme-code (read-scheme-file fname)))
-    (compile-as-module scheme-code fname)))
+  (let ((scheme-code (read-scheme-file fname))
+	(c-filename (string-replace fname ".scm" ".c"))
+	(shared-name (string-replace fname ".scm" ".so")))
+    (compile-as-module scheme-code c-filename)
+    (run-program
+     "cc"
+     "-O1"
+     "-g3"
+     "-fPIC"
+     "-shared"
+     "-o" shared-name c-filename 
+     "-L."  "-lscheme")))
+
+(define (compile-and-load fname)
+  (let ((soname (string-replace fname ".scm" ".so")))
+    (if (not (= (compile-file fname) 0))
+	(error "Could not compile the file.")
+	(load-compiled soname))))
+    
 ;; (compile-to-c 1 'rval (make-default-c-file-object "hello.c"))

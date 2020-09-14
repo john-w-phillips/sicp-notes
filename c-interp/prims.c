@@ -299,7 +299,7 @@ scheme_open (struct lisp_type *argl, struct lisp_type *env)
   if ((strchr (mode_cstring,
 	       'w') != NULL))
     {
-      flags  |= (O_WRONLY | O_CREAT);
+      flags  |= (O_WRONLY | O_CREAT | O_TRUNC);
       fmode |= (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
       if ((strchr (mode_cstring, 'a')) != NULL)
 	flags |= O_APPEND;
@@ -342,7 +342,7 @@ scheme_sys_exec(struct lisp_type *argl, struct lisp_type *env)
   // Count items in list.
   int count = 0, i = 0;
   for (count = 0; !nilp (node_iter); ++count,node_iter=cdr (node_iter));
-  arguments = malloc (sizeof (char *) * count);
+  arguments = malloc (sizeof (char *) * (count + 1));
 
   for (node_iter=argl; !nilp (node_iter); ++i,node_iter = cdr (node_iter))
     {
@@ -704,6 +704,25 @@ scheme_string_to_symbol (struct lisp_type *argl, struct lisp_type *env)
   return NIL_VALUE;
 }
 
+struct lisp_type *
+scheme_char_to_number (struct lisp_type *argl,
+		       struct lisp_type *env)
+{
+  check_argl ("d", "char->number takes one argument.",
+	      "char->number takes one argument.");
+  return make_number (number_value (car (argl)));
+}
+
+struct lisp_type *
+scheme_charp (struct lisp_type *argl, struct lisp_type *env)
+{
+  check_argl ("d", "char? takes only one argument.",
+	      "char? takes only one argument, there are too many.");
+  if (charp (car (argl)))
+    return TRUE_VALUE;
+  else
+    return FALSE_VALUE;
+}
 
 struct lisp_type *
 scheme_vector_len (struct lisp_type *argl, struct lisp_type *env)

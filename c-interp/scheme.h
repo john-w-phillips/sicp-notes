@@ -8,8 +8,8 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
-#define NPAIRS 16384
-
+#define NPAIRS 65536
+#define OBARRAY_SIZE 673
 #define IMMUT_FLAG 1
 enum lisp_types {
   NUMBER,
@@ -35,6 +35,8 @@ get_type_string (enum lisp_types type);
 extern const char *types_to_syms[];
 extern jmp_buf *jmpbuffer;
 extern jmp_buf *debugbuf;
+extern struct lisp_type **symbol_table;
+extern unsigned symbol_table_size;
 extern struct lisp_type *the_global_environment;
 extern struct lisp_type *form_global;
 extern struct lisp_type *environ_global;
@@ -83,12 +85,16 @@ struct scheme_vec
   unsigned type_flags; 
   unsigned capacity;
   unsigned nitems;
+  bool immutable_sequence;
   union {
     union scheme_value  *mem;
     struct lisp_type **mixed_mem;
   };
 };
 
+#define vector_immutablep(vector) ((vector)->v.vec.immutable_sequence)
+#define vector_set_immutable(vector, val) \
+  (((vector)->v.vec.immutable_sequence) = val)
 #define vector_capacity(vect) ((vect)->v.vec.capacity)
 #define vector_set_capacity(vect, newcap) ((vect)->v.vec.capacity = newcap)
 #define vector_mixedmem(vect) (vect)->v.vec.mixed_mem
@@ -328,6 +334,12 @@ struct lisp_type *
 make_symbol(char *str, bool shouldfree);
 
 struct lisp_type *
+intern_symb (char *str, bool free_mem);
+
+void
+unintern_all (void);
+
+struct lisp_type *
 make_char (int c);
 struct lisp_type *
 make_macro (struct lisp_type *formals,
@@ -432,6 +444,9 @@ struct lisp_type *eval (struct lisp_type *form, struct lisp_type *environ);
 // Primitive interpreter functions.
 struct lisp_type *
 scheme_consp (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
+scheme_char_to_number (struct lisp_type *character, struct lisp_type *env);
 
 struct lisp_type *
 scheme_eq (struct lisp_type *argl, struct lisp_type *env);
@@ -583,6 +598,9 @@ struct lisp_type *
 scheme_vectorp (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
+scheme_charp (struct lisp_type *argl, struct lisp_type *env);
+
+struct lisp_type *
 scheme_vector_trunc (struct lisp_type *argl, struct lisp_type *env);
 
 struct lisp_type *
@@ -600,6 +618,12 @@ scheme_vector_push_back (struct lisp_type *argl,
 
 void
 init_io (void);
+
+void
+init_symbol_table (unsigned size);
+
+void
+destroy_symbol_table (void);
 
 void
 init_stacks ();

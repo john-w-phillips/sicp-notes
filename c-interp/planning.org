@@ -4,23 +4,47 @@
 *** DONE Add begin statement to compiler.
 *** DONE Extend interpreter to have a builtin fork/exec so we can compile
     inside a REPL.
-*** TODO Add framework for compiling a file.
-*** TODO Add assignment statement to compiler.
-*** TODO Add some compiler tests 
+*** DONE Add framework for compiling a file.
+*** DONE Add assignment statement to compiler.
+
+*** DONE Add some compiler tests 
     that compile an expression, load the module, and assert the return
     type. The end result should be a single file we can just run or
     load,which tells us everything is okay.
 
+*** DONE Remove dependency on nested functions
+    I unknowingly depended on the GCC nested function extension when I
+    wrote the lambda code, for nested lambdas. I need to find a way to
+    make sure all function declarations are at 'global' scope.
+
+    I think this can be done inside the prepare-sort-module function,
+    by recursing into the statement object I have if it is determined
+    to be a procedure object, and changing it from there.
+
 *** TODO Add lexical lookup to the compiler.
     use vectors in the environment instead of linked lists.
-
 *** TODO Add support for compile-time macros to the compiler
     so we canuse our macro library in compiled modules
+*** TODO Allow compiled modules to be reloaded, and recompiled.
+    Right now recompiling a module and reloading will not actually
+    reload the module, presumably because of the way dlopen works.
 *** TODO Possibly  before (4,5), speed up the environment
      by using vectors instead of lists.
 *** TODO Add a MIX simulator.
 *** TODO  Add a MIX assembler.
 *** TODO Use vectors for argument lists when possible.
-*** TODO use obarray/intern/unintern for symbols.
+*** DONE use obarray/intern/unintern for symbols.
+    The basic workflow should be KISS. Use the malloced pointer as the
+    'hash', and use it as a lookup into a table, which is a hash of
+    cons cells. 
+
+    What about memory? I need to tell GC about the symbol
+    table. However, it seems like you can declare a bunch of symbols
+    that you then never use, and the GC would have no way of
+    collecting these. We always tell GC not to clobber symbols in the
+    symbol table. So any symbol that gets read is, yes, hashed, but
+    may not get freed, ever.
+
+    Earlier if we read a symbol, it would be deleted. But now, 
 
 

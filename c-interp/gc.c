@@ -326,6 +326,7 @@ gc (bool force)
   cells.next = 0;
   cells.free_index = 0;
   copy_root_array (formstack->items, &cells, formstack->index);
+  copy_root_array (symbol_table, &cells, symbol_table_size);
   find_old_cells (conses->items,
 		  &cells,
 		  conses->index);

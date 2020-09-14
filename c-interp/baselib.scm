@@ -160,10 +160,59 @@
   (define (substring-iterator building-string current-index length-remaining)
     (if (= length-remaining 0) building-string
 	(begin
-	  (vector-extend! building-string (vector-ref a-string current-index))
+	  (vector-push-back! building-string (vector-ref a-string current-index))
 	  (substring-iterator
 	   building-string
 	   (+ 1 current-index)
 	   (- length-remaining 1)))))
-  (let ((new-string ""))
+  (let ((new-string (make-vector 'char)))
     (substring-iterator new-string start-index length)))
+(define string-len vector-len)
+(define (string-substring-set! a-string
+			       substring
+			       starting-index
+			       replacement-length)
+  (define (substring-set-iterator current-index)
+    (cond
+     ((= current-index replacement-length) a-string)
+     (else
+      (vector-set! a-string
+		   (+ starting-index current-index)
+		   (vector-ref substring current-index))
+      (substring-set-iterator
+       (+ 1 current-index)))))
+  (substring-set-iterator 0))
+
+(define (string-replace a-string
+			search-substring
+			replacement-string)
+  (let ((output-string (make-vector 'char)))
+    (define (replacement-iterator current-index)
+      (cond
+       ((= current-index (string-len a-string))
+	output-string)
+       ((and
+	 (not (> (string-len search-substring)
+	    (- (string-len a-string) current-index)))
+	 (string=? (substring a-string current-index (string-len search-substring))
+		  search-substring))
+	(begin
+	  (vector-extend! output-string replacement-string)
+	  (replacement-iterator (+ current-index (string-len search-substring)))))
+       (else
+	(vector-push-back! output-string (vector-ref a-string current-index))
+	(replacement-iterator (+ current-index 1)))))
+    (replacement-iterator 0)))
+				
+			
+(define (string-copy input-string)
+  (define (copy-iterator output-string index)
+    (if (= index (string-len input-string))
+	output-string
+	(begin
+	  (vector-push-back! output-string (vector-ref
+					    input-string
+					    index))
+	  (copy-iterator output-string (+ index 1)))))
+  (copy-iterator (make-vector 'char) 0))
+	

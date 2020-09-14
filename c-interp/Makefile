@@ -5,7 +5,7 @@ LIBS := -ldl
 %.o: %.c scheme.h
 	$(CC) $(CFLAGS) -c -fPIC -o $@ $<
 
-libscheme.so: scheme.o gc.o prims.o types.o read.o write.o debug.o scheme.h
+libscheme.so: scheme.o gc.o prims.o types.o read.o write.o debug.o scheme.h hash.o
 	$(CC) $(CFLAGS) -shared -o $@ $^ $(LIBS)
 
 $(module): $(module).o $(module).c
